@@ -168,7 +168,7 @@ class SmartAccumulationDetector:
         if snap.best_sell_volume > 0:
             # حجم معاملات این بازه (تقریبی: کل حجم امروز - دیروز)
             # برای نمونه لحظه‌ای: نسبتی از تجمعی
-            executed = snap.trade_volume
+            executed = snap.total_volume
             absorption = _clamp(executed / max(snap.best_sell_volume * 10, 1))
         else:
             absorption = 0.0
@@ -214,7 +214,7 @@ class SmartAccumulationDetector:
 
         # وزن‌دهی با حجم معاملات (اگر حجم کم است، مقاومت قابل اعتماد نیست)
         # نرمال‌سازی حجم به‌طور کلی به 0-1 با آستانه ۱۰ میلیون سهم
-        vol_norm = _clamp(snap.trade_volume / 10_000_000)
+        vol_norm = _clamp(snap.total_volume / 10_000_000)
         # مقاومت = قیمت مقاوم × نشانه حجم
         norm = _clamp(price_hold * (0.5 + 0.5 * vol_norm))
         score = norm * self.weights["price_resistance"]

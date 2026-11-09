@@ -1,10 +1,13 @@
 """
 excel_report.py
-تولید گزارش Excel با چهار شیت:
+تولید گزارش Excel با هفت شیت:
   1. Dashboard     - وضعیت لحظه‌ای و هشدارها
   2. SellPressure  - شش عامل فشار فروش و امتیازها (به‌مرور زمان)
   3. Accumulation  - شش عامل جمع‌آوری و امتیازها (به‌مرور زمان)
-  4. History       - تمام نمونه‌های زمانی و تغییرات
+  4. Snapshots     - تمام نمونه‌های خام تابلو (گروه‌های A-D و F)
+  5. Trades        - معاملات انجام‌شده (گروه E)
+  6. Metadata      - مشخصات نماد، بازه زمانی، وضعیت بازار
+  7. History       - خلاصه روند زمانی
 
 نماد: دابور (نمونه آزمایشی)
 """
@@ -25,6 +28,7 @@ from openpyxl.chart.label import DataLabelList
 from .sell_pressure import SellPressureResult
 from .smart_accumulation import AccumulationResult
 from .alert_engine import CombinedState, AlertEvent, AlertLevel
+from .data_collector import MarketSnapshot, Trade
 
 
 # ----- پالت رنگ -----
@@ -104,9 +108,10 @@ class ExcelReportGenerator:
         acc_results: List[AccumulationResult],
         combined_states: List[CombinedState],
         alert_events: List[AlertEvent],
-        output_path: Path
+        output_path: Path,
+        trades: Optional[List[Trade]] = None
     ) -> Path:
-        """تولید کامل گزارش."""
+        """تولید کامل گزارش با هفت شیت."""
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         self._build_dashboard(
@@ -115,6 +120,10 @@ class ExcelReportGenerator:
         )
         self._build_sell_pressure_sheet(sp_results)
         self._build_accumulation_sheet(acc_results)
+        self._build_snapshots_sheet(snapshots)
+        if trades:
+            self._build_trades_sheet(trades, symbol)
+        self._build_metadata_sheet(snapshots, symbol)
         self._build_history_sheet(snapshots, combined_states)
 
         self.wb.save(str(output_path))
@@ -189,13 +198,15 @@ class ExcelReportGenerator:
 
             ws.merge_cells(start_row=row, end_row=row+1, start_column=2, end_column=4)
             c = ws.cell(row=row, column=2, value=f"{last_sp.total_score:.0f} / 100")
-            c.font = Font(name="B Nazanin", size=20, bold=True, color="1F4E78")
+            # اگر امتیاز بالا (>= 50) متن سفید، وگرنه تیره
+            sp_text_color = "FFFFFF" if last_sp.total_score >= 50 else "1F4E78"
+            c.font = Font(name="B Nazanin", size=20, bold=True, color=sp_text_color)
             c.fill = PatternFill("solid", fgColor=_score_color(last_sp.total_score))
             c.alignment = Alignment(horizontal="center", vertical="center")
 
             ws.merge_cells(start_row=row, end_row=row+1, start_column=5, end_column=7)
             c = ws.cell(row=row, column=5, value=last_sp.level)
-            c.font = Font(name="B Nazanin", size=11, bold=True)
+            c.font = Font(name="B Nazanin", size=11, bold=True, color=sp_text_color)
             c.fill = PatternFill("solid", fgColor=_score_color(last_sp.total_score))
             c.alignment = Alignment(horizontal="center", vertical="center")
             ws.row_dimensions[row].height = 24
@@ -211,13 +222,15 @@ class ExcelReportGenerator:
 
             ws.merge_cells(start_row=row, end_row=row+1, start_column=2, end_column=4)
             c = ws.cell(row=row, column=2, value=f"{last_acc.total_score:.0f} / 100")
-            c.font = Font(name="B Nazanin", size=20, bold=True, color="006100")
+            # اگر امتیاز قوی (>= 40) متن سفید، وگرنه سبز تیره
+            acc_text_color = "FFFFFF" if last_acc.total_score >= 40 else "006100"
+            c.font = Font(name="B Nazanin", size=20, bold=True, color=acc_text_color)
             c.fill = PatternFill("solid", fgColor=_acc_color(last_acc.total_score))
             c.alignment = Alignment(horizontal="center", vertical="center")
 
             ws.merge_cells(start_row=row, end_row=row+1, start_column=5, end_column=7)
             c = ws.cell(row=row, column=5, value=last_acc.level)
-            c.font = Font(name="B Nazanin", size=11, bold=True)
+            c.font = Font(name="B Nazanin", size=11, bold=True, color=acc_text_color)
             c.fill = PatternFill("solid", fgColor=_acc_color(last_acc.total_score))
             c.alignment = Alignment(horizontal="center", vertical="center")
             ws.row_dimensions[row].height = 24
@@ -332,9 +345,15 @@ class ExcelReportGenerator:
 
                 for j, v in enumerate(vals, 1):
                     c = ws.cell(row=r, column=j, value=v)
-                    c.font = Font(name="B Nazanin", size=10, color=fg,
-                                  bold=(j in (2, 3)))
-                    c.fill = PatternFill("solid", fgColor=bg if j == 2 else Colors.NEUTRAL)
+                    # فقط ستون «سطح» (j==2) رنگ‌دار باشد با متن روشن؛
+                    # سایر ستون‌ها متن تیره روی پس‌زمینه خنثی
+                    if j == 2:
+                        c.font = Font(name="B Nazanin", size=10, color=fg, bold=True)
+                        c.fill = PatternFill("solid", fgColor=bg)
+                    else:
+                        c.font = Font(name="B Nazanin", size=10, color="1F4E78",
+                                      bold=(j == 3))
+                        c.fill = PatternFill("solid", fgColor=Colors.NEUTRAL)
                     c.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
                     c.border = _border()
 
@@ -635,8 +654,8 @@ class ExcelReportGenerator:
                 snap.best_buy_volume,
                 snap.best_sell_price,
                 snap.best_sell_volume,
-                snap.trade_volume,
-                snap.trade_value,
+                snap.total_volume,
+                snap.total_value,
                 round(snap.buyer_power, 2),
                 money_label,
                 round(state.sell_pressure_score, 1),
@@ -683,3 +702,313 @@ class ExcelReportGenerator:
                 ws.cell(row=r, column=2, value=v).font = _body_font()
                 ws.cell(row=r, column=1).border = _border()
                 ws.cell(row=r, column=2).border = _border()
+
+    # -----------------------------------------------------------------
+    # شیت ۴: Snapshots (داده خام - گروه‌های A تا D و F)
+    # -----------------------------------------------------------------
+    def _build_snapshots_sheet(self, snapshots: List[MarketSnapshot]):
+        ws = self.wb.create_sheet("Snapshots")
+        ws.sheet_view.rightToLeft = True
+        ws.freeze_panes = "B4"
+
+        # عنوان
+        ws.merge_cells("A1:BL1")
+        c = ws["A1"]
+        c.value = "Snapshots - داده خام تابلو (هر ۶۰ ثانیه یک ردیف)"
+        c.font = _title_font()
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        c.fill = PatternFill("solid", fgColor=Colors.HEADER_BG)
+        ws.row_dimensions[1].height = 26
+
+        # هدر جدول - شامل تمام فیلدهای گروه A تا D و F
+        headers = [
+            # گروه F - وضعیت بازار
+            "تاریخ شمسی", "زمان دقیق", "نماد", "فاز بازار", "وضعیت نماد",
+            "وضعیت داده", "خطای دریافت",
+            # گروه A - قیمت‌ها
+            "آخرین قیمت", "قیمت پایانی", "اولین قیمت", "قیمت دیروز",
+            "بالاترین روز", "پایین‌ترین روز", "کف مجاز", "سقف مجاز",
+            # گروه B - بهترین قیمت و مجموع
+            "بهترین خرید", "حجم خرید", "بهترین فروش", "حجم فروش",
+            "تعداد سفارش خرید", "تعداد سفارش فروش",
+            # پنج ردیف خرید
+            "bid_price_1", "bid_vol_1", "bid_count_1",
+            "bid_price_2", "bid_vol_2", "bid_count_2",
+            "bid_price_3", "bid_vol_3", "bid_count_3",
+            "bid_price_4", "bid_vol_4", "bid_count_4",
+            "bid_price_5", "bid_vol_5", "bid_count_5",
+            # پنج ردیف فروش
+            "ask_price_1", "ask_vol_1", "ask_count_1",
+            "ask_price_2", "ask_vol_2", "ask_count_2",
+            "ask_price_3", "ask_vol_3", "ask_count_3",
+            "ask_price_4", "ask_vol_4", "ask_count_4",
+            "ask_price_5", "ask_vol_5", "ask_count_5",
+            # گروه C - تجمعی
+            "حجم کل", "ارزش کل", "تعداد معامله کل", "حجم مبنا",
+            "حجم بازه", "ارزش بازه", "تعداد بازه",
+            # گروه D - حقیقی/حقوقی
+            "خریداران حقیقی", "حجم خرید حقیقی", "ارزش خرید حقیقی",
+            "فروشندگان حقیقی", "حجم فروش حقیقی", "ارزش فروش حقیقی",
+            "خریداران حقوقی", "حجم خرید حقوقی", "ارزش خرید حقوقی",
+            "فروشندگان حقوقی", "حجم فروش حقوقی", "ارزش فروش حقوقی",
+            "حجم خرید حقیقی بازه", "حجم فروش حقیقی بازه",
+            # شاخص‌های مشتق
+            "قدرت خریدار", "سرانه خرید", "سرانه فروش",
+            "ورود/خروج پول حقیقی", "نسبت پول حقیقی",
+            # کیفیت داده
+            "داده کامل", "فیلدهای مفقود",
+        ]
+        for i, h in enumerate(headers, 1):
+            c = ws.cell(row=3, column=i, value=h)
+            c.font = _header_font()
+            c.fill = PatternFill("solid", fgColor=Colors.HEADER_BG)
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            c.border = _border()
+        ws.row_dimensions[3].height = 32
+
+        # عرض ستون‌ها - ستون‌های اصلی پهن‌تر
+        col_widths = [11, 9, 7, 8, 8, 8, 10,
+                       10, 10, 10, 10, 10, 10, 10, 10,
+                       10, 10, 10, 10, 10, 10,
+                       9, 8, 7, 9, 8, 7, 9, 8, 7, 9, 8, 7, 9, 8, 7,
+                       9, 8, 7, 9, 8, 7, 9, 8, 7, 9, 8, 7, 9, 8, 7,
+                       12, 14, 10, 10,
+                       10, 12, 8,
+                       10, 10, 12, 10, 10, 12,
+                       10, 10, 12, 10, 10, 12,
+                       12, 12,
+                       10, 10, 10, 14, 10,
+                       8, 12]
+        for i, w in enumerate(col_widths, 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+
+        # داده‌ها
+        phase_label_map = {
+            "pre_open": "پیش‌گشایش",
+            "continuous": "پیوسته",
+            "halted": "متوقف",
+            "suspended": "ممنوع",
+            "closed": "بسته",
+        }
+        for i, snap in enumerate(snapshots):
+            r = 4 + i
+            bid_prices = [row.price for row in snap.buy_rows]
+            bid_volumes = [row.volume for row in snap.buy_rows]
+            bid_counts = [row.order_count for row in snap.buy_rows]
+            ask_prices = [row.price for row in snap.sell_rows]
+            ask_volumes = [row.volume for row in snap.sell_rows]
+            ask_counts = [row.order_count for row in snap.sell_rows]
+
+            # پنج ردیف را به ۵ مقدار گسترش بدهیم (با None اگر کمتر از ۵ ردیف موجود است)
+            def _pad(lst, n=5):
+                return (lst + [None] * n)[:n]
+
+            row_data = [
+                snap.date_jalali, snap.tehran_time, snap.symbol,
+                phase_label_map.get(snap.market_phase, snap.market_phase),
+                snap.symbol_status, snap.data_status, snap.fetch_error,
+                snap.last_price, snap.close_price, snap.open_price, snap.yesterday_price,
+                snap.daily_high, snap.daily_low, snap.min_allowed_price, snap.max_allowed_price,
+                snap.best_buy_price, snap.best_buy_volume, snap.best_sell_price, snap.best_sell_volume,
+                snap.buy_order_count, snap.sell_order_count,
+                *(_pad(bid_prices) + _pad(bid_volumes) + _pad(bid_counts)),
+                *(_pad(ask_prices) + _pad(ask_volumes) + _pad(ask_counts)),
+                snap.total_volume, snap.total_value, snap.total_trade_count, snap.base_volume,
+                snap.interval_volume, snap.interval_value, snap.interval_trade_count,
+                snap.real_buy_count, snap.real_buy_volume, snap.real_buy_value,
+                snap.real_sell_count, snap.real_sell_volume, snap.real_sell_value,
+                snap.legal_buy_count, snap.legal_buy_volume, snap.legal_buy_value,
+                snap.legal_sell_count, snap.legal_sell_volume, snap.legal_sell_value,
+                snap.interval_real_buy_volume, snap.interval_real_sell_volume,
+                round(snap.buyer_power, 2), round(snap.per_capita_buy_real, 1),
+                round(snap.per_capita_sell_real, 1),
+                round(snap.real_money_flow, 0), round(snap.real_money_flow_ratio, 4),
+                "بله" if snap.data_complete else "خیر",
+                ", ".join(snap.missing_fields) if snap.missing_fields else "",
+            ]
+            for j, v in enumerate(row_data, 1):
+                c = ws.cell(row=r, column=j, value=v)
+                c.font = _body_font()
+                c.alignment = Alignment(horizontal="center", vertical="center")
+                c.border = _border()
+
+            # رنگ‌دهی بر اساس فاز بازار
+            phase = snap.market_phase
+            phase_color = {
+                "pre_open": "FFE4B5",     # نارنجی کمرنگ
+                "continuous": "F2F2F2",    # خاکستری روشن
+                "halted": "FFC000",        # نارنجی
+                "suspended": "C00000",     # قرمز
+                "closed": "BFBFBF",        # خاکستری
+            }.get(phase, "F2F2F2")
+            ws.cell(row=r, column=4).fill = PatternFill("solid", fgColor=phase_color)
+
+            # رنگ‌دهی بر اساس data_status
+            if snap.data_status != "ok":
+                ws.cell(row=r, column=6).fill = PatternFill("solid", fgColor=Colors.WARNING)
+            # رنگ‌دهی ورود/خروج پول
+            if snap.real_money_flow > 0:
+                ws.cell(row=r, column=64).fill = PatternFill("solid", fgColor=Colors.NORMAL)
+            elif snap.real_money_flow < 0:
+                ws.cell(row=r, column=64).fill = PatternFill("solid", fgColor=Colors.DANGER)
+
+    # -----------------------------------------------------------------
+    # شیت ۵: Trades (گروه E - معاملات انجام‌شده)
+    # -----------------------------------------------------------------
+    def _build_trades_sheet(self, trades: List[Trade], symbol: str):
+        ws = self.wb.create_sheet("Trades")
+        ws.sheet_view.rightToLeft = True
+        ws.freeze_panes = "B4"
+
+        # عنوان
+        ws.merge_cells("A1:F1")
+        c = ws["A1"]
+        c.value = f"Trades - معاملات انجام‌شده نماد {symbol}"
+        c.font = _title_font()
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        c.fill = PatternFill("solid", fgColor=Colors.HEADER_BG)
+        ws.row_dimensions[1].height = 26
+
+        # هدر
+        headers = ["ردیف", "زمان معامله", "قیمت معامله", "حجم معامله",
+                   "شناسه معامله", "سمت آغازگر"]
+        for i, h in enumerate(headers, 1):
+            c = ws.cell(row=3, column=i, value=h)
+            c.font = _header_font()
+            c.fill = PatternFill("solid", fgColor=Colors.HEADER_BG)
+            c.alignment = Alignment(horizontal="center", vertical="center")
+            c.border = _border()
+        ws.row_dimensions[3].height = 24
+
+        widths = [7, 12, 14, 12, 18, 12]
+        for i, w in enumerate(widths, 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+
+        # داده‌ها
+        for i, tr in enumerate(trades):
+            r = 4 + i
+            aggressor_label = {"buy": "خرید", "sell": "فروش"}.get(
+                tr.aggressor_side, "نامشخص"
+            )
+            row_data = [
+                i + 1,
+                tr.trade_time,
+                tr.trade_price,
+                tr.trade_volume,
+                tr.trade_id,
+                aggressor_label,
+            ]
+            for j, v in enumerate(row_data, 1):
+                c = ws.cell(row=r, column=j, value=v)
+                c.font = _body_font()
+                c.alignment = Alignment(horizontal="center", vertical="center")
+                c.border = _border()
+            # رنگ سمت آغازگر
+            if tr.aggressor_side == "buy":
+                ws.cell(row=r, column=6).fill = PatternFill("solid", fgColor=Colors.NORMAL)
+            elif tr.aggressor_side == "sell":
+                ws.cell(row=r, column=6).fill = PatternFill("solid", fgColor=Colors.DANGER)
+
+        # خلاصه پایانی
+        if trades:
+            summary_row = 4 + len(trades) + 2
+            ws.cell(row=summary_row, column=1, value="خلاصه").font = _subtitle_font()
+            ws.cell(row=summary_row, column=1).fill = PatternFill("solid", fgColor=Colors.SUBTITLE_BG)
+            ws.merge_cells(start_row=summary_row, end_row=summary_row, start_column=1, end_column=6)
+
+            total_vol = sum(t.trade_volume for t in trades)
+            total_val = sum(t.trade_price * t.trade_volume for t in trades)
+            avg_price = total_val / max(total_vol, 1)
+            buy_count = sum(1 for t in trades if t.aggressor_side == "buy")
+            sell_count = sum(1 for t in trades if t.aggressor_side == "sell")
+
+            summary_data = [
+                ("تعداد کل معاملات", len(trades)),
+                ("حجم کل", total_vol),
+                ("ارزش کل", round(total_val, 0)),
+                ("میانگین قیمت", round(avg_price, 2)),
+                ("معاملات خرید آغازگر", buy_count),
+                ("معاملات فروش آغازگر", sell_count),
+            ]
+            for i, (k, v) in enumerate(summary_data):
+                r = summary_row + 1 + i
+                ws.cell(row=r, column=1, value=k).font = _body_font()
+                ws.cell(row=r, column=2, value=v).font = _body_font()
+                ws.cell(row=r, column=1).border = _border()
+                ws.cell(row=r, column=2).border = _border()
+
+    # -----------------------------------------------------------------
+    # شیت ۶: Metadata
+    # -----------------------------------------------------------------
+    def _build_metadata_sheet(self, snapshots: List[MarketSnapshot], symbol: str):
+        ws = self.wb.create_sheet("Metadata")
+        ws.sheet_view.rightToLeft = True
+
+        # عرض ستون‌ها
+        for col, w in zip("AB", [32, 60]):
+            ws.column_dimensions[col].width = w
+
+        # عنوان
+        ws.merge_cells("A1:B1")
+        c = ws["A1"]
+        c.value = "Metadata - مشخصات نماد و جلسه معاملاتی"
+        c.font = _title_font()
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        c.fill = PatternFill("solid", fgColor=Colors.HEADER_BG)
+        ws.row_dimensions[1].height = 26
+
+        # محاسبه خلاصه
+        if snapshots:
+            first = snapshots[0]
+            last = snapshots[-1]
+            phases = {}
+            for s in snapshots:
+                phases[s.market_phase] = phases.get(s.market_phase, 0) + 1
+            phase_summary = "؛ ".join(f"{p}: {n} نمونه" for p, n in phases.items())
+            errors = sum(1 for s in snapshots if s.data_status != "ok")
+            complete_count = sum(1 for s in snapshots if s.data_complete)
+
+            meta_data = [
+                ("نماد", symbol),
+                ("کد ابزار TSETMC", first.ins_code),
+                ("تاریخ شمسی", first.date_jalali),
+                ("زمان شروع پایش", first.tehran_time),
+                ("زمان پایان پایش", last.tehran_time),
+                ("تعداد کل نمونه‌ها", len(snapshots)),
+                ("نمونه‌های کامل", complete_count),
+                ("نمونه‌های دارای خطا", errors),
+                ("وضعیت نماد", last.symbol_status),
+                ("فازهای بازار (توزیع)", phase_summary),
+                ("اولین قیمت روز", first.open_price),
+                ("آخرین قیمت پایان روز", last.last_price),
+                ("قیمت پایانی پایان روز", last.close_price),
+                ("قیمت دیروز (پایه)", last.yesterday_price),
+                ("کف مجاز روز", last.min_allowed_price),
+                ("سقف مجاز روز", last.max_allowed_price),
+                ("بالاترین قیمت روز", last.daily_high),
+                ("پایین‌ترین قیمت روز", last.daily_low),
+                ("حجم کل معاملات روز", last.total_volume),
+                ("ارزش کل معاملات روز", round(last.total_value, 0)),
+                ("تعداد کل معاملات روز", last.total_trade_count),
+                ("حجم مبنا", last.base_volume),
+                ("واحد قیمت", "تومان (هر سهم)"),
+                ("واحد حجم", "سهم (تعداد)"),
+                ("منبع داده", "TSETMC - tsetmc.com"),
+                ("بازه نمونه‌برداری", "۶۰ ثانیه"),
+                ("نسخه موتور", "1.0"),
+            ]
+        else:
+            meta_data = [("نماد", symbol), ("وضعیت", "داده‌ای ثبت نشده")]
+
+        for i, (k, v) in enumerate(meta_data, 1):
+            r = 2 + i
+            c = ws.cell(row=r, column=1, value=k)
+            c.font = _subtitle_font()
+            c.fill = PatternFill("solid", fgColor=Colors.SUBTITLE_BG)
+            c.alignment = Alignment(horizontal="right", vertical="center")
+            c.border = _border()
+
+            c = ws.cell(row=r, column=2, value=str(v))
+            c.font = _body_font()
+            c.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
+            c.border = _border()

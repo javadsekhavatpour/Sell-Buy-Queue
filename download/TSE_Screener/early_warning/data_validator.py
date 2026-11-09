@@ -54,8 +54,8 @@ class DataValidator:
         "best_buy_volume",
         "best_sell_price",
         "best_sell_volume",
-        "trade_volume",
-        "trade_value",
+        "total_volume",
+        "total_value",
     ]
 
     OPTIONAL_FIELDS = [
@@ -75,9 +75,17 @@ class DataValidator:
             field_status={},
         )
 
+        # در فاز پیش‌گشایش، حجم/ارزش معاملات هنوز صفر است
+        # این حالت طبیعی است و نباید نمونه را نامعتبر کند
+        is_pre_open = snap.market_phase == "pre_open"
+
         # ----- بررسی فیلدهای حیاتی -----
         for f in self.CRITICAL_FIELDS:
             v = getattr(snap, f, None)
+            # در پیش‌گشایش، total_volume/total_value می‌توانند 0 باشند
+            if is_pre_open and f in ("total_volume", "total_value"):
+                report.field_status[f] = "ok (pre_open)"
+                continue
             if v is None or (isinstance(v, (int, float)) and v <= 0):
                 report.missing_critical_fields.append(f)
                 report.field_status[f] = "missing"
@@ -114,7 +122,7 @@ class DataValidator:
             if snap.buyer_power > 0:  # صفر فقط در نبود داده
                 report.anomalies.append(f"قدرت خریدار غیرعادی: {snap.buyer_power:.1f}")
 
-        if snap.trade_volume > 0 and snap.real_buy_volume + snap.real_sell_volume > snap.trade_volume * 1.5:
+        if snap.total_volume > 0 and snap.real_buy_volume + snap.real_sell_volume > snap.total_volume * 1.5:
             report.anomalies.append("حجم حقیقی بیش از ۱.۵ برابر کل معاملات")
 
         # ----- محاسبه کمال -----
