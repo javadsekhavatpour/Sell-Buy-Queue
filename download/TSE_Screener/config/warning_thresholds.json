@@ -1,0 +1,105 @@
+{
+  "version": "1.0",
+  "sampling": {
+    "interval_seconds": 60,
+    "market_open": "09:00",
+    "market_close": "12:30",
+    "timezone": "Asia/Tehran",
+    "samples_per_hour": 60
+  },
+  "test_symbol": {
+    "name": "دابور",
+    "ticker": "دابور",
+    "ins_code": "4674107287748763521",
+    "base_price": 13000
+  },
+  "sell_pressure": {
+    "weights": {
+      "buyer_power_weakness": 20,
+      "real_money_outflow": 20,
+      "sell_per_capita_superiority": 15,
+      "negative_gap_last_vs_close": 15,
+      "supply_growth_rate": 15,
+      "demand_depletion_near_low": 15
+    },
+    "thresholds": {
+      "normal_max": 24,
+      "watch_max": 34,
+      "early_warning_max": 49,
+      "high_pressure_max": 64,
+      "sell_queue_danger_max": 79,
+      "critical_max": 100
+    },
+    "operational_threshold": 35,
+    "levels": {
+      "0-24":   {"label": "عادی",            "action": "ادامه پایش"},
+      "25-34":  {"label": "مراقبت",          "action": "ثبت تغییرات"},
+      "35-49":  {"label": "هشدار زودهنگام",  "action": "بررسی احتمال خروج"},
+      "50-64":  {"label": "فشار فروش بالا",  "action": "هشدار جدی خروج"},
+      "65-79":  {"label": "خطر صف فروش",    "action": "اولویت بررسی نقدشوندگی"},
+      "80-100": {"label": "وضعیت بحرانی",    "action": "احتمال بسیار بالای قفل شدن"}
+    }
+  },
+  "accumulation": {
+    "weights": {
+      "real_buyer_power": 20,
+      "real_money_inflow": 20,
+      "real_buyer_count_superiority": 10,
+      "supply_absorption_persistence": 20,
+      "price_resistance": 20,
+      "buying_continuity": 10
+    },
+    "thresholds": {
+      "no_reliable_sign_max": 24,
+      "initial_absorption_max": 39,
+      "notable_accumulation_max": 59,
+      "strong_accumulation_max": 79,
+      "very_strong_accumulation_max": 100
+    },
+    "identification_threshold": 40,
+    "levels": {
+      "0-24":   {"label": "نشانه قابل اتکا ندارد"},
+      "25-39":  {"label": "احتمال اولیه جذب عرضه"},
+      "40-59":  {"label": "جمع‌آوری قابل توجه"},
+      "60-79":  {"label": "جمع‌آوری قوی"},
+      "80-100": {"label": "جمع‌آوری بسیار قوی"}
+    }
+  },
+  "alerts": {
+    "yellow": {
+      "label": "هشدار زرد - مراقبت",
+      "condition": "sell_pressure_score >= 35",
+      "message": "نشانه‌های اولیه ضعف تقاضا ظاهر شده است.",
+      "requires_multiple_signals": false
+    },
+    "red": {
+      "label": "هشدار قرمز - ریسک خروج",
+      "condition": "sell_pressure_score >= 50 AND accumulation_score < 40",
+      "message": "فشار فروش در حال تشدید است؛ نقدشوندگی را بررسی کن.",
+      "requires_multiple_signals": true,
+      "min_independent_signals": 2
+    },
+    "green": {
+      "label": "هشدار سبز - جذب عرضه",
+      "condition": "accumulation_score >= 40",
+      "message": "خریداران قدرتمند در حال جذب عرضه هستند.",
+      "requires_multiple_signals": false
+    }
+  },
+  "combination_matrix": {
+    "high_pressure_low_accumulation":  "خطر خروج",
+    "high_pressure_high_accumulation": "جذب عرضه توسط خریدار قوی",
+    "low_pressure_high_accumulation":  "فرصت احتمالی ورود",
+    "low_pressure_low_accumulation":   "بدون سیگنال خاص"
+  },
+  "tsetmc_endpoints": {
+    "base_url": "http://www.tsetmc.com",
+    "instinfo": "http://www.tsetmc.com/tsev2/data/instinfodata.aspx",
+    "clienttype": "http://www.tsetmc.com/tsev2/data/clienttype.aspx",
+    "instrument_search": "http://www.tsetmc.com/tsev2/data/instsearch.aspx",
+    "timeout_seconds": 15,
+    "retry_count": 2,
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+  },
+  "history_required_samples": 5
+}
