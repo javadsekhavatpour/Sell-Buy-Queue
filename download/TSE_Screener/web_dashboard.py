@@ -495,41 +495,67 @@ DASHBOARD_HTML = """
                         <div class="price-info-value" id="closePrice">-</div>
                     </div>
                 </div>
+                <!-- بازه روز (کمترین و بیشترین) - مطابق TSETMC -->
+                <div style="background:#f1f5f9;padding:6px 8px;border-radius:4px;margin:6px 0;">
+                    <div style="font-size:10px;color:#64748b;margin-bottom:4px;text-align:center;font-weight:bold;">بازه روز</div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                        <div style="text-align:center;">
+                            <div style="font-size:9px;color:#64748b;">کمترین</div>
+                            <div style="font-size:14px;font-weight:bold;color:#dc2626;" id="dailyLow">-</div>
+                        </div>
+                        <div style="text-align:center;">
+                            <div style="font-size:9px;color:#64748b;">بیشترین</div>
+                            <div style="font-size:14px;font-weight:bold;color:#16a34a;" id="dailyHigh">-</div>
+                        </div>
+                    </div>
+                </div>
                 <div class="price-info-row">
                     <div class="price-info-item">
-                        <div class="price-info-label">بالاترین</div>
-                        <div class="price-info-value" id="dailyHigh" style="color:#16a34a;">-</div>
-                    </div>
-                    <div class="price-info-item">
-                        <div class="price-info-label">پایین‌ترین</div>
-                        <div class="price-info-value" id="dailyLow" style="color:#dc2626;">-</div>
-                    </div>
-                    <div class="price-info-item">
-                        <div class="price-info-label">فاز</div>
+                        <div class="price-info-label">فاز بازار</div>
                         <div class="price-info-value" id="marketPhase">-</div>
                     </div>
-                </div>
-                <!-- نوار بازه مجاز -->
-                <div class="range-labels">
-                    <span>کف مجاز: <span id="minAllowed">-</span></span>
-                    <span>سقف مجاز: <span id="maxAllowed">-</span></span>
-                </div>
-                <div class="range-bar">
-                    <div class="range-fill"></div>
-                    <div class="range-marker" id="priceMarker" style="left: 50%;"></div>
-                </div>
-                <div class="price-info-row">
                     <div class="price-info-item">
                         <div class="price-info-label">حجم معاملات</div>
                         <div class="price-info-value" id="totalVolume">-</div>
                     </div>
                     <div class="price-info-item">
+                        <div class="price-info-label">تعداد معامله</div>
+                        <div class="price-info-value" id="totalTradeCount">-</div>
+                    </div>
+                </div>
+                <!-- قیمت مجاز (کف و سقف) - مطابق TSETMC -->
+                <div style="background:#fff7ed;padding:6px 8px;border-radius:4px;margin:6px 0;">
+                    <div style="font-size:10px;color:#92400e;margin-bottom:4px;text-align:center;font-weight:bold;">قیمت مجاز</div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                        <div style="text-align:center;">
+                            <div style="font-size:9px;color:#92400e;">کف مجاز</div>
+                            <div style="font-size:13px;font-weight:bold;color:#dc2626;" id="minAllowed">-</div>
+                        </div>
+                        <div style="text-align:center;">
+                            <div style="font-size:9px;color:#92400e;">سقف مجاز</div>
+                            <div style="font-size:13px;font-weight:bold;color:#16a34a;" id="maxAllowed">-</div>
+                        </div>
+                    </div>
+                    <!-- نوار قیمت مجاز -->
+                    <div style="margin-top:6px;">
+                        <div class="range-bar" style="height:5px;">
+                            <div class="range-fill"></div>
+                            <div class="range-marker" id="priceMarker" style="left: 50%;"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="price-info-row" style="margin-top:6px;">
+                    <div class="price-info-item">
                         <div class="price-info-label">ارزش معاملات</div>
                         <div class="price-info-value" id="totalValue">-</div>
                     </div>
                     <div class="price-info-item">
-                        <div class="price-info-label">تعداد معامله</div>
-                        <div class="price-info-value" id="totalTradeCount">-</div>
+                        <div class="price-info-label">حجم مبنا</div>
+                        <div class="price-info-value" id="baseVolume">-</div>
+                    </div>
+                    <div class="price-info-item">
+                        <div class="price-info-label">سهم شناور</div>
+                        <div class="price-info-value" style="color:#94a3b8;">-</div>
                     </div>
                 </div>
             </div>
@@ -739,6 +765,7 @@ function updateUI(data) {
         // حجم و ارزش
         document.getElementById('totalVolume').textContent = formatVolume(snap.total_volume);
         document.getElementById('totalValue').textContent = formatMoney(snap.total_value);
+        document.getElementById('baseVolume').textContent = formatVolume(snap.base_volume);
         document.getElementById('totalTradeCount').textContent = formatNumber(snap.total_trade_count);
 
         // جدول حقیقی/حقوقی
