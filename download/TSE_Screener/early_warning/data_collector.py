@@ -22,7 +22,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 
 import requests
 
@@ -166,21 +166,22 @@ class MarketDataCollector:
     """
     دریافت داده از TSETMC برای نماد مشخص شده.
 
-    ویژگی‌های نسخه ۲.۰:
-      - استفاده از چندین endpoint به‌عنوان fallback
-      - پارسر انعطاف‌پذیر
-      - پیام خطای واضح
-      - ذخیره پاسخ خام برای دیباگ
+    نسخه ۳.۰: استفاده از API جدید cdn.tsetmc.com (JSON API)
+
+    TSETMC سایت قدیمی را به یک React SPA تبدیل کرده و دیگر
+    /tsev2/data/instinfodata.aspx پاسخ متنی نمی‌دهد. به‌جای آن
+    از JSON API روی cdn.tsetmc.com استفاده می‌کنیم.
+
+    Endpoints استفاده‌شده:
+      - ClosingPrice/GetClosingPriceInfo/{InsCode}  - داده‌های قیمت
+      - BestLimits/{InsCode}                       - ۵ ردیف سفارش
+      - ClientType/GetClientType/{InsCode}          - حقیقی/حقوقی
+      - Instrument/GetInstrumentSearch/{query}      - جستجوی نماد
+      - Trade/GetTradeHistory/{InsCode}/{Top}       - معاملات اخیر
     """
 
-    # چندین endpoint مختلف برای تست fallback
-    ENDPOINT_URLS = {
-        "instinfo_v2": "http://www.tsetmc.com/tsev2/data/instinfodata.aspx",
-        "instinfo_v1": "http://www.tsetmc.com/tsev1/data/instinfodata.aspx",
-        "clienttype": "http://www.tsetmc.com/tsev2/data/clienttype.aspx",
-        "tradehistory": "http://www.tsetmc.com/tsev2/data/tradehistory.aspx",
-        "instrument_info": "http://www.tsetmc.com/tsev2/data/instinfofast.aspx",
-    }
+    # API جدید TSETMC روی cdn.tsetmc.com (نه www)
+    API_BASE = "https://cdn.tsetmc.com/api"
 
     def __init__(self, config: Dict):
         self.cfg = config
@@ -189,11 +190,12 @@ class MarketDataCollector:
         # هدرهای کامل برای شبیه‌سازی مرورگر
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept": "application/json, text/plain, */*",
             "Accept-Language": "fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Accept-Encoding": "gzip, deflate",
+            "Accept-Encoding": "gzip, deflate, br",
             "Connection": "keep-alive",
             "Referer": "http://www.tsetmc.com/",
+            "Origin": "http://www.tsetmc.com",
         })
         self.timeout = self.endpoints.get("timeout_seconds", 15)
         self.debug_mode = False
@@ -213,254 +215,188 @@ class MarketDataCollector:
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
 
+    def _api_get(self, endpoint: str, parse_json: bool = True) -> Optional[Any]:
+        """درخواست GET به API جدید TSETMC."""
+        url = f"{self.API_BASE}/{endpoint.lstrip('/')}"
+        try:
+            r = self.session.get(url, timeout=self.timeout)
+            if r.status_code != 200:
+                if self.debug_mode:
+                    print(f"  [!] {endpoint}: HTTP {r.status_code}")
+                return None
+            if not r.text.strip():
+                return None
+            self._save_debug(endpoint.replace("/", "_"), r.text)
+            if parse_json:
+                try:
+                    return r.json()
+                except Exception:
+                    # اگر JSON نبود، متن خام را برگردان
+                    return r.text
+            return r.text
+        except Exception as e:
+            if self.debug_mode:
+                print(f"  [!] {endpoint}: {e}")
+            return None
+
     # -----------------------------------------------------------------
-    # دریافت داده با fallback
+    # دریافت داده با API جدید
     # -----------------------------------------------------------------
 
     def fetch_intraday(self, ins_code: str) -> Optional[Dict]:
-        """دریافت داده‌های روز جاری با تلاش روی چند endpoint."""
-        for endpoint_key in ["instinfo_v2", "instinfo_v1", "instrument_info"]:
-            url = self.ENDPOINT_URLS.get(endpoint_key)
-            if not url:
-                continue
-            params = {"i": ins_code, "c": "57+"}
-            try:
-                r = self.session.get(url, params=params, timeout=self.timeout)
-                if r.status_code == 200 and r.text.strip():
-                    self._save_debug(f"instinfo_{endpoint_key}", r.text)
-                    parsed = self._parse_instinfo(r.text)
-                    if parsed.get("last_price", 0) > 0 or parsed.get("close_price", 0) > 0:
-                        if self.debug_mode:
-                            print(f"  [✓] دریافت موفق از {endpoint_key}")
-                        return parsed
-                    else:
-                        if self.debug_mode:
-                            print(f"  [!] {endpoint_key}: پاسخ دریافت ولی قیمت‌ها ۰ هستند")
-                else:
-                    if self.debug_mode:
-                        print(f"  [!] {endpoint_key}: HTTP {r.status_code}")
-            except Exception as e:
-                if self.debug_mode:
-                    print(f"  [!] {endpoint_key}: خطا - {e}")
-                continue
-        return None
-
-    def fetch_clienttype(self, ins_code: str) -> Optional[Dict]:
-        """دریافت اطلاعات حقیقی/حقوقی."""
-        url = self.ENDPOINT_URLS["clienttype"]
-        try:
-            r = self.session.get(url, params={"i": ins_code}, timeout=self.timeout)
-            if r.status_code == 200 and r.text.strip():
-                self._save_debug("clienttype", r.text)
-                return self._parse_clienttype(r.text)
-        except Exception as e:
+        """دریافت داده‌های قیمت روز جاری از API جدید."""
+        # داده‌های قیمت پایانی
+        price_data = self._api_get(f"ClosingPrice/GetClosingPriceInfo/{ins_code}")
+        if not price_data or not isinstance(price_data, dict):
             if self.debug_mode:
-                print(f"  [!] clienttype: خطا - {e}")
-        return None
+                print(f"  [!] price data: invalid response")
+            return None
 
-    def fetch_trades(self, ins_code: str) -> List[Trade]:
-        """دریافت معاملات انجام‌شده اخیر."""
-        url = self.ENDPOINT_URLS["tradehistory"]
-        try:
-            r = self.session.get(url, params={"i": ins_code, "a": 1}, timeout=self.timeout)
-            if r.status_code == 200 and r.text.strip():
-                return self._parse_trades(r.text)
-        except Exception as e:
-            if self.debug_mode:
-                print(f"  [!] trades: خطا - {e}")
-        return []
+        # استخراج داده‌ها از JSON
+        # ساختار معمول: {"closingPriceInfo": {...}, "closingPriceInfoHistory": [...]}
+        info_data = price_data.get("closingPriceInfo") or price_data.get("ClosingPriceInfo") or price_data
+        if not isinstance(info_data, dict):
+            return None
 
-    # -----------------------------------------------------------------
-    # پارسرها - انعطاف‌پذیر و چندگانه
-    # -----------------------------------------------------------------
-
-    def _parse_instinfo(self, raw: str) -> Dict:
-        """
-        پارسر انعطاف‌پذیر برای instinfodata.aspx.
-
-        فرمت کلی:
-          @داده روز;داده روز قبل;...@دیتای ۵ ردیف خرید و فروش@...
-
-        بخش‌ها با @ جدا می‌شوند. بخش ۲ (index 1) داده روز جاری است.
-        بخش ۳ (index 2) شامل پنج ردیف بهترین قیمت‌ها.
-        """
         info = {
-            "last_price": 0,
-            "close_price": 0,
-            "yesterday_price": 0,
-            "open_price": 0,
-            "daily_high": 0,
-            "daily_low": 0,
-            "trade_volume": 0,
-            "trade_value": 0,
-            "trade_count": 0,
+            "last_price": float(info_data.get("pDrCotVal") or info_data.get("lastPrice") or 0),
+            "close_price": float(info_data.get("pClosing") or info_data.get("closingPrice") or 0),
+            "yesterday_price": float(info_data.get("priceYesterday") or info_data.get("yesterday") or 0),
+            "daily_high": float(info_data.get("priceHigh") or 0),
+            "daily_low": float(info_data.get("priceLow") or 0),
+            "trade_volume": int(info_data.get("zTotTran") or info_data.get("totalVolume") or 0),
+            "trade_value": float(info_data.get("qTotTranValJAdj") or info_data.get("totalValue") or 0),
+            "trade_count": int(info_data.get("zTotTran") or info_data.get("tradeCount") or 0),
             "buy_rows": [],
             "sell_rows": [],
             "min_allowed": 0,
             "max_allowed": 0,
-            "base_volume": 0,
+            "base_volume": 100000,
         }
 
-        try:
-            # تقسیم بر اساس @
-            sections = raw.split("@")
-            if len(sections) < 2:
-                return info
-
-            # بخش داده روز جاری (معمولاً بخش ۲ یعنی sections[2])
-            daily_section = None
-            for i in range(2, min(5, len(sections))):
-                if ";" in sections[i] or "," in sections[i]:
-                    daily_section = sections[i]
-                    break
-            if daily_section is None and len(sections) >= 2:
-                daily_section = sections[1]  # fallback
-
-            if daily_section:
-                # اولین ردیف داده روز جاری است
-                first_row = daily_section.split(";")[0]
-                parts = first_row.split(",")
-                if len(parts) >= 10:
-                    try:
-                        # ترتیب کلاسیک: close, last, vol, val, count, buyers, sellers, ...
-                        info["close_price"] = float(parts[0]) if parts[0] else 0
-                        info["last_price"] = float(parts[1]) if parts[1] else 0
-                        info["trade_volume"] = int(float(parts[2])) if parts[2] else 0
-                        info["trade_value"] = float(parts[3]) if parts[3] else 0
-                        info["trade_count"] = int(float(parts[4])) if parts[4] else 0
-                        # قسمت‌های بعدی: high, low, yesterday
-                        if len(parts) > 5:
-                            # ترتیب ممکن است متفاوت باشد - امتحان چند حالت
-                            # حالت ۱: yesterday در آخر
-                            try:
-                                info["yesterday_price"] = float(parts[-1])
-                            except (ValueError, IndexError):
-                                pass
-                            # حالت ۲: در برخی فرمت‌ها high/low در parts[5]/[6]
-                            if len(parts) >= 8:
-                                try:
-                                    # این مقادیر ممکن است بر اساس فرمت متفاوت باشند
-                                    # فقط اگر معتبر باشند
-                                    high_candidate = float(parts[5]) if parts[5] else 0
-                                    low_candidate = float(parts[6]) if parts[6] else 0
-                                    if 0 < high_candidate < 1e8:
-                                        info["daily_high"] = high_candidate
-                                    if 0 < low_candidate < 1e8 and low_candidate <= info["daily_high"]:
-                                        info["daily_low"] = low_candidate
-                                except (ValueError, IndexError):
-                                    pass
-                    except (ValueError, IndexError) as e:
-                        if self.debug_mode:
-                            print(f"  [!] خطا در parse: {e}")
-
-            # بخش ۴: پنج ردیف بهترین قیمت‌ها
-            if len(sections) >= 4:
-                best_limits = sections[3] if len(sections) > 3 else sections[-1]
+        # دریافت BestLimits (۵ ردیف سفارش)
+        limits_data = self._api_get(f"BestLimits/{ins_code}")
+        if limits_data and isinstance(limits_data, dict):
+            # ساختار: {"bestLimits": [...], "bestLimitsHistory": [...]}
+            limits_list = (limits_data.get("bestLimits") or
+                          limits_data.get("BestLimits") or
+                          limits_data.get("bestLimitsHistory") or [])
+            if isinstance(limits_list, list):
                 buy_rows, sell_rows = [], []
-                # هر خط: buy_price,buy_vol,buy_count@sell_price,sell_vol,sell_count
-                rows = best_limits.split(";")
-                for row in rows:
-                    if not row.strip():
+                for row in limits_list:
+                    if not isinstance(row, dict):
                         continue
-                    # فرمت: price,volume,count برای خرید و فروش جدا شده با @
-                    if "@" in row:
-                        cols = row.split("@")
-                    else:
-                        # بعضی فرمت‌ها فقط با "," جدا می‌شوند
-                        cols = row.split(",")
-                        # اگه ۶ عدد داشت: buy_p,buy_v,sell_p,sell_v
-                        if len(cols) == 6:
-                            buy_rows.append({
-                                "price": int(float(cols[0])) if cols[0] else 0,
-                                "volume": int(float(cols[1])) if cols[1] else 0,
-                                "order_count": 1,
-                            })
-                            sell_rows.append({
-                                "price": int(float(cols[2])) if cols[2] else 0,
-                                "volume": int(float(cols[3])) if cols[3] else 0,
-                                "order_count": 1,
-                            })
-                            continue
+                    # هر ردیف: pMeDem (قیمت خرید), qTitMeDem (حجم خرید), zOrdMeDem (تعداد خرید)
+                    #           pMeOf (قیمت فروش), qTitMeOf (حجم فروش), zOrdMeOf (تعداد فروش)
+                    buy_price = int(float(row.get("pMeDem") or 0))
+                    buy_vol = int(float(row.get("qTitMeDem") or 0))
+                    buy_count = int(float(row.get("zOrdMeDem") or 0))
+                    sell_price = int(float(row.get("pMeOf") or 0))
+                    sell_vol = int(float(row.get("qTitMeOf") or 0))
+                    sell_count = int(float(row.get("zOrdMeOf") or 0))
 
-                    if len(cols) >= 2:
-                        buy_cols = cols[0].split(",")
-                        sell_cols = cols[1].split(",")
-                        if len(buy_cols) >= 3:
-                            try:
-                                buy_rows.append({
-                                    "price": int(float(buy_cols[0])) if buy_cols[0] else 0,
-                                    "volume": int(float(buy_cols[1])) if buy_cols[1] else 0,
-                                    "order_count": int(float(buy_cols[2])) if buy_cols[2] else 1,
-                                })
-                            except ValueError:
-                                pass
-                        if len(sell_cols) >= 3:
-                            try:
-                                sell_rows.append({
-                                    "price": int(float(sell_cols[0])) if sell_cols[0] else 0,
-                                    "volume": int(float(sell_cols[1])) if sell_cols[1] else 0,
-                                    "order_count": int(float(sell_cols[2])) if sell_cols[2] else 1,
-                                })
-                            except ValueError:
-                                pass
+                    if buy_price > 0:
+                        buy_rows.append({
+                            "price": buy_price,
+                            "volume": buy_vol,
+                            "order_count": max(1, buy_count),
+                        })
+                    if sell_price > 0:
+                        sell_rows.append({
+                            "price": sell_price,
+                            "volume": sell_vol,
+                            "order_count": max(1, sell_count),
+                        })
 
                 info["buy_rows"] = buy_rows[:5]
                 info["sell_rows"] = sell_rows[:5]
                 if buy_rows:
                     info["daily_high"] = info["daily_high"] or max(r["price"] for r in sell_rows + buy_rows if r["price"] > 0)
+                if buy_rows:
                     info["daily_low"] = info["daily_low"] or min(r["price"] for r in buy_rows if r["price"] > 0)
 
-        except Exception as e:
-            if self.debug_mode:
-                print(f"  [!] خطا در parse_instinfo: {e}")
+        # محاسبه کف و سقف مجاز
+        if info["yesterday_price"] > 0:
+            info["min_allowed"] = round(info["yesterday_price"] * 0.95, 2)
+            info["max_allowed"] = round(info["yesterday_price"] * 1.05, 2)
 
         return info
 
-    def _parse_clienttype(self, raw: str) -> Dict:
-        """پارسر clienttype."""
-        out = {
-            "real_buy_count": 0, "real_sell_count": 0,
-            "legal_buy_count": 0, "legal_sell_count": 0,
-            "real_buy_volume": 0, "real_sell_volume": 0,
-            "legal_buy_volume": 0, "legal_sell_volume": 0,
-        }
-        try:
-            rows = [r for r in raw.strip().split(";") if r.strip()]
-            if rows:
-                last = rows[-1].split(",")
-                if len(last) >= 8:
-                    out["real_buy_count"]   = int(float(last[0]))
-                    out["real_sell_count"]  = int(float(last[1]))
-                    out["real_buy_volume"]  = int(float(last[2]))
-                    out["real_sell_volume"] = int(float(last[3]))
-                    out["legal_buy_count"]  = int(float(last[4]))
-                    out["legal_sell_count"] = int(float(last[5]))
-                    out["legal_buy_volume"] = int(float(last[6]))
-                    out["legal_sell_volume"]= int(float(last[7]))
-        except Exception:
-            pass
-        return out
+    def fetch_clienttype(self, ins_code: str) -> Optional[Dict]:
+        """دریافت اطلاعات حقیقی/حقوقی از API جدید."""
+        data = self._api_get(f"ClientType/GetClientType/{ins_code}/1/0")
+        if not data or not isinstance(data, dict):
+            return None
 
-    def _parse_trades(self, raw: str) -> List[Trade]:
-        """پارسر tradehistory."""
+        # ساختار: {"clientType": {...}}
+        ct_data = data.get("clientType") or data.get("ClientType") or data
+        if not isinstance(ct_data, dict):
+            # ممکن است لیست باشد
+            if isinstance(ct_data, list) and len(ct_data) > 0:
+                ct_data = ct_data[-1]  # آخرین ردیف
+            else:
+                return None
+
+        return {
+            "real_buy_count": int(float(ct_data.get("nIndividualBuy") or 0)),
+            "real_sell_count": int(float(ct_data.get("nIndividualSell") or 0)),
+            "real_buy_volume": int(float(ct_data.get("nVolIndividualBuy") or 0)),
+            "real_sell_volume": int(float(ct_data.get("nVolIndividualSell") or 0)),
+            "legal_buy_count": int(float(ct_data.get("nCorporateBuy") or 0)),
+            "legal_sell_count": int(float(ct_data.get("nCorporateSell") or 0)),
+            "legal_buy_volume": int(float(ct_data.get("nVolCorporateBuy") or 0)),
+            "legal_sell_volume": int(float(ct_data.get("nVolCorporateSell") or 0)),
+        }
+
+    def fetch_trades(self, ins_code: str) -> List[Trade]:
+        """دریافت معاملات انجام‌شده اخیر از API جدید."""
+        data = self._api_get(f"Trade/GetTradeHistory/{ins_code}/99/0")
+        if not data or not isinstance(data, dict):
+            return []
+
+        trades_list = data.get("trade") or data.get("Trade") or data.get("tradeHistory") or []
+        if not isinstance(trades_list, list):
+            return []
+
         trades = []
-        try:
-            rows = [r for r in raw.strip().split(";") if r.strip()]
-            for row in rows:
-                cols = row.split(",")
-                if len(cols) >= 3:
-                    try:
-                        trades.append(Trade(
-                            trade_time=cols[0],
-                            trade_price=float(cols[1]),
-                            trade_volume=int(float(cols[2])),
-                            trade_id=cols[3] if len(cols) > 3 else None,
-                        ))
-                    except ValueError:
-                        continue
-        except Exception:
-            pass
-        return trades[-200:]
+        for row in trades_list[-200:]:
+            if not isinstance(row, dict):
+                continue
+            try:
+                # زمان: hEven (ثانیه از شروع روز)
+                h_even = int(row.get("hEven") or 0)
+                hours = (h_even // 10000) % 24
+                minutes = (h_even // 100) % 100
+                seconds = h_even % 100
+                trade_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+                trades.append(Trade(
+                    trade_time=trade_time,
+                    trade_price=float(row.get("pTran") or 0),
+                    trade_volume=int(float(row.get("qTitTran") or 0)),
+                    trade_id=str(row.get("nTran") or ""),
+                ))
+            except Exception:
+                continue
+
+        return trades
+
+    def search_symbol(self, query: str) -> List[Dict]:
+        """جستجوی نماد در TSETMC."""
+        data = self._api_get(f"Instrument/GetInstrumentSearch/{query}")
+        if not data or not isinstance(data, dict):
+            return []
+
+        results_list = data.get("instrumentSearch") or data.get("InstrumentSearch") or []
+        if not isinstance(results_list, list):
+            return []
+
+        return [{
+            "code": str(item.get("insCode") or ""),
+            "name_fa": item.get("lVal18Afc") or item.get("lVal30File") or "",
+            "name_en": item.get("lSym") or "",
+            "isin": item.get("lVal18Afc") or "",
+        } for item in results_list if isinstance(item, dict)]
 
     # -----------------------------------------------------------------
     # دریافت کامل یک نمونه
