@@ -2,11 +2,11 @@
 find_symbol_code.py
 اسکریپت پیدا کردن کد ابزار (ins_code) صحیح نماد از TSETMC.
 
-این اسکریپت با جستجوی نماد "دابور" در TSETMC، کد صحیح آن را پیدا می‌کند.
+این اسکریپت با جستجوی نماد "ریتون" در TSETMC، کد صحیح آن را پیدا می‌کند.
 
 نحوه اجرا:
   python find_symbol_code.py
-  python find_symbol_code.py --search دابور
+  python find_symbol_code.py --search ریتون
 """
 
 import sys
@@ -184,10 +184,10 @@ def test_specific_code(ins_code: str) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description="پیدا کردن کد ابزار نماد")
-    parser.add_argument("--search", default="دابور",
-                        help="نماد برای جستجو (پیش‌فرض: دابور)")
+    parser.add_argument("--search", default="ریتون",
+                        help="نماد برای جستجو (پیش‌فرض: ریتون)")
     parser.add_argument("--test-code", default="",
-                        help="تست یک کد خاص (مثلا: 4674107287748763521)")
+                        help="تست یک کد خاص (مثلا: 14035144070182412)")
     args = parser.parse_args()
 
     print("=" * 70)
@@ -225,7 +225,7 @@ def main():
         log("No results parsed - see raw response above")
 
     # مرحله ۲: تست کد فعلی
-    current_code = "4674107287748763521"
+    current_code = "14035144070182412"
     log()
     log("=" * 70)
     log(f"Step 2: Test current ins_code: {current_code}")

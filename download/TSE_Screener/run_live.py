@@ -51,8 +51,8 @@ def load_config() -> dict:
 
 def parse_args():
     p = argparse.ArgumentParser(description="TSE Early Warning - Live Mode (SQLite)")
-    p.add_argument("--symbol", default="دابور", help="نام نماد")
-    p.add_argument("--ins-code", default="4674107287748763521", help="کد TSETMC")
+    p.add_argument("--symbol", default="ریتون", help="نام نماد")
+    p.add_argument("--ins-code", default="14035144070182412", help="کد TSETMC")
     p.add_argument("--interval", type=int, default=60, help="فاصله نمونه‌برداری (ثانیه)")
     p.add_argument("--max-samples", type=int, default=226, help="حداکثر تعداد نمونه")
     p.add_argument("--db", default="data/early_warning_live.sqlite", help="مسیر فایل SQLite")

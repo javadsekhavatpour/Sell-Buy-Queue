@@ -1,6 +1,6 @@
 """
 run_demo.py
-اجرای نمونه کامل ماژول هشدار زودهنگام با داده‌های شبیه‌سازی شده دابور.
+اجرای نمونه کامل ماژول هشدار زودهنگام با داده‌های شبیه‌سازی شده ریتون.
 
 این اسکریپت نشان می‌دهد چگونه دو موتور تحلیلی مستقل (Sell Pressure و
 Smart Accumulation) به‌صورت هم‌زمان روی زنجیره‌ای از نمونه‌های زمانی
@@ -210,7 +210,7 @@ def generate_excel_report(results: dict, output_path: Path, scenario: str):
 
 def main():
     print("=" * 70)
-    print("  TSE Early Warning Engine - اجرای نمونه دابور (نسخه ۱.۱)")
+    print("  TSE Early Warning Engine - اجرای نمونه ریتون (نسخه ۱.۱)")
     print("  با پایگاه داده SQLite + معاملات + پیش‌گشایش")
     print("=" * 70)
 

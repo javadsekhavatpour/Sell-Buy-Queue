@@ -146,7 +146,7 @@ def main():
         collector = MarketDataCollector(config)
 
         # تست با عبارت فارسی و انگلیسی
-        search_terms = ["ریتون", "rhyton", "Riton", "دابور", "dabeus"]
+        search_terms = ["ریتون", "rhyton", "Riton", "Rhyton"]
 
         for term in search_terms:
             log(f"Searching: '{term}'")
@@ -183,9 +183,9 @@ def main():
 
     # ذخیره پاسخ خام از API جدید
     test_endpoints = [
-        ("ClosingPrice_GetClosingPriceInfo_dabur", "https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceInfo/4674107287748763521"),
-        ("BestLimits_dabur", "https://cdn.tsetmc.com/api/BestLimits/4674107287748763521"),
-        ("ClientType_dabur", "https://cdn.tsetmc.com/api/ClientType/GetClientType/4674107287748763521/1/0"),
+        ("ClosingPrice_GetClosingPriceInfo_riton", "https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceInfo/14035144070182412"),
+        ("BestLimits_riton", "https://cdn.tsetmc.com/api/BestLimits/14035144070182412"),
+        ("ClientType_riton", "https://cdn.tsetmc.com/api/ClientType/GetClientType/14035144070182412/1/0"),
         ("InstrumentSearch_rhyton", "https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/rhyton"),
         ("InstrumentSearch_riton", "https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/ریتون"),
     ]

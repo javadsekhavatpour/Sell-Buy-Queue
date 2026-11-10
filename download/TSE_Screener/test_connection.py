@@ -38,9 +38,9 @@ def load_config() -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description="TSETMC Connection Test")
-    parser.add_argument("--ins-code", default="4674107287748763521",
+    parser.add_argument("--ins-code", default="14035144070182412",
                         help="TSETMC instrument code")
-    parser.add_argument("--symbol", default="دابور", help="Symbol name")
+    parser.add_argument("--symbol", default="ریتون", help="Symbol name")
     parser.add_argument("--debug", action="store_true",
                         help="Save raw TSETMC responses")
     parser.add_argument("--no-save", action="store_true",

@@ -252,7 +252,7 @@ DASHBOARD_HTML = """
     <div class="container">
         <header>
             <h1>📊 TSE Early Warning Engine - داشبورد زنده</h1>
-            <div class="meta">نماد: <span id="symbol">دابور</span> | پایگاه داده: early_warning_live.sqlite</div>
+            <div class="meta">نماد: <span id="symbol">ریتون</span> | پایگاه داده: early_warning_live.sqlite</div>
         </header>
 
         <div class="status-bar">
@@ -343,7 +343,7 @@ DASHBOARD_HTML = """
         function updateUI(data) {
             document.getElementById('lastUpdate').textContent = data.last_update;
             document.getElementById('totalCount').textContent = data.total_snapshots;
-            document.getElementById('symbol').textContent = data.symbol || 'دابور';
+            document.getElementById('symbol').textContent = data.symbol || 'ریتون';
 
             // امتیازها
             const sp = data.sell_pressure;
@@ -765,7 +765,7 @@ def api_data():
             'last_update': datetime.now().strftime('%H:%M:%S'),
             'total_snapshots': 0,
             'total_trades': 0,
-            'symbol': 'دابور',
+            'symbol': 'ریتون',
             'last_snapshot': None,
             'recent_snapshots': [],
             'recent_trades': [],
@@ -825,7 +825,7 @@ def api_data():
         'last_update': datetime.now().strftime('%H:%M:%S'),
         'total_snapshots': total_snapshots,
         'total_trades': total_trades,
-        'symbol': last_snap.get('symbol', 'دابور') if last_snap else 'دابور',
+        'symbol': last_snap.get('symbol', 'ریتون') if last_snap else 'ریتون',
         'last_snapshot': last_snap,
         'recent_snapshots': recent,
         'recent_trades': trades,
