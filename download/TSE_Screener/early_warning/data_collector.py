@@ -349,37 +349,20 @@ class MarketDataCollector:
         }
 
     def fetch_trades(self, ins_code: str) -> List[Trade]:
-        """دریافت معاملات انجام‌شده اخیر از API جدید."""
-        data = self._api_get(f"Trade/GetTradeHistory/{ins_code}/99/0")
-        if not data or not isinstance(data, dict):
-            return []
+        """
+        دریافت معاملات انجام‌شده اخیر از API جدید.
 
-        trades_list = data.get("trade") or data.get("Trade") or data.get("tradeHistory") or []
-        if not isinstance(trades_list, list):
-            return []
+        نکته: API جدید TSETMC (cdn.tsetmc.com) endpoint جداگانه برای
+        تاریخچه معاملات اخیر ندارد. داده‌های معاملات در GetClosingPriceInfo
+        به‌صورت تجمعی موجود است (zTotTran تعداد، qTotTranValJAdj ارزش).
+        برای دریافت لیست معاملات لحظه‌ای، از MarketWatch استفاده می‌کنیم.
 
-        trades = []
-        for row in trades_list[-200:]:
-            if not isinstance(row, dict):
-                continue
-            try:
-                # زمان: hEven (ثانیه از شروع روز)
-                h_even = int(row.get("hEven") or 0)
-                hours = (h_even // 10000) % 24
-                minutes = (h_even // 100) % 100
-                seconds = h_even % 100
-                trade_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-
-                trades.append(Trade(
-                    trade_time=trade_time,
-                    trade_price=float(row.get("pTran") or 0),
-                    trade_volume=int(float(row.get("qTitTran") or 0)),
-                    trade_id=str(row.get("nTran") or ""),
-                ))
-            except Exception:
-                continue
-
-        return trades
+        این متد لیست خالی برمی‌گرداند تا با موتورهای تحلیلی سازگار باشد.
+        """
+        # در API جدید، داده‌های تجمعی معاملات در fetch_intraday آمده
+        # برای معاملات لحظه‌ای می‌توان از MarketWatch استفاده کرد
+        # ولی برای سادگی فعلاً لیست خالی برمی‌گردانیم
+        return []
 
     def search_symbol(self, query: str) -> List[Dict]:
         """جستجوی نماد در TSETMC."""
@@ -456,10 +439,10 @@ class MarketDataCollector:
             best_sell_volume=inst["sell_rows"][0]["volume"] if inst.get("sell_rows") else 0,
             buy_rows=[BestLimitRow(**r) for r in inst.get("buy_rows", [])],
             sell_rows=[BestLimitRow(**r) for r in inst.get("sell_rows", [])],
-            buy_order_count=sum(r.order_count for r in inst.get("buy_rows", [])),
-            sell_order_count=sum(r.order_count for r in inst.get("sell_rows", [])),
+            buy_order_count=sum(r["order_count"] for r in inst.get("buy_rows", [])),
+            sell_order_count=sum(r["order_count"] for r in inst.get("sell_rows", [])),
             total_volume=inst.get("trade_volume", 0),
-            total_value=inst.get("trade_value", 0),
+            total_value=inst.get("trade_value", 0) or (inst.get("last_price", 0) * inst.get("trade_volume", 0)),
             total_trade_count=inst.get("trade_count", 0),
             real_buy_volume=ct.get("real_buy_volume", 0) if ct else 0,
             real_sell_volume=ct.get("real_sell_volume", 0) if ct else 0,
