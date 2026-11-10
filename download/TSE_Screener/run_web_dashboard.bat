@@ -1,44 +1,65 @@
 @echo off
 REM ============================================================
-REM اسکریپت اجرای داشبورد وب TSE Early Warning
-REM این اسکریپت:
-REM   1. encoding کنسول را به UTF-8 تنظیم می‌کند
-REM   2. Flask را نصب می‌کند (اگر نصب نیست)
-REM   3. سرور وب را روی پورت 8050 اجرا می‌کند
-REM   4. مرورگر را به‌صورت خودکار باز می‌کند
+REM TSE Early Warning - Web Dashboard Launcher
+REM This script: 1) installs Flask if needed, 2) runs web server
 REM ============================================================
 
-chcp 65001 >nul
 title TSE Early Warning - Web Dashboard
 
 echo ============================================================
-echo   TSE Early Warning Engine - راه‌اندازی داشبورد وب
+echo   TSE Early Warning Engine - Web Dashboard Launcher
 echo ============================================================
 echo.
 
-REM بررسی نصب Flask
-python -c "import flask" 2>nul
+REM Change encoding to UTF-8
+chcp 65001 >nul 2>&1
+
+REM Check if Python is installed
+python --version >nul 2>&1
 if errorlevel 1 (
-    echo [نصب] Flask در حال نصب...
-    pip install flask
+    echo [ERROR] Python is not installed or not in PATH
+    echo Please install Python from https://www.python.org/downloads/
+    pause
+    exit /b 1
+)
+
+echo [OK] Python found:
+python --version
+echo.
+
+REM Check if Flask is installed
+python -c "import flask" >nul 2>&1
+if errorlevel 1 (
+    echo [INFO] Flask is not installed. Installing now...
+    echo.
+    python -m pip install flask
     if errorlevel 1 (
-        echo [خطا] نصب Flask ناموفق بود
+        echo.
+        echo [ERROR] Failed to install Flask
+        echo Please run manually: python -m pip install flask
         pause
         exit /b 1
     )
     echo.
+    echo [OK] Flask installed successfully
+    echo.
+) else (
+    echo [OK] Flask is already installed
+    echo.
 )
 
-echo [راه‌اندازی] سرور وب در حال اجرا...
-echo.
-echo [نکته] مرورگر به‌صورت خودکار باز می‌شود
-echo [نکته] برای توقف، این پنجره را ببندید یا Ctrl+C را فشار دهید
+echo [INFO] Starting web dashboard...
+echo [INFO] Server will start at: http://localhost:8050
+echo [INFO] Your browser will open automatically in 3 seconds
+echo [INFO] Press Ctrl+C to stop the server
 echo.
 
-REM باز کردن مرورگر پس از ۳ ثانیه (در پس‌زمینه)
-start /b cmd /c "timeout /t 3 /nobreak >nul && start http://localhost:8050"
+REM Open browser after 3 seconds (in background)
+start "" /b cmd /c "timeout /t 3 /nobreak >nul & start http://localhost:8050"
 
-REM اجرای سرور وب
+REM Run the web dashboard
 python web_dashboard.py --port 8050
 
+echo.
+echo [INFO] Server stopped
 pause
