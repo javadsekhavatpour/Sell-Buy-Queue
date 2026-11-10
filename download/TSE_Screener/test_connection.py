@@ -1,22 +1,19 @@
 """
-test_connection.py
-اسکریپت تست اتصال به TSETMC و عیب‌یابی.
-
-این اسکریپت به شما نشان می‌دهد:
-  ۱) آیا TSETMC قابل دسترسی است؟
-  ۲) آیا کد نماد درست است؟
-  ۳) چه داده‌ای از API برمی‌گردد؟
-  ۴) کدام فیلد به‌درستی parse می‌شود؟
+test_connection.py (نسخه ساده‌شده)
+تست اتصال به TSETMC با ذخیره خودکار خروجی در فایل.
 
 نحوه اجرا:
-  python test_connection.py
-  python test_connection.py --ins-code 4674107287748763521
-  python test_connection.py --debug
+  python test_connection.py            # تست + ذخیره خروجی در فایل
+  python test_connection.py --debug     # + ذخیره پاسخ خام TSETMC
+  python test_connection.py --no-save   # بدون ذخیره فایل
+
+پس از اجرا، فایل result.txt ساخته می‌شود که می‌توانید برایم بفرستید.
 """
 
 import sys
 import json
 import argparse
+import io
 from pathlib import Path
 from datetime import datetime
 
@@ -40,153 +37,213 @@ def load_config() -> dict:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="تست اتصال به TSETMC")
+    parser = argparse.ArgumentParser(description="TSETMC Connection Test")
     parser.add_argument("--ins-code", default="4674107287748763521",
-                        help="کد ابزار TSETMC")
-    parser.add_argument("--symbol", default="دابور", help="نام نماد")
+                        help="TSETMC instrument code")
+    parser.add_argument("--symbol", default="دابور", help="Symbol name")
     parser.add_argument("--debug", action="store_true",
-                        help="ذخیره پاسخ‌های خام برای دیباگ")
+                        help="Save raw TSETMC responses")
+    parser.add_argument("--no-save", action="store_true",
+                        help="Don't save output to file")
     args = parser.parse_args()
 
-    print("=" * 70)
-    print("  TSETMC Connection Test")
-    print("=" * 70)
-    print()
+    # ذخیره همه printها در یک buffer
+    output_buffer = io.StringIO()
+
+    def log(msg=""):
+        print(msg)
+        output_buffer.write(str(msg) + "\n")
+
+    log("=" * 70)
+    log("  TSETMC Connection Test")
+    log("=" * 70)
+    log()
+    log(f"Symbol:     {args.symbol}")
+    log(f"Ins Code:   {args.ins_code}")
+    log(f"Time:       {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    log()
 
     config = load_config()
     collector = MarketDataCollector(config)
 
     if args.debug:
         collector.enable_debug(ROOT / "data" / "raw_responses")
-        print("🔍 حالت دیباگ فعال است - پاسخ‌های خام در data/raw_responses ذخیره می‌شوند")
-        print()
-
-    print(f"📋 نماد: {args.symbol}")
-    print(f"📋 کد ابزار: {args.ins_code}")
-    print(f"⏰ زمان تست: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print()
+        log("Debug mode: raw responses saved to data/raw_responses/")
+        log()
 
     # مرحله ۱: دریافت داده روز جاری
-    print("─" * 70)
-    print("۱) دریافت داده روز جاری (instinfo)")
-    print("─" * 70)
+    log("─" * 70)
+    log("1) Fetching intraday data (instinfo)")
+    log("─" * 70)
 
-    inst = collector.fetch_intraday(args.ins_code)
+    try:
+        inst = collector.fetch_intraday(args.ins_code)
+    except Exception as e:
+        log(f"ERROR during fetch: {e}")
+        inst = None
 
     if inst is None:
-        print("❌ هیچ پاسخی از TSETMC دریافت نشد!")
-        print()
-        print("علل احتمالی:")
-        print("  • اتصال اینترنت قطع است")
-        print("  • TSETMC از دسترس شما بسته شده (IP مسدود)")
-        print("  • کد ابزار اشتباه است")
-        print("  • ساختار API تغییر کرده و پارسر ناسازگار است")
-        print()
-        print("اقدامات پیشنهادی:")
-        print("  ۱) مرورگر را باز کنید و به http://www.tsetmc.com بروید")
-        print("  ۲) اگر باز شد، به صفحه نماد دابور بروید")
-        print("  ۳) URL را کپی کنید و کد ابزار را از آن استخراج کنید")
-        print("     مثال: http://www.tsetmc.com/Loader.aspx?ParTree=151311&i=4674107287748763521")
-        print("     ↑ این عدد همان ins_code است")
-        print("  ۴) با --debug اجرا کنید تا پاسخ خام ذخیره شود")
-        return
+        log("FAILED: No data received from TSETMC")
+        log()
+        log("Possible causes:")
+        log("  - Internet connection issue")
+        log("  - TSETMC is blocking your IP")
+        log("  - Wrong ins-code")
+        log("  - API structure changed")
+        log()
+        log("Try these:")
+        log("  1) Open http://www.tsetmc.com in your browser")
+        log("  2) Run with --debug to save raw responses")
+    else:
+        log("SUCCESS: Response received")
+        log()
+        log("Parsed values:")
+        log(f"  last_price:      {inst.get('last_price', 0):,}")
+        log(f"  close_price:     {inst.get('close_price', 0):,}")
+        log(f"  yesterday_price: {inst.get('yesterday_price', 0):,}")
+        log(f"  daily_high:      {inst.get('daily_high', 0):,}")
+        log(f"  daily_low:       {inst.get('daily_low', 0):,}")
+        log(f"  trade_volume:    {inst.get('trade_volume', 0):,}")
+        log(f"  trade_value:     {inst.get('trade_value', 0):,}")
+        log(f"  trade_count:     {inst.get('trade_count', 0):,}")
+        log()
 
-    print("✓ پاسخ دریافت شد")
-    print()
-    print("داده‌های parse شده:")
-    print(f"  آخرین قیمت:        {inst.get('last_price', 0):,}")
-    print(f"  قیمت پایانی:      {inst.get('close_price', 0):,}")
-    print(f"  قیمت دیروز:       {inst.get('yesterday_price', 0):,}")
-    print(f"  بالاترین روز:      {inst.get('daily_high', 0):,}")
-    print(f"  پایین‌ترین روز:   {inst.get('daily_low', 0):,}")
-    print(f"  حجم معاملات:       {inst.get('trade_volume', 0):,}")
-    print(f"  ارزش معاملات:      {inst.get('trade_value', 0):,}")
-    print(f"  تعداد معاملات:     {inst.get('trade_count', 0):,}")
-    print()
-
-    buy_rows = inst.get("buy_rows", [])
-    sell_rows = inst.get("sell_rows", [])
-    print(f"  ردیف‌های خرید: {len(buy_rows)}")
-    if buy_rows:
-        for i, r in enumerate(buy_rows[:3], 1):
-            print(f"    {i}: قیمت {r['price']:,} | حجم {r['volume']:,} | سفارش {r['order_count']}")
-    print(f"  ردیف‌های فروش: {len(sell_rows)}")
-    if sell_rows:
-        for i, r in enumerate(sell_rows[:3], 1):
-            print(f"    {i}: قیمت {r['price']:,} | حجم {r['volume']:,} | سفارش {r['order_count']}")
-    print()
+        buy_rows = inst.get("buy_rows", [])
+        sell_rows = inst.get("sell_rows", [])
+        log(f"  buy_rows count:  {len(buy_rows)}")
+        if buy_rows:
+            for i, r in enumerate(buy_rows[:3], 1):
+                log(f"    {i}: price={r['price']:,}  vol={r['volume']:,}  orders={r['order_count']}")
+        log(f"  sell_rows count: {len(sell_rows)}")
+        if sell_rows:
+            for i, r in enumerate(sell_rows[:3], 1):
+                log(f"    {i}: price={r['price']:,}  vol={r['volume']:,}  orders={r['order_count']}")
+    log()
 
     # مرحله ۲: اطلاعات حقیقی/حقوقی
-    print("─" * 70)
-    print("۲) اطلاعات حقیقی/حقوقی (clienttype)")
-    print("─" * 70)
+    log("─" * 70)
+    log("2) Fetching client type data (real/legal)")
+    log("─" * 70)
 
-    ct = collector.fetch_clienttype(args.ins_code)
+    try:
+        ct = collector.fetch_clienttype(args.ins_code)
+    except Exception as e:
+        log(f"ERROR: {e}")
+        ct = None
 
     if ct is None:
-        print("❌ اطلاعات clienttype دریافت نشد")
+        log("FAILED: No clienttype data")
     else:
-        print("✓ دریافت شد")
-        print(f"  خریداران حقیقی:    {ct.get('real_buy_count', 0):,}")
-        print(f"  فروشندگان حقیقی: {ct.get('real_sell_count', 0):,}")
-        print(f"  حجم خرید حقیقی: {ct.get('real_buy_volume', 0):,}")
-        print(f"  حجم فروش حقیقی: {ct.get('real_sell_volume', 0):,}")
-        print(f"  خریداران حقوقی:    {ct.get('legal_buy_count', 0):,}")
-        print(f"  فروشندگان حقوقی: {ct.get('legal_sell_count', 0):,}")
-    print()
+        log("SUCCESS")
+        log(f"  real_buy_count:   {ct.get('real_buy_count', 0):,}")
+        log(f"  real_sell_count:  {ct.get('real_sell_count', 0):,}")
+        log(f"  real_buy_volume:  {ct.get('real_buy_volume', 0):,}")
+        log(f"  real_sell_volume: {ct.get('real_sell_volume', 0):,}")
+        log(f"  legal_buy_count:  {ct.get('legal_buy_count', 0):,}")
+        log(f"  legal_sell_count: {ct.get('legal_sell_count', 0):,}")
+    log()
 
     # مرحله ۳: معاملات اخیر
-    print("─" * 70)
-    print("۳) معاملات اخیر (tradehistory)")
-    print("─" * 70)
+    log("─" * 70)
+    log("3) Fetching recent trades")
+    log("─" * 70)
 
-    trades = collector.fetch_trades(args.ins_code)
+    try:
+        trades = collector.fetch_trades(args.ins_code)
+    except Exception as e:
+        log(f"ERROR: {e}")
+        trades = []
+
     if not trades:
-        print("❌ معامله‌ای دریافت نشد")
+        log("No trades received")
     else:
-        print(f"✓ {len(trades)} معامله دریافت شد")
+        log(f"SUCCESS: {len(trades)} trades")
         for t in trades[:5]:
-            print(f"  {t.trade_time} | {t.trade_price:,} × {t.trade_volume:,}")
-    print()
+            log(f"  {t.trade_time} | {t.trade_price:,} x {t.trade_volume:,}")
+    log()
 
     # مرحله ۴: ساخت نمونه کامل
-    print("─" * 70)
-    print("۴) ساخت MarketSnapshot کامل")
-    print("─" * 70)
+    log("─" * 70)
+    log("4) Building full MarketSnapshot")
+    log("─" * 70)
 
-    snap, _ = collector.collect(args.symbol, args.ins_code, fetch_trades=False)
+    try:
+        snap, _ = collector.collect(args.symbol, args.ins_code, fetch_trades=False)
+    except Exception as e:
+        log(f"ERROR: {e}")
+        snap = None
 
     if snap is None:
-        print("❌ ساخت نمونه ناموفق بود")
-        return
-
-    print(f"✓ نمونه ساخته شد")
-    print(f"  وضعیت داده:        {snap.data_status}")
-    if snap.fetch_error:
-        print(f"  خطا:               {snap.fetch_error}")
-    print(f"  فاز بازار:         {snap.market_phase}")
-    print(f"  داده کامل:         {'بله' if snap.data_complete else 'خیر'}")
-    if snap.missing_fields:
-        print(f"  فیلدهای مفقود:     {', '.join(snap.missing_fields)}")
-    print()
-
-    # خلاصه
-    print("=" * 70)
-    if snap.data_complete and snap.last_price > 0:
-        print("✅ نتیجه: همه چیز درست کار می‌کند!")
-        print("   می‌توانید run_live.py را اجرا کنید.")
-    elif snap.last_price > 0:
-        print("⚠️  نتیجه: داده دریافت شد ولی کامل نیست")
-        print("   برخی فیلدها مفقودند ولی برنامه کار می‌کند.")
+        log("FAILED to build snapshot")
     else:
-        print("❌ نتیجه: داده‌ها به‌درستی دریافت نشدند")
-        print("   برای عیب‌یابی دقیق‌تر:")
-        print("   ۱) با پرچم --debug اجرا کنید")
-        print("   ۲) فایل‌های data/raw_responses/ را بررسی کنید")
-        print("   ۳) مرورگر را باز کنید و آدرس زیر را تست کنید:")
-        print(f"      http://www.tsetmc.com/tsev2/data/instinfodata.aspx?i={args.ins_code}&c=57+")
+        log("Snapshot built")
+        log(f"  data_status:    {snap.data_status}")
+        if snap.fetch_error:
+            log(f"  fetch_error:    {snap.fetch_error}")
+        log(f"  market_phase:   {snap.market_phase}")
+        log(f"  data_complete:  {snap.data_complete}")
+        if snap.missing_fields:
+            log(f"  missing_fields: {snap.missing_fields}")
+        log(f"  last_price:     {snap.last_price:,}")
+        log(f"  close_price:    {snap.close_price:,}")
+        log(f"  buyer_power:    {snap.buyer_power:.2f}")
+        log(f"  real_money_flow: {snap.real_money_flow:,.0f}")
+    log()
+
+    # خلاصه نهایی
+    log("=" * 70)
+    if snap and snap.last_price > 0:
+        log("RESULT: All good! You can run run_live.py")
+    elif snap and snap.last_price == 0:
+        log("RESULT: Connection works but no price data received")
+        log("  Check if market is open (Sat-Wed, 09:00-12:30 Tehran time)")
+        log("  Or run with --debug and send me data/raw_responses/ files")
+    else:
+        log("RESULT: Connection failed - see errors above")
+    log("=" * 70)
+    log()
+
+    # ذخیره خروجی در فایل
+    if not args.no_save:
+        log_path = ROOT / "data" / "test_connection_result.txt"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write(output_buffer.getvalue())
+        print()
+        print(f"📁 Result saved to: {log_path}")
+        print()
+        print("=" * 70)
+        print("📋 Please send me the content of this file:")
+        print(f"   {log_path}")
+        print("=" * 70)
+        print()
+        print("How to send:")
+        print("  1) Open the file in Notepad")
+        print("  2) Ctrl+A to select all")
+        print("  3) Ctrl+C to copy")
+        print("  4) Paste it in our chat")
+        print()
+
+    # مکث برای جلوگیری از بسته شدن پنجره
     print("=" * 70)
+    print("Test completed. Window will stay open.")
+    print("=" * 70)
+    try:
+        input("Press Enter to exit...")
+    except (EOFError, KeyboardInterrupt):
+        pass
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print()
+        print(f"UNEXPECTED ERROR: {e}")
+        print()
+        import traceback
+        traceback.print_exc()
+        try:
+            input("Press Enter to exit...")
+        except:
+            pass
