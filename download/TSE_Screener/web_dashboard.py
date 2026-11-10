@@ -473,25 +473,7 @@ DASHBOARD_HTML = """
     <!-- ردیف اول: حقیقی/حقوقی + قیمت لحظه‌ای + تغییر مالکیت -->
     <div class="top-row">
 
-        <!-- سمت راست: جدول حقیقی/حقوقی -->
-        <div class="card">
-            <div class="card-header">حقیقی / حقوقی</div>
-            <table class="real-legal-table">
-                <thead>
-                    <tr>
-                        <th></th>
-                        <th>حجم</th>
-                        <th>ارزش</th>
-                        <th>تعداد</th>
-                    </tr>
-                </thead>
-                <tbody id="realLegalTable">
-                    <tr><td colspan="4" class="no-data">داده‌ای دریافت نشده</td></tr>
-                </tbody>
-            </table>
-        </div>
-
-        <!-- وسط: پنل قیمت لحظه‌ای -->
+        <!-- سمت راست: پنل قیمت لحظه‌ای -->
         <div class="card">
             <div class="card-header">قیمت لحظه‌ای</div>
             <div class="price-panel">
@@ -553,7 +535,7 @@ DASHBOARD_HTML = """
             </div>
         </div>
 
-        <!-- سمت چپ: تغییر مالکیت و NAV -->
+        <!-- وسط: پنل تغییر مالکیت و NAV -->
         <div class="card">
             <div class="card-header">تغییر مالکیت و NAV</div>
             <div class="ownership-panel">
@@ -585,6 +567,24 @@ DASHBOARD_HTML = """
                     </div>
                 </div>
             </div>
+        </div>
+
+        <!-- سمت چپ: جدول حقیقی/حقوقی -->
+        <div class="card">
+            <div class="card-header">حقیقی / حقوقی</div>
+            <table class="real-legal-table">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>حجم</th>
+                        <th>ارزش</th>
+                        <th>تعداد</th>
+                    </tr>
+                </thead>
+                <tbody id="realLegalTable">
+                    <tr><td colspan="4" class="no-data">داده‌ای دریافت نشده</td></tr>
+                </tbody>
+            </table>
         </div>
     </div>
 
