@@ -1,22 +1,21 @@
 """
-web_dashboard.py (نسخه ۲.۰ - شبیه TSETMC)
-داشبورد وب زنده با چیدمان و رنگ‌بندی مشابه TSETMC.
+web_dashboard.py (نسخه ۲.۱ - دقیقاً مطابق TSETMC)
+داشبورد وب زنده با چیدمان و اطلاعات دقیقاً مشابه TSETMC.
 
-طراحی:
+چیدمان مطابق TSETMC:
   ردیف اول (بالا):
-    - راست: جدول حقیقی/حقوقی (آبی تیره)
-    - وسط: پنل قیمت لحظه‌ای (آخرین معامله، بازه مجاز، حجم/ارزش)
-    - چپ: تغییر مالکیت و NAV
+    - راست: جدول حقیقی/حقوقی (تعداد/حجم/درصد برای خرید و فروش)
+    - وسط: پنل قیمت لحظه‌ای + آمار معاملات + نوار بازه مجاز
+    - چپ: پنل تغییر مالکیت + NAV
   ردیف دوم (پایین):
     - چپ: نمودار قیمت
     - راست: جدول عمق بازار (۵ ردیف سفارش)
 
-رنگ‌بندی TSETMC:
-  - قرمز/صورتی: قیمت‌های منفی
-  - سبز: مثبت
-  - آبی تیره: هدر حقیقی/حقوقی
-  - بنفش کم‌رنگ: هدر جدول سفارش‌ها
-  - خاکستری: پس‌زمینه
+رنگ‌بندی مطابق TSETMC:
+  - قرمز/صورتی: آخرین قیمت (در بازار ایران قرمز = نزول)
+  - سبز: NAV، قیمت‌های مثبت
+  - آبی تیره: هدر جدول حقیقی/حقوقی
+  - بنفش کم‌رنگ: هدر جدول عمق بازار
 
 نحوه اجرا:
   python web_dashboard.py
@@ -31,7 +30,6 @@ import sys
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Any
 
 try:
     from flask import Flask, render_template_string, jsonify, request
@@ -53,7 +51,7 @@ app = Flask(__name__)
 
 
 # ---------------------------------------------------------------------------
-# قالب HTML - شبیه TSETMC
+# قالب HTML - دقیقاً مطابق TSETMC
 # ---------------------------------------------------------------------------
 
 DASHBOARD_HTML = """
@@ -62,68 +60,62 @@ DASHBOARD_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TSE Early Warning - ریتون</title>
+    <title>TSETMC - ریتون</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: 'Vazirmatn', 'Segoe UI', Tahoma, sans-serif;
-            background: #e8ecef;
+            background: #d4dadf;
             color: #2c3e50;
-            font-size: 13px;
-            padding: 10px;
+            font-size: 12px;
+            padding: 8px;
         }
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
+        .container { max-width: 1400px; margin: 0 auto; }
 
         /* نوار عنوان مشکی - شبیه TSETMC */
         .header-bar {
             background: #1a1a1a;
             color: white;
-            padding: 10px 15px;
+            padding: 8px 12px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-radius: 6px 6px 0 0;
+            border-radius: 4px 4px 0 0;
+            font-size: 13px;
         }
-        .header-bar .symbol-name {
-            font-size: 15px;
-            font-weight: bold;
-        }
+        .header-bar .symbol-name { font-weight: bold; }
         .header-bar .clock {
             font-family: monospace;
-            font-size: 14px;
             background: #2c5282;
-            padding: 4px 10px;
-            border-radius: 4px;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 12px;
         }
 
         /* ردیف اول - سه ستون */
         .top-row {
             display: grid;
-            grid-template-columns: 1fr 1.5fr 1fr;
-            gap: 8px;
-            margin-bottom: 8px;
+            grid-template-columns: 1.1fr 1.4fr 1fr;
+            gap: 6px;
+            margin-bottom: 6px;
         }
 
-        /* کارت‌ها */
         .card {
             background: white;
-            border-radius: 6px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
             overflow: hidden;
         }
         .card-header {
             background: #4a5568;
             color: white;
-            padding: 6px 10px;
-            font-size: 12px;
+            padding: 5px 10px;
+            font-size: 11px;
             font-weight: bold;
             text-align: center;
         }
 
-        /* جدول حقیقی/حقوقی - آبی تیره */
+        /* جدول حقیقی/حقوقی - مطابق TSETMC */
         .real-legal-table {
             width: 100%;
             border-collapse: collapse;
@@ -132,114 +124,146 @@ DASHBOARD_HTML = """
         .real-legal-table th {
             background: #2c5282;
             color: white;
-            padding: 6px 4px;
+            padding: 5px 3px;
             text-align: center;
             font-weight: 600;
+            font-size: 10px;
         }
         .real-legal-table td {
-            padding: 6px 4px;
+            padding: 5px 3px;
             text-align: center;
             border-bottom: 1px solid #e2e8f0;
         }
-        .real-legal-table tr.header-row td {
+        .real-legal-table .row-header {
             background: #2c5282;
             color: white;
             font-weight: bold;
+        }
+        .real-legal-table .label-col {
+            background: #ebf4ff;
+            font-weight: bold;
+            text-align: right;
+            padding-right: 8px;
         }
         .real-legal-table .orange { color: #d97706; font-weight: bold; }
         .real-legal-table .green { color: #16a34a; font-weight: bold; }
 
         /* پنل قیمت لحظه‌ای */
-        .price-panel {
-            padding: 12px;
-        }
+        .price-panel { padding: 10px; }
         .last-price-box {
             background: #fee2e2;
-            padding: 12px;
-            border-radius: 6px;
+            padding: 10px;
+            border-radius: 4px;
             text-align: center;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
         }
         .last-price-value {
-            font-size: 32px;
+            font-size: 30px;
             font-weight: bold;
             color: #dc2626;
         }
         .last-price-change {
-            font-size: 13px;
+            font-size: 12px;
             color: #dc2626;
-            margin-top: 4px;
+            margin-top: 3px;
         }
         .price-info-row {
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
-            gap: 6px;
-            margin-bottom: 8px;
+            gap: 5px;
+            margin-bottom: 6px;
         }
         .price-info-item {
             background: #f1f5f9;
-            padding: 6px 8px;
-            border-radius: 4px;
+            padding: 5px 6px;
+            border-radius: 3px;
             text-align: center;
         }
         .price-info-label {
-            font-size: 10px;
+            font-size: 9px;
             color: #64748b;
             margin-bottom: 2px;
         }
         .price-info-value {
-            font-size: 13px;
+            font-size: 12px;
             font-weight: bold;
             color: #1e293b;
         }
-        .range-bar {
-            background: #e2e8f0;
-            height: 8px;
-            border-radius: 4px;
-            margin: 8px 0;
-            position: relative;
-        }
-        .range-fill {
-            background: linear-gradient(90deg, #dc2626 0%, #fbbf24 50%, #16a34a 100%);
-            height: 100%;
-            border-radius: 4px;
-        }
-        .range-marker {
-            position: absolute;
-            top: -3px;
-            width: 4px;
-            height: 14px;
-            background: #1e293b;
-            border-radius: 2px;
+
+        /* نوار بازه مجاز */
+        .range-section {
+            margin: 6px 0;
+            padding: 6px;
+            background: #f8fafc;
+            border-radius: 3px;
         }
         .range-labels {
             display: flex;
             justify-content: space-between;
             font-size: 10px;
             color: #64748b;
+            margin-bottom: 4px;
+        }
+        .range-bar {
+            background: #e2e8f0;
+            height: 6px;
+            border-radius: 3px;
+            position: relative;
+        }
+        .range-fill {
+            background: linear-gradient(90deg, #dc2626 0%, #fbbf24 50%, #16a34a 100%);
+            height: 100%;
+            border-radius: 3px;
+        }
+        .range-marker {
+            position: absolute;
+            top: -3px;
+            width: 3px;
+            height: 12px;
+            background: #1e293b;
+            border-radius: 1px;
         }
 
-        /* پنل تغییر مالکیت */
-        .ownership-panel {
-            padding: 10px;
+        /* آمار معاملات */
+        .stats-section {
+            background: #f8fafc;
+            padding: 6px;
+            border-radius: 3px;
+            margin-top: 6px;
         }
+        .stats-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 5px;
+        }
+        .stats-item {
+            text-align: center;
+            padding: 3px;
+            background: white;
+            border-radius: 2px;
+        }
+        .stats-label { font-size: 9px; color: #64748b; }
+        .stats-value { font-size: 11px; font-weight: bold; color: #1e293b; }
+
+        /* پنل تغییر مالکیت + NAV */
+        .ownership-panel { padding: 8px; }
         .ownership-label {
-            font-size: 11px;
+            font-size: 10px;
             color: #64748b;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
             text-align: center;
         }
         .ownership-buttons {
             display: flex;
-            gap: 4px;
-            margin-bottom: 12px;
+            gap: 3px;
+            margin-bottom: 8px;
         }
         .ownership-btn {
             flex: 1;
-            padding: 6px 4px;
+            padding: 4px 2px;
             text-align: center;
-            border-radius: 4px;
-            font-size: 10px;
+            border-radius: 3px;
+            font-size: 9px;
             background: #e2e8f0;
             color: #64748b;
         }
@@ -253,54 +277,99 @@ DASHBOARD_HTML = """
             padding: 8px;
             border-radius: 4px;
             text-align: center;
-            margin-top: 10px;
+            margin: 8px 0;
         }
-        .nav-label {
-            font-size: 10px;
-            color: #16a34a;
-        }
+        .nav-label { font-size: 10px; color: #16a34a; }
         .nav-value {
-            font-size: 18px;
+            font-size: 20px;
             font-weight: bold;
             color: #16a34a;
+            margin: 2px 0;
         }
-        .nav-time {
+        .nav-time { font-size: 9px; color: #64748b; }
+
+        .extra-info {
+            margin-top: 8px;
             font-size: 10px;
-            color: #64748b;
-            margin-top: 2px;
+        }
+        .extra-info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 3px 0;
+            border-bottom: 1px solid #f1f5f9;
         }
 
-        /* ردیف دوم - نمودار و عمق بازار */
+        /* پنل هشدار موتور */
+        .alert-bar {
+            background: white;
+            border-radius: 4px;
+            padding: 8px 12px;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .alert-scores { display: flex; gap: 15px; }
+        .score-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-width: 80px;
+        }
+        .score-label { font-size: 10px; color: #64748b; }
+        .score-value { font-size: 20px; font-weight: bold; }
+        .score-value.sp { color: #dc2626; }
+        .score-value.acc { color: #16a34a; }
+        .score-bar {
+            width: 100%;
+            height: 4px;
+            background: #e2e8f0;
+            border-radius: 2px;
+            margin-top: 3px;
+            overflow: hidden;
+        }
+        .score-bar-fill-sp { height: 100%; background: #dc2626; transition: width 0.5s; }
+        .score-bar-fill-acc { height: 100%; background: #16a34a; transition: width 0.5s; }
+        .signal-badge {
+            padding: 6px 14px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            color: white;
+        }
+        .signal-normal { background: #64748b; }
+        .signal-yellow { background: #f59e0b; }
+        .signal-red { background: #dc2626; }
+        .signal-green { background: #16a34a; }
+        .signal-orange { background: #ea580c; }
+
+        /* ردیف دوم */
         .bottom-row {
             display: grid;
             grid-template-columns: 1fr 1.3fr;
-            gap: 8px;
+            gap: 6px;
         }
-        .chart-card {
-            padding: 10px;
-            height: 350px;
-        }
-        .chart-container {
-            height: 280px;
-            position: relative;
-        }
+        .chart-card { padding: 8px; height: 320px; }
+        .chart-container { height: 250px; position: relative; }
 
         /* جدول عمق بازار - بنفش کم‌رنگ */
         .orderbook-table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 12px;
+            font-size: 11px;
         }
         .orderbook-table th {
             background: #ede9fe;
             color: #6b21a8;
-            padding: 6px 4px;
+            padding: 5px 3px;
             text-align: center;
             font-weight: 600;
             border-bottom: 2px solid #c4b5fd;
+            font-size: 10px;
         }
         .orderbook-table td {
-            padding: 5px 4px;
+            padding: 4px 3px;
             text-align: center;
             border-bottom: 1px solid #f1f5f9;
         }
@@ -314,105 +383,21 @@ DASHBOARD_HTML = """
             color: #16a34a;
             font-weight: bold;
         }
-        .orderbook-table .vol-bar {
-            position: relative;
-        }
-        .vol-bar-buy {
-            background: rgba(220, 38, 38, 0.1);
-            position: absolute;
-            left: 0;
-            top: 0;
-            height: 100%;
-            border-radius: 2px;
-        }
-        .vol-bar-sell {
-            background: rgba(22, 163, 74, 0.1);
-            position: absolute;
-            right: 0;
-            top: 0;
-            height: 100%;
-            border-radius: 2px;
-        }
 
-        /* پنل هشدار موتور */
-        .alert-bar {
-            background: white;
-            border-radius: 6px;
-            padding: 10px 15px;
-            margin-top: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .alert-scores {
-            display: flex;
-            gap: 15px;
-        }
-        .score-item {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            min-width: 80px;
-        }
-        .score-label {
-            font-size: 10px;
-            color: #64748b;
-        }
-        .score-value {
-            font-size: 22px;
-            font-weight: bold;
-        }
-        .score-value.sp { color: #dc2626; }
-        .score-value.acc { color: #16a34a; }
-        .score-bar {
-            width: 100%;
-            height: 4px;
-            background: #e2e8f0;
-            border-radius: 2px;
-            margin-top: 4px;
-            overflow: hidden;
-        }
-        .score-bar-fill-sp {
-            height: 100%;
-            background: #dc2626;
-            transition: width 0.5s;
-        }
-        .score-bar-fill-acc {
-            height: 100%;
-            background: #16a34a;
-            transition: width 0.5s;
-        }
-        .signal-badge {
-            padding: 8px 16px;
-            border-radius: 6px;
-            font-size: 13px;
-            font-weight: bold;
-            color: white;
-        }
-        .signal-normal { background: #64748b; }
-        .signal-yellow { background: #f59e0b; }
-        .signal-red { background: #dc2626; }
-        .signal-green { background: #16a34a; }
-        .signal-orange { background: #ea580c; }
-
-        /* جدول نمونه‌های اخیر */
-        .recent-card {
-            margin-top: 8px;
-        }
+        .recent-card { margin-top: 6px; }
         .recent-table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 11px;
+            font-size: 10px;
         }
         .recent-table th {
             background: #4a5568;
             color: white;
-            padding: 6px;
+            padding: 5px;
             text-align: center;
         }
         .recent-table td {
-            padding: 4px 6px;
+            padding: 3px 5px;
             text-align: center;
             border-bottom: 1px solid #e2e8f0;
         }
@@ -420,30 +405,27 @@ DASHBOARD_HTML = """
 
         .status-bar {
             background: white;
-            padding: 8px 15px;
-            border-radius: 6px;
-            margin-bottom: 8px;
+            padding: 6px 12px;
+            border-radius: 4px;
+            margin-bottom: 6px;
             display: flex;
             justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-            font-size: 12px;
+            font-size: 11px;
         }
         .live-dot {
             display: inline-block;
-            width: 8px;
-            height: 8px;
+            width: 7px;
+            height: 7px;
             background: #16a34a;
             border-radius: 50%;
-            margin-left: 6px;
+            margin-left: 5px;
             animation: pulse 2s infinite;
         }
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.4; }
         }
-
-        .no-data { color: #94a3b8; text-align: center; padding: 20px; }
+        .no-data { color: #94a3b8; text-align: center; padding: 15px; font-size: 11px; }
     </style>
 </head>
 <body>
@@ -453,7 +435,7 @@ DASHBOARD_HTML = """
     <div class="header-bar">
         <div class="symbol-name">صندوق سرمایه‌گذاری کالای پاسارگاد (ریتون)</div>
         <div>
-            <span>زمان: </span>
+            <span>ساعت: </span>
             <span class="clock" id="clock">--:--:--</span>
         </div>
     </div>
@@ -473,16 +455,16 @@ DASHBOARD_HTML = """
     <!-- ردیف اول: حقیقی/حقوقی + قیمت لحظه‌ای + تغییر مالکیت -->
     <div class="top-row">
 
-        <!-- سمت راست: جدول حقیقی/حقوقی -->
+        <!-- سمت راست: جدول حقیقی/حقوقی (مطابق TSETMC) -->
         <div class="card">
             <div class="card-header">حقیقی / حقوقی</div>
             <table class="real-legal-table">
                 <thead>
                     <tr>
                         <th></th>
-                        <th>حجم</th>
-                        <th>ارزش</th>
                         <th>تعداد</th>
+                        <th>حجم</th>
+                        <th>درصد</th>
                     </tr>
                 </thead>
                 <tbody id="realLegalTable">
@@ -523,41 +505,48 @@ DASHBOARD_HTML = """
                         <div class="price-info-value" id="dailyLow" style="color:#dc2626;">-</div>
                     </div>
                     <div class="price-info-item">
-                        <div class="price-info-label">فاز</div>
+                        <div class="price-info-label">فاز بازار</div>
                         <div class="price-info-value" id="marketPhase">-</div>
                     </div>
                 </div>
+
                 <!-- نوار بازه مجاز -->
-                <div class="range-labels">
-                    <span>کف مجاز: <span id="minAllowed">-</span></span>
-                    <span>سقف مجاز: <span id="maxAllowed">-</span></span>
-                </div>
-                <div class="range-bar">
-                    <div class="range-fill"></div>
-                    <div class="range-marker" id="priceMarker" style="left: 50%;"></div>
-                </div>
-                <div class="price-info-row">
-                    <div class="price-info-item">
-                        <div class="price-info-label">حجم معاملات</div>
-                        <div class="price-info-value" id="totalVolume">-</div>
+                <div class="range-section">
+                    <div class="range-labels">
+                        <span>کف مجاز: <span id="minAllowed">-</span></span>
+                        <span>سقف مجاز: <span id="maxAllowed">-</span></span>
                     </div>
-                    <div class="price-info-item">
-                        <div class="price-info-label">ارزش معاملات</div>
-                        <div class="price-info-value" id="totalValue">-</div>
+                    <div class="range-bar">
+                        <div class="range-fill"></div>
+                        <div class="range-marker" id="priceMarker" style="left: 50%;"></div>
                     </div>
-                    <div class="price-info-item">
-                        <div class="price-info-label">تعداد معامله</div>
-                        <div class="price-info-value" id="totalTradeCount">-</div>
+                </div>
+
+                <!-- آمار معاملات -->
+                <div class="stats-section">
+                    <div class="stats-row">
+                        <div class="stats-item">
+                            <div class="stats-label">تعداد معاملات</div>
+                            <div class="stats-value" id="totalTradeCount">-</div>
+                        </div>
+                        <div class="stats-item">
+                            <div class="stats-label">حجم معاملات</div>
+                            <div class="stats-value" id="totalVolume">-</div>
+                        </div>
+                        <div class="stats-item">
+                            <div class="stats-label">ارزش معاملات</div>
+                            <div class="stats-value" id="totalValue">-</div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- سمت چپ: تغییر مالکیت و NAV -->
+        <!-- سمت چپ: تغییر مالکیت + NAV -->
         <div class="card">
             <div class="card-header">تغییر مالکیت و NAV</div>
             <div class="ownership-panel">
-                <div class="ownership-label">احتمال تغییر مالکیت (میانگین حجم فروش)</div>
+                <div class="ownership-label">احتمال تغییر مالکیت</div>
                 <div class="ownership-buttons">
                     <div class="ownership-btn" id="ownLight">سبک</div>
                     <div class="ownership-btn" id="ownSemiLight">نیمه‌سبک</div>
@@ -565,21 +554,31 @@ DASHBOARD_HTML = """
                     <div class="ownership-btn" id="ownHeavy">سنگین</div>
                     <div class="ownership-btn" id="ownVeryHeavy">خیلی سنگین</div>
                 </div>
+
                 <div class="nav-box">
                     <div class="nav-label">NAV ابطال</div>
                     <div class="nav-value" id="navValue">-</div>
                     <div class="nav-time" id="navTime">-</div>
                 </div>
-                <div style="margin-top: 10px; font-size: 11px;">
-                    <div style="display:flex; justify-content:space-between; padding: 4px 0;">
+
+                <div class="extra-info">
+                    <div class="extra-info-row">
                         <span>قدرت خریدار:</span>
                         <strong id="buyerPower">-</strong>
                     </div>
-                    <div style="display:flex; justify-content:space-between; padding: 4px 0;">
+                    <div class="extra-info-row">
+                        <span>سرانه خرید:</span>
+                        <strong id="perCapitaBuy">-</strong>
+                    </div>
+                    <div class="extra-info-row">
+                        <span>سرانه فروش:</span>
+                        <strong id="perCapitaSell">-</strong>
+                    </div>
+                    <div class="extra-info-row">
                         <span>ورود/خروج پول:</span>
                         <strong id="moneyFlow">-</strong>
                     </div>
-                    <div style="display:flex; justify-content:space-between; padding: 4px 0;">
+                    <div class="extra-info-row">
                         <span>کمال داده:</span>
                         <strong id="completeness">-</strong>
                     </div>
@@ -602,12 +601,11 @@ DASHBOARD_HTML = """
                 <div class="score-bar"><div class="score-bar-fill-acc" id="accBar" style="width:0%"></div></div>
             </div>
         </div>
-        <div class="signal-badge signal-normal" id="signalBadge">در حال دریافت داده...</div>
+        <div class="signal-badge signal-normal" id="signalBadge">در حال دریافت...</div>
     </div>
 
     <!-- ردیف دوم: نمودار + عمق بازار -->
     <div class="bottom-row">
-        <!-- نمودار -->
         <div class="card chart-card">
             <div class="card-header">نمودار قیمت</div>
             <div class="chart-container">
@@ -615,7 +613,6 @@ DASHBOARD_HTML = """
             </div>
         </div>
 
-        <!-- عمق بازار -->
         <div class="card">
             <div class="card-header">عمق بازار (۵ ردیف سفارش)</div>
             <table class="orderbook-table">
@@ -671,14 +668,13 @@ async function fetchData() {
         const data = await response.json();
         updateUI(data);
     } catch (err) {
-        console.error('خطا در دریافت داده:', err);
+        console.error('خطا:', err);
     }
 }
 
-function formatNumber(v, decimals) {
+function formatNumber(v) {
     if (v === null || v === undefined || v === 0) return '-';
-    decimals = decimals || 0;
-    return Number(v).toLocaleString('fa-IR', {minimumFractionDigits: 0, maximumFractionDigits: decimals});
+    return Number(v).toLocaleString('fa-IR');
 }
 
 function formatVolume(v) {
@@ -697,7 +693,7 @@ function formatMoney(v) {
 }
 
 function phaseLabel(p) {
-    return {'pre_open':'پیش‌گشایش','continuous':'پیوسته','halted':'متوقف','closed':'بسته'}[p] || p;
+    return {'pre_open':'پیش‌گشایش','continuous':'پیوسته','halted':'متوقف','closed':'بسته'}[p] || p || '-';
 }
 
 function updateUI(data) {
@@ -736,39 +732,53 @@ function updateUI(data) {
             document.getElementById('priceMarker').style.left = Math.max(0, Math.min(100, pct)) + '%';
         }
 
-        // حجم و ارزش
+        // آمار معاملات
+        document.getElementById('totalTradeCount').textContent = formatNumber(snap.total_trade_count);
         document.getElementById('totalVolume').textContent = formatVolume(snap.total_volume);
         document.getElementById('totalValue').textContent = formatMoney(snap.total_value);
-        document.getElementById('totalTradeCount').textContent = formatNumber(snap.total_trade_count);
 
-        // جدول حقیقی/حقوقی
-        if (snap.real_buy_count > 0 || snap.real_sell_count > 0) {
+        // جدول حقیقی/حقوقی (مطابق TSETMC)
+        const rb = snap.real_buy_count || 0;
+        const rs = snap.real_sell_count || 0;
+        const lb = snap.legal_buy_count || 0;
+        const ls = snap.legal_sell_count || 0;
+        const rbv = snap.real_buy_volume || 0;
+        const rsv = snap.real_sell_volume || 0;
+        const lbv = snap.legal_buy_volume || 0;
+        const lsv = snap.legal_sell_volume || 0;
+        const totalBuyVol = rbv + lbv;
+        const totalSellVol = rsv + lsv;
+
+        if (rb > 0 || rs > 0 || lb > 0 || ls > 0) {
+            const rbPct = totalBuyVol > 0 ? (rbv/totalBuyVol*100).toFixed(1) : '0';
+            const lbPct = totalBuyVol > 0 ? (lbv/totalBuyVol*100).toFixed(1) : '0';
+            const rsPct = totalSellVol > 0 ? (rsv/totalSellVol*100).toFixed(1) : '0';
+            const lsPct = totalSellVol > 0 ? (lsv/totalSellVol*100).toFixed(1) : '0';
+
             document.getElementById('realLegalTable').innerHTML = `
-                <tr class="header-row"><td colspan="4">حقیقی</td></tr>
-                <tr>
-                    <td>خرید</td>
-                    <td>${formatVolume(snap.real_buy_volume)}</td>
-                    <td>${formatMoney(snap.real_buy_value)}</td>
-                    <td>${formatNumber(snap.real_buy_count)}</td>
+                <tr class="row-header">
+                    <td class="label-col">حقیقی (خرید)</td>
+                    <td>${formatNumber(rb)}</td>
+                    <td>${formatVolume(rbv)}</td>
+                    <td class="orange">${rbPct}%</td>
                 </tr>
-                <tr>
-                    <td>فروش</td>
-                    <td>${formatVolume(snap.real_sell_volume)}</td>
-                    <td>${formatMoney(snap.real_sell_value)}</td>
-                    <td>${formatNumber(snap.real_sell_count)}</td>
+                <tr class="row-header">
+                    <td class="label-col">حقوقی (خرید)</td>
+                    <td>${formatNumber(lb)}</td>
+                    <td>${formatVolume(lbv)}</td>
+                    <td class="orange">${lbPct}%</td>
                 </tr>
-                <tr class="header-row"><td colspan="4">حقوقی</td></tr>
-                <tr>
-                    <td>خرید</td>
-                    <td>${formatVolume(snap.legal_buy_volume)}</td>
-                    <td>${formatMoney(snap.legal_buy_value)}</td>
-                    <td>${formatNumber(snap.legal_buy_count)}</td>
+                <tr class="row-header">
+                    <td class="label-col">حقیقی (فروش)</td>
+                    <td>${formatNumber(rs)}</td>
+                    <td>${formatVolume(rsv)}</td>
+                    <td class="orange">${rsPct}%</td>
                 </tr>
-                <tr>
-                    <td>فروش</td>
-                    <td>${formatVolume(snap.legal_sell_volume)}</td>
-                    <td>${formatMoney(snap.legal_sell_value)}</td>
-                    <td>${formatNumber(snap.legal_sell_count)}</td>
+                <tr class="row-header">
+                    <td class="label-col">حقوقی (فروش)</td>
+                    <td>${formatNumber(ls)}</td>
+                    <td>${formatVolume(lsv)}</td>
+                    <td class="orange">${lsPct}%</td>
                 </tr>
             `;
         }
@@ -790,25 +800,16 @@ function updateUI(data) {
         ].filter(r => r.price);
 
         if (buyRows.length > 0 && sellRows.length > 0) {
-            const maxVol = Math.max(...buyRows.map(r=>r.vol), ...sellRows.map(r=>r.vol));
             let html = '';
             for (let i = 0; i < 5; i++) {
                 const b = buyRows[i] || {price:'-', vol:'-', count:'-'};
                 const s = sellRows[i] || {price:'-', vol:'-', count:'-'};
-                const bVolPct = b.vol && maxVol ? (b.vol / maxVol * 100) : 0;
-                const sVolPct = s.vol && maxVol ? (s.vol / maxVol * 100) : 0;
                 html += `<tr>
                     <td>${b.count || '-'}</td>
-                    <td class="vol-bar" style="position:relative;">
-                        <div class="vol-bar-buy" style="width:${bVolPct}%"></div>
-                        <span style="position:relative;">${formatVolume(b.vol)}</span>
-                    </td>
+                    <td>${formatVolume(b.vol)}</td>
                     <td class="price-buy">${b.price || '-'}</td>
                     <td class="price-sell">${s.price || '-'}</td>
-                    <td class="vol-bar" style="position:relative;">
-                        <div class="vol-bar-sell" style="width:${sVolPct}%"></div>
-                        <span style="position:relative;">${formatVolume(s.vol)}</span>
-                    </td>
+                    <td>${formatVolume(s.vol)}</td>
                     <td>${s.count || '-'}</td>
                 </tr>`;
             }
@@ -818,6 +819,10 @@ function updateUI(data) {
         // اطلاعات تکمیلی
         document.getElementById('buyerPower').textContent =
             snap.buyer_power ? snap.buyer_power.toFixed(2) : '-';
+        document.getElementById('perCapitaBuy').textContent =
+            snap.per_capita_buy_real ? formatVolume(snap.per_capita_buy_real) : '-';
+        document.getElementById('perCapitaSell').textContent =
+            snap.per_capita_sell_real ? formatVolume(snap.per_capita_sell_real) : '-';
         const mf = snap.real_money_flow;
         if (mf) {
             const sign = mf >= 0 ? '+' : '';
@@ -827,12 +832,6 @@ function updateUI(data) {
         }
         document.getElementById('completeness').textContent =
             (data.last_snapshot.completeness_pct || 0) + '%';
-
-        // NAV (در صورت وجود)
-        if (snap.nav_value) {
-            document.getElementById('navValue').textContent = formatNumber(snap.nav_value);
-            document.getElementById('navTime').textContent = snap.nav_time || '-';
-        }
     }
 
     // امتیازها
@@ -875,7 +874,7 @@ function updateUI(data) {
         document.getElementById('recentTable').innerHTML = html;
     }
 
-    // به‌روزرسانی نمودار
+    // نمودار
     if (data.recent_snapshots && data.recent_snapshots.length > 0) {
         updateChart(data.recent_snapshots);
     }
@@ -923,21 +922,17 @@ function updateChart(snaps) {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: {
-                        position: 'top',
-                        labels: {font: {size: 11}}
-                    }
+                    legend: {position: 'top', labels: {font: {size: 10}}}
                 },
                 scales: {
-                    y: {ticks: {font: {size: 10}}},
-                    x: {ticks: {font: {size: 9}, maxRotation: 0}}
+                    y: {ticks: {font: {size: 9}}},
+                    x: {ticks: {font: {size: 8}, maxRotation: 0}}
                 }
             }
         });
     }
 }
 
-// به‌روزرسانی خودکار هر ۵ ثانیه
 fetchData();
 setInterval(fetchData, 5000);
 setInterval(() => {
@@ -1081,7 +1076,6 @@ def api_data():
         })
 
     cur = conn.cursor()
-
     cur.execute("SELECT COUNT(*) FROM snapshots")
     total_snapshots = cur.fetchone()[0]
     cur.execute("SELECT COUNT(*) FROM trades")
@@ -1090,7 +1084,6 @@ def api_data():
     cur.execute("SELECT * FROM snapshots ORDER BY timestamp DESC LIMIT 1")
     last_row = cur.fetchone()
     last_snap = dict(last_row) if last_row else None
-
     if last_snap:
         last_snap['completeness_pct'] = compute_completeness(last_snap)
 
@@ -1098,8 +1091,10 @@ def api_data():
         SELECT tehran_time, market_phase, last_price, close_price,
                best_buy_volume, best_sell_volume, buyer_power,
                real_money_flow, data_complete, total_volume, total_value,
-               best_buy_price, best_sell_price, real_buy_count, real_buy_volume,
-               real_sell_count, real_sell_volume, buy_order_count, sell_order_count,
+               total_trade_count, best_buy_price, best_sell_price,
+               real_buy_count, real_buy_volume, real_sell_count, real_sell_volume,
+               legal_buy_count, legal_buy_volume, legal_sell_count, legal_sell_volume,
+               per_capita_buy_real, per_capita_sell_real, buy_order_count, sell_order_count,
                bid_price_1, bid_volume_1, bid_count_1,
                bid_price_2, bid_volume_2, bid_count_2,
                bid_price_3, bid_volume_3, bid_count_3,
@@ -1116,15 +1111,8 @@ def api_data():
     for r in recent:
         r['completeness_pct'] = compute_completeness(r)
 
-    cur.execute("""
-        SELECT trade_time, trade_price, trade_volume, trade_id, aggressor_side
-        FROM trades ORDER BY trade_id_row DESC LIMIT 20
-    """)
-    trades = [dict(r) for r in cur.fetchall()]
-
     sp, acc = compute_scores(last_snap)
     signal = determine_signal(sp, acc)
-
     conn.close()
 
     return jsonify({
@@ -1134,7 +1122,7 @@ def api_data():
         'symbol': last_snap.get('symbol', 'ریتون') if last_snap else 'ریتون',
         'last_snapshot': last_snap,
         'recent_snapshots': recent,
-        'recent_trades': trades,
+        'recent_trades': [],
         'alerts': [],
         'sell_pressure': sp,
         'accumulation': acc,
@@ -1142,26 +1130,14 @@ def api_data():
     })
 
 
-@app.route('/api/snapshots')
-def api_snapshots():
-    conn = get_db_conn()
-    if conn is None:
-        return jsonify({'snapshots': []})
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM snapshots ORDER BY timestamp ASC")
-    rows = [dict(r) for r in cur.fetchall()]
-    conn.close()
-    return jsonify({'snapshots': rows, 'count': len(rows)})
-
-
 def main():
-    parser = argparse.ArgumentParser(description='داشبورد وب TSE Early Warning v2.0')
+    parser = argparse.ArgumentParser(description='TSE Early Warning Dashboard v2.1')
     parser.add_argument('--port', type=int, default=8050, help='پورت سرور')
     parser.add_argument('--host', type=str, default='127.0.0.1', help='میزبان')
     args = parser.parse_args()
 
     print("=" * 60)
-    print("  TSE Early Warning - Dashboard v2.0 (TSETMC Style)")
+    print("  TSE Early Warning - Dashboard v2.1 (TSETMC Style)")
     print("=" * 60)
     print()
     print(f"📊 Database: {DB_PATH}")
