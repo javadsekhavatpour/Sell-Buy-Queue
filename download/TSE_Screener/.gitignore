@@ -1,0 +1,81 @@
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+.env
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Generated outputs - قابل تولید مجدد با python run_demo.py
+# پایگاه داده SQLite (حاوی داده‌های شبیه‌سازی شده)
+data/*.sqlite
+data/*.sqlite-journal
+data/*.sqlite-wal
+data/*.sqlite-shm
+
+# فایل‌های CSV خروجی (تولید مجدد)
+data/snapshots_export_*.csv
+data/trades_export_*.csv
+data/snapshots_live_*.csv
+data/trades_live_*.csv
+
+# نمونه‌های خام JSON (هر بار اجرای live تولید می‌شوند)
+data/raw_snapshots/*.json
+
+# گزارش‌های Excel تولید شده (قابل تولید مجدد)
+reports/*.xlsx
+reports/*.pdf
+
+# ولی پوشه‌های خالی را نگه می‌داریم
+!data/raw_snapshots/.gitkeep
+!data/historical/.gitkeep
+!reports/.gitkeep
+!data/raw_snapshots/README.txt
+!data/historical/README.txt
+!reports/README.txt
+
+# فایل‌های موقت سیستم
+*.tmp
+*.bak
+*.log
+
+# اطلاعات حساس (در صورت وجود)
+.env
+*.key
+*.pem
+config/local_*.json
