@@ -396,16 +396,43 @@ DASHBOARD_HTML = """
         }
 
         function formatMoney(v) {
-            if (!v) return '0';
-            if (Math.abs(v) >= 1e9) return (v/1e9).toFixed(2) + ' میلیارد';
-            if (Math.abs(v) >= 1e6) return (v/1e6).toFixed(1) + ' میلیون';
-            return v.toLocaleString('fa-IR');
+            if (v === null || v === undefined || v === 0) return '<span style="color:#999">—</span>';
+            if (Math.abs(v) >= 1e9) return (v/1e9).toFixed(2) + ' میلیارد تومان';
+            if (Math.abs(v) >= 1e6) return (v/1e6).toFixed(1) + ' میلیون تومان';
+            return v.toLocaleString('fa-IR') + ' تومان';
+        }
+
+        function formatVolume(v) {
+            if (v === null || v === undefined || v === 0) return '<span style="color:#999">—</span>';
+            if (Math.abs(v) >= 1e6) return (v/1e6).toFixed(2) + ' میلیون سهم';
+            if (Math.abs(v) >= 1e3) return (v/1e3).toFixed(1) + ' هزار سهم';
+            return v.toLocaleString('fa-IR') + ' سهم';
+        }
+
+        function formatPrice(v) {
+            if (v === null || v === undefined || v === 0) return '<span style="color:#999">—</span>';
+            return v.toLocaleString('fa-IR') + ' تومان';
+        }
+
+        function formatNumber(v, decimals) {
+            if (v === null || v === undefined || v === 0) return '<span style="color:#999">—</span>';
+            return Number(v).toFixed(decimals || 2);
+        }
+
+        function completenessColor(pct) {
+            if (pct >= 80) return 'color: #28a745; font-weight: bold;';
+            if (pct >= 50) return 'color: #ffc107; font-weight: bold;';
+            return 'color: #dc3545; font-weight: bold;';
         }
 
         function buildSnapshotTable(s) {
+            const moneyFlow = s.real_money_flow;
+            const moneyColor = moneyFlow > 0 ? 'color: #28a745;' :
+                              (moneyFlow < 0 ? 'color: #dc3545;' : 'color: #6c757d;');
+
             return `
                 <div class="data-row">
-                    <span class="data-label">⏰ زمان</span>
+                    <span class="data-label">⏰ زمان نمونه</span>
                     <span class="data-value">${s.tehran_time || '-'}</span>
                 </div>
                 <div class="data-row">
@@ -414,27 +441,59 @@ DASHBOARD_HTML = """
                 </div>
                 <div class="data-row">
                     <span class="data-label">💰 آخرین قیمت</span>
-                    <span class="data-value">${(s.last_price || 0).toLocaleString('fa-IR')} تومان</span>
+                    <span class="data-value">${formatPrice(s.last_price)}</span>
                 </div>
                 <div class="data-row">
                     <span class="data-label">💎 قیمت پایانی</span>
-                    <span class="data-value">${(s.close_price || 0).toLocaleString('fa-IR')} تومان</span>
+                    <span class="data-value">${formatPrice(s.close_price)}</span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">📊 اولین قیمت روز</span>
+                    <span class="data-value">${formatPrice(s.open_price)}</span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">⬆️ بالاترین روز</span>
+                    <span class="data-value">${formatPrice(s.daily_high)}</span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">⬇️ پایین‌ترین روز</span>
+                    <span class="data-value">${formatPrice(s.daily_low)}</span>
                 </div>
                 <div class="data-row">
                     <span class="data-label">📈 حجم کل معاملات</span>
-                    <span class="data-value">${(s.total_volume || 0).toLocaleString('fa-IR')} سهم</span>
+                    <span class="data-value">${formatVolume(s.total_volume)}</span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">💵 ارزش کل معاملات</span>
+                    <span class="data-value">${formatMoney(s.total_value)}</span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">🛒 بهترین خرید (حجم)</span>
+                    <span class="data-value">${formatVolume(s.best_buy_volume)} <span style="color:#6c757d">@ ${formatPrice(s.best_buy_price)}</span></span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">🏷️ بهترین فروش (حجم)</span>
+                    <span class="data-value">${formatVolume(s.best_sell_volume)} <span style="color:#6c757d">@ ${formatPrice(s.best_sell_price)}</span></span>
                 </div>
                 <div class="data-row">
                     <span class="data-label">💪 قدرت خریدار</span>
-                    <span class="data-value">${(s.buyer_power || 0).toFixed(2)}</span>
+                    <span class="data-value">${formatNumber(s.buyer_power, 2)}</span>
                 </div>
                 <div class="data-row">
                     <span class="data-label">💵 ورود/خروج پول حقیقی</span>
-                    <span class="data-value">${formatMoney(s.real_money_flow)}</span>
+                    <span class="data-value" style="${moneyColor}">${formatMoney(s.real_money_flow)}</span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">👥 خریداران حقیقی</span>
+                    <span class="data-value">${(s.real_buy_count || 0).toLocaleString('fa-IR')}</span>
+                </div>
+                <div class="data-row">
+                    <span class="data-label">👥 فروشندگان حقیقی</span>
+                    <span class="data-value">${(s.real_sell_count || 0).toLocaleString('fa-IR')}</span>
                 </div>
                 <div class="data-row">
                     <span class="data-label">✓ کمال داده</span>
-                    <span class="data-value">${s.completeness_pct || 0}%</span>
+                    <span class="data-value" style="${completenessColor(s.completeness_pct)}">${s.completeness_pct || 0}٪</span>
                 </div>
             `;
         }
@@ -564,6 +623,53 @@ def get_db_conn():
     return conn
 
 
+def compute_completeness(snap_dict):
+    """
+    محاسبه درصد کمال داده یک نمونه.
+    بر اساس فیلدهای حیاتی (CRITICAL) و اختیاری (OPTIONAL).
+    """
+    if not snap_dict:
+        return 0
+
+    # فیلدهای حیاتی (هر کدام ۸ امتیاز = ۸۰٪ از ۱۰۰٪)
+    critical_fields = [
+        'last_price', 'close_price',
+        'best_buy_price', 'best_buy_volume',
+        'best_sell_price', 'best_sell_volume',
+        'total_volume', 'total_value',
+    ]
+    # فیلدهای اختیاری (هر کدام ۲ امتیاز = ۲۰٪ از ۱۰۰٪)
+    optional_fields = [
+        'real_buy_count', 'real_buy_volume',
+        'real_sell_count', 'real_sell_volume',
+        'legal_buy_count', 'legal_sell_count',
+        'buyer_power', 'real_money_flow',
+        'buy_order_count', 'sell_order_count',
+    ]
+
+    # در پیش‌گشایش، حجم/ارزش معاملات هنوز صفر است -> نادیده بگیر
+    is_pre_open = snap_dict.get('market_phase') == 'pre_open'
+
+    critical_filled = 0
+    for f in critical_fields:
+        if is_pre_open and f in ('total_volume', 'total_value'):
+            critical_filled += 1  # در پیش‌گشایش این فیلدها صفرند ولی مشکلی نیست
+            continue
+        v = snap_dict.get(f)
+        if v is not None and v != 0:
+            critical_filled += 1
+
+    optional_filled = 0
+    for f in optional_fields:
+        v = snap_dict.get(f)
+        if v is not None and v != 0:
+            optional_filled += 1
+
+    # درصد: ۸۰٪ حیاتی + ۲۰٪ اختیاری
+    pct = 80 * (critical_filled / len(critical_fields)) + 20 * (optional_filled / len(optional_fields))
+    return int(min(100, max(0, pct)))
+
+
 def compute_scores(snap_dict):
     """محاسبه ساده امتیازها برای نمایش (بدون اجرای کامل موتورها)."""
     if not snap_dict:
@@ -684,23 +790,23 @@ def api_data():
     last_row = cur.fetchone()
     last_snap = dict(last_row) if last_row else None
 
-    # محاسبه کمال داده
+    # محاسبه کمال داده با تابع صحیح
     if last_snap:
-        total_fields = 20  # تخمینی
-        filled = sum(1 for v in last_snap.values() if v is not None and v != 0)
-        last_snap['completeness_pct'] = int(100 * filled / total_fields)
+        last_snap['completeness_pct'] = compute_completeness(last_snap)
 
     # نمونه‌های اخیر (۱۵ نمونه)
     cur.execute("""
         SELECT tehran_time, market_phase, last_price, close_price,
                best_buy_volume, best_sell_volume, buyer_power,
-               real_money_flow, data_complete
+               real_money_flow, data_complete, total_volume, total_value,
+               best_buy_price, best_sell_price, real_buy_count, real_buy_volume,
+               real_sell_count, real_sell_volume, buy_order_count, sell_order_count
         FROM snapshots ORDER BY timestamp DESC LIMIT 15
     """)
     recent = [dict(r) for r in cur.fetchall()]
     # محاسبه کمال برای هر نمونه
     for r in recent:
-        r['completeness_pct'] = 14 if not r.get('data_complete') else 100
+        r['completeness_pct'] = compute_completeness(r)
 
     # معاملات اخیر
     cur.execute("""
