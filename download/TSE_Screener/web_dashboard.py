@@ -451,7 +451,7 @@ DASHBOARD_HTML = """
 
     <!-- نوار عنوان مشکی -->
     <div class="header-bar">
-        <div class="symbol-name">صندوق سرمایه‌گذاری کالای پاسارگاد (ریتون)</div>
+        <div class="symbol-name">صندوق سرمایه‌گذاری کالای پاسارگاد (ریتون) <span style="background:#dc2626;color:white;padding:2px 8px;border-radius:3px;font-size:10px;margin-right:8px;">v2.0-TSETMC</span></div>
         <div>
             <span>زمان: </span>
             <span class="clock" id="clock">--:--:--</span>
