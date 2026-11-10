@@ -67,8 +67,13 @@ def main():
     collector = MarketDataCollector(config)
 
     if args.debug:
-        collector.enable_debug(ROOT / "data" / "raw_responses")
-        log("Debug mode: raw responses saved to data/raw_responses/")
+        # بررسی اینکه آیا enable_debug در این نسخه وجود دارد
+        if hasattr(collector, 'enable_debug'):
+            collector.enable_debug(ROOT / "data" / "raw_responses")
+            log("Debug mode: raw responses saved to data/raw_responses/")
+        else:
+            log("Note: enable_debug not available in this version of data_collector.py")
+            log("       To get full debug, please update data_collector.py from GitHub")
         log()
 
     # مرحله ۱: دریافت داده روز جاری
