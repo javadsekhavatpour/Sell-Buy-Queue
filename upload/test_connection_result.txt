@@ -1,0 +1,61 @@
+======================================================================
+  TSETMC Connection Test
+======================================================================
+
+Symbol:     دابور
+Ins Code:   4674107287748763521
+Time:       2026-11-10 12:15:35
+
+──────────────────────────────────────────────────────────────────────
+1) Fetching intraday data (instinfo)
+──────────────────────────────────────────────────────────────────────
+SUCCESS: Response received
+
+Parsed values:
+  last_price:      0
+  close_price:     0
+  yesterday_price: 0
+  daily_high:      0
+  daily_low:       0
+  trade_volume:    0
+  trade_value:     0
+  trade_count:     0
+
+  buy_rows count:  0
+  sell_rows count: 0
+
+──────────────────────────────────────────────────────────────────────
+2) Fetching client type data (real/legal)
+──────────────────────────────────────────────────────────────────────
+SUCCESS
+  real_buy_count:   0
+  real_sell_count:  0
+  real_buy_volume:  0
+  real_sell_volume: 0
+  legal_buy_count:  0
+  legal_sell_count: 0
+
+──────────────────────────────────────────────────────────────────────
+3) Fetching recent trades
+──────────────────────────────────────────────────────────────────────
+No trades received
+
+──────────────────────────────────────────────────────────────────────
+4) Building full MarketSnapshot
+──────────────────────────────────────────────────────────────────────
+Snapshot built
+  data_status:    ok
+  market_phase:   continuous
+  data_complete:  False
+  missing_fields: ['last_price', 'close_price', 'buy_rows', 'sell_rows', 'clienttype']
+  last_price:     0
+  close_price:    0
+  buyer_power:    0.00
+  real_money_flow: 0
+
+======================================================================
+RESULT: Connection works but no price data received
+  Check if market is open (Sat-Wed, 09:00-12:30 Tehran time)
+  Or run with --debug and send me data/raw_responses/ files
+======================================================================
+
