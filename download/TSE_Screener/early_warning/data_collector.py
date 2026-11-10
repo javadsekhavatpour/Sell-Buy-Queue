@@ -473,9 +473,15 @@ class MarketDataCollector:
         now = datetime.now()
         h, m = now.hour, now.minute
         hm = h * 60 + m
+        # فاز پیش‌گشایش: 08:45 تا 09:00
         if 8 * 60 + 45 <= hm < 9 * 60:
             return MarketPhase.PRE_OPEN.value
+        # فاز پیوسته - بازار اولیه: 09:00 تا 12:30 (بورس اوراق بهادار)
         elif 9 * 60 <= hm < 12 * 60 + 30:
+            return MarketPhase.CONTINUOUS.value
+        # فاز پیوسته - بازار ثانویه: 12:30 تا 18:00
+        # (شامل صندوق‌های کالایی مثل ریتون که تا 18:00 باز هستند)
+        elif 12 * 60 + 30 <= hm < 18 * 60:
             return MarketPhase.CONTINUOUS.value
         else:
             return MarketPhase.CLOSED.value
