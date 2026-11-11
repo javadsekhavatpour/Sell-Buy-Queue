@@ -45,8 +45,15 @@ from early_warning import (
 
 def load_config() -> dict:
     cfg_path = ROOT / "config" / "warning_thresholds.json"
+    print(f"📂 فایل پیکربندی: {cfg_path}")
+    print(f"   وجود دارد: {cfg_path.exists()}")
+    if not cfg_path.exists():
+        print(f"❌ فایل پیکربندی پیدا نشد!")
+        sys.exit(1)
     with open(cfg_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        cfg = json.load(f)
+    print(f"   نماد در پیکربندی: {cfg['test_symbol']['name']} (کد: {cfg['test_symbol']['ins_code']})")
+    return cfg
 
 
 def parse_args():
