@@ -352,73 +352,84 @@ class MarketDataCollector:
         """
         دریافت اطلاعات حقیقی/حقوقی از API جدید.
 
-        این متد با چندین نام فیلد مختلف کار می‌کند چون APIهای TSETMC
-        قراردادهای نام‌گذاری مختلفی دارند.
+        نام فیلدهای صحیح (مشاهده شده در پاسخ):
+          buy_I_Volume  = حجم خرید حقیقی (Individual)
+          buy_N_Volume  = حجم خرید حقوقی (Non-individual)
+          buy_CountI    = تعداد خریداران حقیقی
+          buy_CountN    = تعداد خریداران حقوقی
+          sell_I_Volume = حجم فروش حقیقی
+          sell_N_Volume = حجم فروش حقوقی
+          sell_CountI   = تعداد فروشندگان حقیقی
+          sell_CountN   = تعداد فروشندگان حقوقی
 
-        همچنین اگر پاسخ خالی بود یا هیچ فیلد معتبری نداشت،
-        None برمی‌گرداند تا در نمونه ذخیره شود (نه صفر).
+        اگر نماد در GetClientType خالی بود، از GetClientTypeAll پیدا می‌شود.
         """
         # تلاش با چندین پارامتر مختلف
-        for params in ["/1/0", "/0/0", "/2/0", ""]:
+        ct_data = None
+        for params in ["/1/0", "/0/0", "/2/0"]:
             data = self._api_get(f"ClientType/GetClientType/{ins_code}{params}")
             if data and isinstance(data, dict):
-                break
-        else:
+                ct_data = data.get("clientType") or data.get("ClientType")
+                if isinstance(ct_data, dict):
+                    break
+
+        # اگر ct_data پیدا شد، بررسی کن آیا داده واقعی دارد (نه همه صفر)
+        has_data = False
+        if isinstance(ct_data, dict):
+            has_data = any([
+                ct_data.get("buy_I_Volume", 0) > 0,
+                ct_data.get("buy_N_Volume", 0) > 0,
+                ct_data.get("sell_I_Volume", 0) > 0,
+                ct_data.get("sell_N_Volume", 0) > 0,
+                ct_data.get("buy_CountI", 0) > 0,
+                ct_data.get("buy_CountN", 0) > 0,
+                ct_data.get("sell_CountI", 0) > 0,
+                ct_data.get("sell_CountN", 0) > 0,
+            ])
+
+        # اگر داده‌ای نبود، از GetClientTypeAll استفاده کن
+        if not has_data:
+            if self.debug_mode:
+                print(f"  [!] GetClientType خالی، جستجو در GetClientTypeAll...")
+            ct_data_all = self._api_get("ClientType/GetClientTypeAll")
+            if ct_data_all and isinstance(ct_data_all, dict):
+                all_list = ct_data_all.get("clientTypeAllDto", [])
+                for item in all_list:
+                    if str(item.get("insCode", "")) == str(ins_code):
+                        ct_data = item
+                        has_data = True
+                        if self.debug_mode:
+                            print(f"  ✓ نماد در GetClientTypeAll پیدا شد")
+                        break
+
+        if not isinstance(ct_data, dict):
             return None
 
-        # ساختار ممکن است dict یا list باشد
-        ct_data = data.get("clientType") or data.get("ClientType") or data
-        if isinstance(ct_data, list) and len(ct_data) > 0:
-            ct_data = ct_data[-1]  # آخرین ردیف
-        elif not isinstance(ct_data, dict):
-            return None
-
-        # تابع کمکی برای گرفتن مقدار از چندین نام فیلد ممکن
-        def get_field(ct, *possible_names):
-            for name in possible_names:
-                if name in ct and ct[name] is not None:
+        # استخراج با نام فیلدهای صحیح
+        def get_int(ct, *names):
+            for n in names:
+                if n in ct and ct[n] is not None:
                     try:
-                        return int(float(ct[name]))
+                        return int(float(ct[n]))
                     except (ValueError, TypeError):
                         continue
             return 0
 
-        # تلاش با چندین نام فیلد مختلف
         result = {
-            "real_buy_count":   get_field(ct_data,
-                "nIndividualBuy", "nIndBuyCount", "buyCountInd",
-                "Buy_N_Individual", "buyCountReal", "real_buy_count"),
-            "real_sell_count":  get_field(ct_data,
-                "nIndividualSell", "nIndSellCount", "sellCountInd",
-                "Sell_N_Individual", "sellCountReal", "real_sell_count"),
-            "real_buy_volume":  get_field(ct_data,
-                "nVolIndividualBuy", "nIndBuyVol", "buyVolInd",
-                "Buy_Vol_Individual", "buyVolReal", "real_buy_volume"),
-            "real_sell_volume": get_field(ct_data,
-                "nVolIndividualSell", "nIndSellVol", "sellVolInd",
-                "Sell_Vol_Individual", "sellVolReal", "real_sell_volume"),
-            "legal_buy_count":  get_field(ct_data,
-                "nCorporateBuy", "nCorpBuyCount", "buyCountCorp",
-                "Buy_N_Corporate", "buyCountLegal", "legal_buy_count"),
-            "legal_sell_count": get_field(ct_data,
-                "nCorporateSell", "nCorpSellCount", "sellCountCorp",
-                "Sell_N_Corporate", "sellCountLegal", "legal_sell_count"),
-            "legal_buy_volume": get_field(ct_data,
-                "nVolCorporateBuy", "nCorpBuyVol", "buyVolCorp",
-                "Buy_Vol_Corporate", "buyVolLegal", "legal_buy_volume"),
-            "legal_sell_volume": get_field(ct_data,
-                "nVolCorporateSell", "nCorpSellVol", "sellVolCorp",
-                "Sell_Vol_Corporate", "sellVolLegal", "legal_sell_volume"),
+            # حقیقی = Individual (I)
+            "real_buy_count":   get_int(ct_data, "buy_CountI"),
+            "real_sell_count":  get_int(ct_data, "sell_CountI"),
+            "real_buy_volume":  get_int(ct_data, "buy_I_Volume"),
+            "real_sell_volume": get_int(ct_data, "sell_I_Volume"),
+            # حقوقی = Non-individual (N)
+            "legal_buy_count":  get_int(ct_data, "buy_CountN"),
+            "legal_sell_count": get_int(ct_data, "sell_CountN"),
+            "legal_buy_volume": get_int(ct_data, "buy_N_Volume"),
+            "legal_sell_volume": get_int(ct_data, "sell_N_Volume"),
         }
 
-        # اگر همه صفر بودند، احتمالا فیلدها پیدا نشده‌اند
-        # در این حالت None برمی‌گردانیم تا در نمونه ذخیره شود ولی
-        # فیلدهای clienttype به‌صورت NULL ذخیره شوند (نه صفر)
-        if all(v == 0 for v in result.values()):
-            if self.debug_mode:
-                print(f"  [!] clienttype: all fields are 0 (fields may be wrong)")
-                print(f"      Available keys: {list(ct_data.keys()) if isinstance(ct_data, dict) else 'list'}")
-            return None
+        # محاسبه ارزش‌ها (حجم × قیمت پایانی)
+        # این کار در _compute_derived انجام می‌شود
 
         return result
 
