@@ -470,6 +470,30 @@ DASHBOARD_HTML = """
         </div>
     </div>
 
+    <!-- نوار انتخاب نماد -->
+    <div style="background:white;padding:10px 12px;border-radius:4px;margin-bottom:6px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <div style="font-weight:bold;color:#1F4E78;font-size:13px;">
+                📊 نماد فعال:
+            </div>
+            <div>
+                <input type="text" id="symbolInput" placeholder="نام نماد (مثلا ریتون، فملی، دابور)"
+                       style="padding:6px 10px;border:1px solid #cbd5e1;border-radius:4px;width:250px;font-size:12px;font-family:inherit;"
+                       value="ریتون">
+            </div>
+            <button onclick="searchAndSelectSymbol()"
+                    style="padding:6px 14px;background:#2c5282;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-family:inherit;">
+                🔍 جستجو و انتخاب
+            </button>
+            <button onclick="useCurrentSymbol()"
+                    style="padding:6px 14px;background:#16a34a;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-family:inherit;">
+                ✓ استفاده از همین نماد
+            </button>
+            <div id="symbolSearchResult" style="flex:1;font-size:11px;color:#64748b;"></div>
+        </div>
+        <div id="symbolResults" style="margin-top:8px;display:none;background:#f8fafc;padding:8px;border-radius:4px;border:1px solid #e2e8f0;"></div>
+    </div>
+
     <!-- ردیف اول: حقیقی/حقوقی + قیمت لحظه‌ای + تغییر مالکیت -->
     <div class="top-row">
 
@@ -698,6 +722,119 @@ async function fetchData() {
         updateUI(data);
     } catch (err) {
         console.error('خطا در دریافت داده:', err);
+    }
+}
+
+// جستجوی نماد در TSETMC
+async function searchAndSelectSymbol() {
+    const query = document.getElementById('symbolInput').value.trim();
+    if (!query) {
+        alert('لطفاً نام نماد را وارد کنید');
+        return;
+    }
+
+    document.getElementById('symbolSearchResult').innerHTML =
+        '<span style="color:#3b82f6;">🔍 در حال جستجو...</span>';
+
+    try {
+        const response = await fetch('/api/search_symbol/' + encodeURIComponent(query));
+        const data = await response.json();
+
+        if (data.error) {
+            document.getElementById('symbolSearchResult').innerHTML =
+                '<span style="color:#dc2626;">❌ خطا: ' + data.error + '</span>';
+            return;
+        }
+
+        if (!data.results || data.results.length === 0) {
+            document.getElementById('symbolSearchResult').innerHTML =
+                '<span style="color:#dc2626;">❌ نمادی پیدا نشد</span>';
+            document.getElementById('symbolResults').style.display = 'none';
+            return;
+        }
+
+        document.getElementById('symbolSearchResult').innerHTML =
+            '<span style="color:#16a34a;">✓ ' + data.count + ' نتیجه پیدا شد (پایین را ببینید)</span>';
+
+        // نمایش نتایج
+        let html = '<div style="font-weight:bold;margin-bottom:6px;color:#1F4E78;">نتیجه جستجو - برای انتخاب روی نماد کلیک کنید:</div>';
+        for (let i = 0; i < data.results.length; i++) {
+            const r = data.results[i];
+            html += '<div style="padding:6px;border:1px solid #e2e8f0;border-radius:4px;margin:4px 0;cursor:pointer;background:white;" '
+                  + 'onclick="selectSymbol(\'' + (r.name_fa || query) + '\', \'' + r.code + '\')" '
+                  + 'onmouseover="this.style.background=\'#f1f5f9\'" '
+                  + 'onmouseout="this.style.background=\'white\'">'
+                  + '<strong>' + (i + 1) + '. ' + (r.name_fa || query) + '</strong>'
+                  + ' <span style="color:#64748b;font-size:10px;">(' + (r.name_en || '') + ')</span>'
+                  + '<br><span style="font-size:10px;color:#64748b;">کد: ' + r.code + ' | ISIN: ' + (r.isin || '-') + '</span>'
+                  + '</div>';
+        }
+        document.getElementById('symbolResults').innerHTML = html;
+        document.getElementById('symbolResults').style.display = 'block';
+
+    } catch (err) {
+        document.getElementById('symbolSearchResult').innerHTML =
+            '<span style="color:#dc2626;">❌ خطا در ارتباط با سرور: ' + err.message + '</span>';
+    }
+}
+
+// انتخاب نماد از نتایج جستجو
+async function selectSymbol(symbol, insCode) {
+    if (!confirm('نماد "' + symbol + '" (کد: ' + insCode + ') انتخاب شود؟\n\nنکته: run_live.py باید دوباره اجرا شود تا داده‌های نماد جدید جمع شود.')) {
+        return;
+    }
+
+    document.getElementById('symbolSearchResult').innerHTML =
+        '<span style="color:#3b82f6;">💾 در حال ذخیره...</span>';
+
+    try {
+        const response = await fetch('/api/set_symbol', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({symbol: symbol, ins_code: insCode})
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            document.getElementById('symbolSearchResult').innerHTML =
+                '<span style="color:#16a34a;font-weight:bold;">✓ ' + data.message + '</span>';
+            document.getElementById('symbolResults').style.display = 'none';
+            document.getElementById('symbolInput').value = symbol;
+
+            // به‌روزرسانی عنوان صفحه
+            alert('✓ نماد "' + symbol + '" ذخیره شد!\n\nبرای جمع‌آوری داده:\n1) در پنجره CMD که run_live.py اجراست، Ctrl+C بزنید\n2) دوباره اجرا کنید: python run_live.py --no-prompt');
+
+            // refresh داده‌ها
+            setTimeout(fetchData, 1000);
+        } else {
+            document.getElementById('symbolSearchResult').innerHTML =
+                '<span style="color:#dc2626;">❌ ' + (data.error || 'خطا در ذخیره') + '</span>';
+        }
+    } catch (err) {
+        document.getElementById('symbolSearchResult').innerHTML =
+            '<span style="color:#dc2626;">❌ خطا: ' + err.message + '</span>';
+    }
+}
+
+// استفاده از نماد فعلی (بدون تغییر)
+function useCurrentSymbol() {
+    const symbol = document.getElementById('symbolInput').value.trim();
+    document.getElementById('symbolSearchResult').innerHTML =
+        '<span style="color:#16a34a;">✓ نماد فعلی: ' + symbol + '</span>';
+    document.getElementById('symbolResults').style.display = 'none';
+    fetchData();
+}
+
+// بارگذاری نماد فعلی از پیکربندی هنگام شروع
+async function loadCurrentSymbol() {
+    try {
+        const response = await fetch('/api/current_symbol');
+        const data = await response.json();
+        if (data.symbol) {
+            document.getElementById('symbolInput').value = data.symbol;
+        }
+    } catch (err) {
+        console.error('خطا در بارگذاری نماد:', err);
     }
 }
 
@@ -965,11 +1102,20 @@ function updateChart(snaps) {
 }
 
 // به‌روزرسانی خودکار هر ۵ ثانیه
+loadCurrentSymbol();   // ابتدا نماد فعلی را بارگذاری کن
 fetchData();
 setInterval(fetchData, 5000);
 setInterval(() => {
     document.getElementById('clock').textContent = new Date().toLocaleTimeString('fa-IR');
 }, 1000);
+
+// Enter key در فیلد جستجو
+document.getElementById('symbolInput').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        searchAndSelectSymbol();
+    }
+});
 </script>
 </body>
 </html>
@@ -1179,6 +1325,65 @@ def api_snapshots():
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
     return jsonify({'snapshots': rows, 'count': len(rows)})
+
+
+@app.route('/api/search_symbol/<query>')
+def api_search_symbol(query):
+    """جستجوی نماد در TSETMC."""
+    try:
+        from early_warning import MarketDataCollector
+        config = json.loads((ROOT / "config" / "warning_thresholds.json").read_text(encoding='utf-8'))
+        collector = MarketDataCollector(config)
+        results = collector.search_symbol(query)
+        return jsonify({'results': results, 'count': len(results), 'query': query})
+    except Exception as e:
+        return jsonify({'error': str(e), 'results': []})
+
+
+@app.route('/api/set_symbol', methods=['POST'])
+def api_set_symbol():
+    """ذخیره نماد انتخاب‌شده در پیکربندی."""
+    try:
+        data = request.get_json()
+        symbol = data.get('symbol')
+        ins_code = data.get('ins_code')
+
+        if not symbol or not ins_code:
+            return jsonify({'error': 'نام نماد و کد لازم است'}), 400
+
+        # بارگذاری پیکربندی فعلی
+        cfg_path = ROOT / "config" / "warning_thresholds.json"
+        config = json.loads(cfg_path.read_text(encoding='utf-8'))
+
+        # به‌روزرسانی
+        config["test_symbol"]["name"] = symbol
+        config["test_symbol"]["ticker"] = symbol
+        config["test_symbol"]["ins_code"] = str(ins_code)
+
+        # ذخیره
+        cfg_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding='utf-8')
+
+        return jsonify({
+            'success': True,
+            'symbol': symbol,
+            'ins_code': ins_code,
+            'message': f'نماد {symbol} در پیکربندی ذخیره شد'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/current_symbol')
+def api_current_symbol():
+    """دریافت نماد فعلی از پیکربندی."""
+    try:
+        config = json.loads((ROOT / "config" / "warning_thresholds.json").read_text(encoding='utf-8'))
+        return jsonify({
+            'symbol': config["test_symbol"]["name"],
+            'ins_code': config["test_symbol"]["ins_code"]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
 
 
 def main():
