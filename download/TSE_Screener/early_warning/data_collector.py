@@ -258,49 +258,54 @@ class MarketDataCollector:
         if not isinstance(info_data, dict):
             return None
 
+        # -----------------------------------------------------------------
+        # نام کلیدهای واقعی API (تایید شده با پاسخ واقعی cdn.tsetmc.com):
+        #   priceFirst / priceYesterday / priceMax / priceMin
+        #   qTotTran5J (حجم کل) / qTotCap (ارزش کل) / zTotTran (تعداد)
+        #   instrumentState.cEtavalTitle (وضعیت نماد)
+        # نام‌های قدیمی pPriceFirst و ... در این API وجود ندارند و فقط به‌عنوان
+        # fallback نگه‌داری شده‌اند. qBaseVol و pMinAllowed/pMaxAllowed هم در
+        # این API نیستند (حجم مبنا از پیکربندی، بازه مجاز از دیروز محاسبه می‌شود).
+        # -----------------------------------------------------------------
+        cfg_sym = self.cfg.get("test_symbol", {}) if isinstance(self.cfg, dict) else {}
+        state = info_data.get("instrumentState") or {}
         info = {
             # آخرین قیمت (آخرین معامله)
-            "last_price": float(info_data.get("pDrCotVal") or info_data.get("lastPrice") or 0),
+            "last_price": float(info_data.get("pDrCotVal") or 0),
             # قیمت پایانی (میانگین وزنی)
-            "close_price": float(info_data.get("pClosing") or info_data.get("closingPrice") or 0),
+            "close_price": float(info_data.get("pClosing") or 0),
             # اولین قیمت روز (open price)
-            "open_price": float(info_data.get("pPriceFirst") or info_data.get("firstPrice") or 0),
+            "open_price": float(info_data.get("priceFirst") or info_data.get("pPriceFirst") or 0),
             # قیمت دیروز
-            "yesterday_price": float(info_data.get("pPriceYesterday") or info_data.get("priceYesterday") or info_data.get("yesterday") or 0),
-            # بیشترین قیمت روز (در بازه روز)
-            "daily_high": float(info_data.get("pPriceMax") or info_data.get("priceHigh") or 0),
-            # کمترین قیمت روز (در بازه روز)
-            "daily_low": float(info_data.get("pPriceMin") or info_data.get("priceLow") or 0),
-            # حجم معاملات (تعداد سهم معامله شده) - qTotTran نه zTotTran
-            "trade_volume": int(float(info_data.get("qTotTran") or info_data.get("totalVolume") or 0)),
-            # ارزش معاملات (تومان) - qTotTranValJAdj
-            "trade_value": float(info_data.get("qTotTranValJAdj") or info_data.get("totalValue") or 0),
-            # تعداد معاملات (تعداد دفعات معامله) - zTotTran
-            "trade_count": int(float(info_data.get("zTotTran") or info_data.get("tradeCount") or 0)),
-            # حجم مبنا
-            "base_volume": int(float(info_data.get("qBaseVol") or 100000)),
+            "yesterday_price": float(info_data.get("priceYesterday") or info_data.get("pPriceYesterday") or 0),
+            # بیشترین قیمت روز
+            "daily_high": float(info_data.get("priceMax") or info_data.get("pPriceMax") or 0),
+            # کمترین قیمت روز
+            "daily_low": float(info_data.get("priceMin") or info_data.get("pPriceMin") or 0),
+            # حجم کل معاملات روز (سهم) - نام واقعی: qTotTran5J
+            "trade_volume": int(float(info_data.get("qTotTran5J") or info_data.get("qTotTran") or 0)),
+            # ارزش کل معاملات روز (ریال) - نام واقعی: qTotCap
+            "trade_value": float(info_data.get("qTotCap") or info_data.get("qTotTranValJAdj") or 0),
+            # تعداد معاملات روز - zTotTran
+            "trade_count": int(float(info_data.get("zTotTran") or 0)),
+            # حجم مبنا - در این API موجود نیست؛ از پیکربندی یا ۱۰۰٬۰۰۰
+            "base_volume": int(float(info_data.get("qBaseVol") or cfg_sym.get("base_volume") or 100000)),
+            # وضعیت نماد از instrumentState (مثلا «مجاز»)
+            "symbol_status": str(state.get("cEtavalTitle") or "").strip(),
             "buy_rows": [],
             "sell_rows": [],
             "min_allowed": 0,
             "max_allowed": 0,
         }
 
-        # کف و سقف مجاز روز - اول از API
-        # در TSETMC فیلدهای pMinAllowed و pMaxAllowed وجود دارند
-        # اگر نبودند، از yesterday با ۱۰٪ محاسبه می‌کنیم (برای صندوق‌های کالایی مثل ریتون)
-        # برای سهام عادی ۵٪ است
-        api_min = info_data.get("pMinAllowed") or info_data.get("minAllowed") or 0
-        api_max = info_data.get("pMaxAllowed") or info_data.get("maxAllowed") or 0
-        if api_min and float(api_min) > 0:
-            info["min_allowed"] = float(api_min)
-        elif info["yesterday_price"] > 0:
-            # محاسبه با ۱۰٪ (مطمئن‌ترین برای صندوق‌های کالایی)
-            info["min_allowed"] = round(info["yesterday_price"] * 0.90, 0)
-
-        if api_max and float(api_max) > 0:
-            info["max_allowed"] = float(api_max)
-        elif info["yesterday_price"] > 0:
-            info["max_allowed"] = round(info["yesterday_price"] * 1.10, 0)
+        # کف و سقف مجاز روز - این فیلدها در API جدید نیستند؛ از قیمت دیروز
+        # با درصد محدودیت پیکربندی (limit_percent، پیش‌فرض ۱۰٪) محاسبه می‌شود
+        limit_pct = float(cfg_sym.get("limit_percent", 10))
+        low_factor = 1 - limit_pct / 100.0
+        high_factor = 1 + limit_pct / 100.0
+        if info["yesterday_price"] > 0:
+            info["min_allowed"] = round(info["yesterday_price"] * low_factor, 0)
+            info["max_allowed"] = round(info["yesterday_price"] * high_factor, 0)
 
         # دریافت BestLimits (۵ ردیف سفارش)
         limits_data = self._api_get(f"BestLimits/{ins_code}")
@@ -439,7 +444,7 @@ class MarketDataCollector:
 
         نکته: API جدید TSETMC (cdn.tsetmc.com) endpoint جداگانه برای
         تاریخچه معاملات اخیر ندارد. داده‌های معاملات در GetClosingPriceInfo
-        به‌صورت تجمعی موجود است (zTotTran تعداد، qTotTranValJAdj ارزش).
+        به‌صورت تجمعی موجود است (zTotTran تعداد، qTotTran5J حجم، qTotCap ارزش).
         برای دریافت لیست معاملات لحظه‌ای، از MarketWatch استفاده می‌کنیم.
 
         این متد لیست خالی برمی‌گرداند تا با موتورهای تحلیلی سازگار باشد.
@@ -500,13 +505,18 @@ class MarketDataCollector:
 
         # ساخت نمونه
         now = datetime.now()
-        yesterday_price = inst.get("yesterday_price") or self.cfg.get("test_symbol", {}).get("base_price", 13000)
+        cfg_sym = self.cfg.get("test_symbol", {}) if isinstance(self.cfg, dict) else {}
+        limit_pct = float(cfg_sym.get("limit_percent", 10))
+        low_factor = 1 - limit_pct / 100.0
+        high_factor = 1 + limit_pct / 100.0
+        yesterday_price = inst.get("yesterday_price") or cfg_sym.get("base_price", 13000)
         snap = MarketSnapshot(
             timestamp=now.isoformat(),
             tehran_time=now.strftime("%H:%M:%S"),
             symbol=symbol,
             ins_code=ins_code,
             market_phase=self._detect_market_phase(),
+            symbol_status=inst.get("symbol_status") or "allowed",
             source_update_time=now.isoformat(),
             data_status="ok" if inst.get("last_price", 0) > 0 else "partial",
             last_price=inst.get("last_price", 0),
@@ -515,8 +525,8 @@ class MarketDataCollector:
             yesterday_price=yesterday_price,
             daily_high=inst.get("daily_high", 0),
             daily_low=inst.get("daily_low", 0),
-            min_allowed_price=inst.get("min_allowed", 0) or (round(yesterday_price * 0.90, 0) if yesterday_price > 0 else 0),
-            max_allowed_price=inst.get("max_allowed", 0) or (round(yesterday_price * 1.10, 0) if yesterday_price > 0 else 0),
+            min_allowed_price=inst.get("min_allowed", 0) or (round(yesterday_price * low_factor, 0) if yesterday_price > 0 else 0),
+            max_allowed_price=inst.get("max_allowed", 0) or (round(yesterday_price * high_factor, 0) if yesterday_price > 0 else 0),
             base_volume=inst.get("base_volume", 100000),
             best_buy_price=inst["buy_rows"][0]["price"] if inst.get("buy_rows") else 0,
             best_buy_volume=inst["buy_rows"][0]["volume"] if inst.get("buy_rows") else 0,
@@ -589,6 +599,10 @@ class MarketDataCollector:
         missing = []
         if s.last_price <= 0: missing.append("last_price")
         if s.close_price <= 0: missing.append("close_price")
+        if s.daily_high <= 0: missing.append("daily_high")
+        if s.daily_low <= 0: missing.append("daily_low")
+        if s.total_volume <= 0: missing.append("total_volume")
+        if s.total_value <= 0: missing.append("total_value")
         if not s.buy_rows: missing.append("buy_rows")
         if not s.sell_rows: missing.append("sell_rows")
         if s.real_buy_count == 0 and s.real_sell_count == 0: missing.append("clienttype")

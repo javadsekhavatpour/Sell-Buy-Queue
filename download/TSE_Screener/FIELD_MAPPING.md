@@ -2,6 +2,8 @@
 
 > این سند مرجع کامل نگاشت فیلدهای دریافتی از سایت TSETMC به فیلدهای داخلی پروژه است.
 > محل پیاده‌سازی: `early_warning/data_collector.py` (نسخه ۳ — APIهای جدید `cdn.tsetmc.com`)
+>
+> ⚠ **اصلاح مهم (۲۰۲۶-۱۱-۱۱):** نام چند کلید قبلی اشتباه بود و باعث می‌شد بالاترین/پایین‌ترین قیمت روز، حجم کل و ارزش کل معاملات همیشه صفر ذخیره شوند. نام‌های واقعی با بررسی پاسخ واقعی API (و کتابخانه مرجع `tsetmc`) تأیید شد: `priceMax` / `priceMin` / `priceFirst` / `priceYesterday` / `qTotTran5J` / `qTotCap`. نام‌های قدیمی (`pPriceMax` و ...) در این API وجود ندارند.
 
 **مثال خوانش جدول:** `pClosing = close_price` یعنی فیلد `pClosing` از پاسخ API در فیلد `close_price` نمونه داده ذخیره می‌شود.
 
@@ -10,20 +12,23 @@
 ## ۱) Endpoint اول: `ClosingPrice/GetClosingPriceInfo/{InsCode}`
 ### قیمت‌ها — گروه A و حجم/ارزش — گروه C
 
-| فیلد TSETMC | فیلد داخلی | گروه | توضیح |
+| فیلد TSETMC (نام واقعی) | فیلد داخلی | گروه | توضیح |
 |---|---|---|---|
 | `pDrCotVal` | `last_price` | A | آخرین قیمت معامله |
 | `pClosing` | `close_price` | A | قیمت پایانی (میانگین وزنی) |
-| `pPriceFirst` | `open_price` | A | اولین قیمت روز |
-| `pPriceYesterday` | `yesterday_price` | A | قیمت دیروز (مبنای درصد تغییر) |
-| `pPriceMax` | `daily_high` | A | بالاترین قیمت روز |
-| `pPriceMin` | `daily_low` | A | پایین‌ترین قیمت روز |
-| `pMinAllowed` | `min_allowed_price` | A | کمترین قیمت مجاز؛ اگر خالی بود: دیروز × ۰٫۹۰ |
-| `pMaxAllowed` | `max_allowed_price` | A | بیشترین قیمت مجاز؛ اگر خالی بود: دیروز × ۱٫۱۰ |
-| `qTotTran` | `total_volume` | C | حجم کل معاملات روز (سهم) |
-| `qTotTranValJAdj` | `total_value` | C | ارزش کل معاملات روز (ریال) |
+| `priceFirst` | `open_price` | A | اولین قیمت روز |
+| `priceYesterday` | `yesterday_price` | A | قیمت دیروز (مبنای درصد تغییر) |
+| `priceMax` | `daily_high` | A | بالاترین قیمت روز |
+| `priceMin` | `daily_low` | A | پایین‌ترین قیمت روز |
+| — (در این API نیست) | `min_allowed_price` | A | از قیمت دیروز × (۱ − `limit_percent` پیکربندی، پیش‌فرض ۱۰٪) |
+| — (در این API نیست) | `max_allowed_price` | A | از قیمت دیروز × (۱ + `limit_percent`) |
+| `qTotTran5J` | `total_volume` | C | حجم کل معاملات روز (سهم) |
+| `qTotCap` | `total_value` | C | ارزش کل معاملات روز (ریال) |
 | `zTotTran` | `total_trade_count` | C | تعداد کل معاملات روز |
-| `qBaseVol` | `base_volume` | C | حجم مبنا (پیش‌فرض ۱۰۰٬۰۰۰) |
+| — (در این API نیست) | `base_volume` | C | حجم مبنا: از پیکربندی (`test_symbol.base_volume`) یا ۱۰۰٬۰۰۰ |
+| `instrumentState.cEtavalTitle` | `symbol_status` | F | وضعیت نماد (مثلا «مجاز») |
+
+کنترل صحت با پاسخ واقعی: `qTotTran5J × pClosing ≈ qTotCap` (حجم کل × قیمت پایانی ≈ ارزش کل).
 
 ---
 
