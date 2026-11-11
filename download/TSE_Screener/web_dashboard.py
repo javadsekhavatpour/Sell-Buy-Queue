@@ -1345,15 +1345,25 @@ def api_set_symbol():
     """ذخیره نماد انتخاب‌شده در پیکربندی."""
     try:
         data = request.get_json()
+        print(f"\n=== /api/set_symbol called ===")
+        print(f"Received data: {data}")
+
         symbol = data.get('symbol')
         ins_code = data.get('ins_code')
+        print(f"Symbol: {symbol}")
+        print(f"Ins code: {ins_code}")
 
         if not symbol or not ins_code:
+            print(f"ERROR: missing symbol or ins_code")
             return jsonify({'error': 'نام نماد و کد لازم است'}), 400
 
         # بارگذاری پیکربندی فعلی
         cfg_path = ROOT / "config" / "warning_thresholds.json"
+        print(f"Config path: {cfg_path}")
+        print(f"Config exists: {cfg_path.exists()}")
+
         config = json.loads(cfg_path.read_text(encoding='utf-8'))
+        print(f"Old symbol: {config['test_symbol']['name']}")
 
         # به‌روزرسانی
         config["test_symbol"]["name"] = symbol
@@ -1362,14 +1372,23 @@ def api_set_symbol():
 
         # ذخیره
         cfg_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding='utf-8')
+        print(f"✓ Saved to {cfg_path}")
+
+        # تأیید
+        verify = json.loads(cfg_path.read_text(encoding='utf-8'))
+        print(f"Verified - new symbol: {verify['test_symbol']['name']}")
 
         return jsonify({
             'success': True,
             'symbol': symbol,
             'ins_code': ins_code,
+            'config_path': str(cfg_path),
             'message': f'نماد {symbol} در پیکربندی ذخیره شد'
         })
     except Exception as e:
+        import traceback
+        print(f"ERROR in /api/set_symbol: {e}")
+        print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 
