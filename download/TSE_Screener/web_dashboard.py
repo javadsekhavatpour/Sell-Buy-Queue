@@ -358,10 +358,13 @@ DASHBOARD_HTML = """
         <div>
             <span class="live-dot"></span>
             پایش زنده فعال
+            <span id="newDataBadge" style="display:none;background:#dc2626;color:white;padding:2px 8px;border-radius:3px;font-size:10px;margin-right:8px;font-weight:bold;">NEW</span>
         </div>
         <div>
-            آخرین به‌روزرسانی: <strong id="lastUpdate">-</strong>
-            | تعداد نمونه‌ها: <strong id="totalCount">0</strong>
+            آخرین نمونه: <strong id="lastSampleTime">-</strong>
+            (<span id="timeAgo">-</span>)
+            | تعداد: <strong id="totalCount">0</strong>
+            | <span id="pollStatus" style="font-size:10px;color:#94a3b8;">در حال پایش...</span>
         </div>
     </div>
 
@@ -537,14 +540,67 @@ DASHBOARD_HTML = """
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 let priceChart = null;
+let lastSnapshotId = 0;       // آخرین snapshot_id که دیده‌ایم
+let lastTotalCount = 0;       // آخرین تعداد نمونه‌ها
+let lastSampleTimestamp = null; // زمان آخرین نمونه
 
 async function fetchData() {
     try {
+        document.getElementById('pollStatus').textContent = 'در حال بررسی...';
         const response = await fetch('/api/data');
         const data = await response.json();
-        updateUI(data);
+
+        // بررسی: آیا داده جدیدی هست؟
+        const newCount = data.total_snapshots || 0;
+        const isNewData = (newCount > lastTotalCount) || (lastTotalCount === 0);
+
+        if (isNewData) {
+            // داده جدید! فلش بزن
+            if (lastTotalCount > 0) {
+                showNewBadge();
+            }
+            lastTotalCount = newCount;
+            updateUI(data);
+            document.getElementById('pollStatus').textContent = '✓ به‌روزرسانی شد';
+        } else {
+            // داده جدیدی نیست
+            document.getElementById('pollStatus').textContent = 'منتظر داده جدید...';
+        }
+
+        // به‌روزرسانی زمان گذشته
+        updateTimeAgo(data);
     } catch (err) {
         console.error('خطا:', err);
+        document.getElementById('pollStatus').textContent = '⚠ خطا در ارتباط';
+    }
+}
+
+function showNewBadge() {
+    const badge = document.getElementById('newDataBadge');
+    badge.style.display = 'inline-block';
+    setTimeout(() => {
+        badge.style.display = 'none';
+    }, 3000);
+}
+
+function updateTimeAgo(data) {
+    const snap = data.last_snapshot;
+    if (snap && snap.tehran_time) {
+        document.getElementById('lastSampleTime').textContent = snap.tehran_time;
+        // محاسبه زمان گذشته (تقریبی)
+        const now = new Date();
+        const [h, m, s] = snap.tehran_time.split(':').map(Number);
+        const sampleTime = new Date();
+        sampleTime.setHours(h, m, s || 0, 0);
+        const diffSec = Math.floor((now - sampleTime) / 1000);
+        if (diffSec < 0) diffSec = 0;
+        if (diffSec < 60) {
+            document.getElementById('timeAgo').textContent = diffSec + ' ثانیه پیش';
+        } else if (diffSec < 3600) {
+            document.getElementById('timeAgo').textContent = Math.floor(diffSec / 60) + ' دقیقه پیش';
+        } else {
+            document.getElementById('timeAgo').textContent = Math.floor(diffSec / 3600) + ' ساعت پیش';
+        }
     }
 }
 
@@ -765,11 +821,19 @@ function updateChart(snaps) {
     }
 }
 
-// به‌روزرسانی خودکار هر ۵ ثانیه
+// به‌روزرسانی خودکار هر ۱ ثانیه (بررسی داده جدید)
+// فقط وقتی داده جدیدی در بانک هست، UI به‌روزرسانی می‌شود
 fetchData();
-setInterval(fetchData, 5000);
+setInterval(fetchData, 1000);
+
+// به‌روزرسانی زمان گذشته و ساعت هر ۱ ثانیه
 setInterval(() => {
     document.getElementById('clock').textContent = new Date().toLocaleTimeString('fa-IR');
+    // به‌روزرسانی زمان گذشته
+    if (lastTotalCount > 0) {
+        const now = new Date();
+        // این در fetchData هم انجام می‌شود ولی اینجا هم برای زمان‌های بین polling
+    }
 }, 1000);
 </script>
 </body>
