@@ -51,35 +51,34 @@ def load_config() -> dict:
 
 def parse_args():
     p = argparse.ArgumentParser(description="TSE Early Warning - Live Mode (SQLite)")
-    p.add_argument("--symbol", default=None, help="نام نماد (اگر ندهید، از شما می‌پرسد)")
-    p.add_argument("--ins-code", default=None, help="کد TSETMC (اگر ندهید، جستجو می‌شود)")
+    p.add_argument("--symbol", default=None, help="نام نماد (اگر ندهید، از پیکربندی استفاده می‌شود)")
+    p.add_argument("--ins-code", default=None, help="کد TSETMC (اگر ندهید، از پیکربندی استفاده می‌شود)")
     p.add_argument("--interval", type=int, default=60, help="فاصله نمونه‌برداری (ثانیه)")
     p.add_argument("--max-samples", type=int, default=226, help="حداکثر تعداد نمونه")
     p.add_argument("--db", default="data/early_warning_live.sqlite", help="مسیر فایل SQLite")
     p.add_argument("--output", default="reports/early_warning_report_live.xlsx")
-    p.add_argument("--no-prompt", action="store_true",
-                   help="از کاربر نپرسد، از پیکربندی استفاده کند")
+    p.add_argument("--prompt", action="store_true",
+                   help="از کاربر بپرسد کدام نماد (پیش‌فرض: بدون پرسش از پیکربندی)")
     return p.parse_args()
 
 
 def load_config_with_prompt(args) -> dict:
     """
-    بارگذاری پیکربندی و اگر کاربر نماد نداده، از او می‌پرسد.
-    اگر نماد جدید بود، در پیکربندی ذخیره می‌کند.
+    بارگذاری پیکربندی و انتخاب نماد.
+
+    رفتار:
+      - پیش‌فرض: از نماد فعلی پیکربندی استفاده می‌کند (بدون پرسش)
+      - با --prompt: از کاربر می‌پرسد
+      - با --symbol X: جستجوی X و استفاده از آن
+      - با --symbol X --ins-code Y: مستقیم
     """
     config = load_config()
 
-    # اگر --no-prompt داده شد و نماد نداده، از پیکربندی استفاده کن
-    if args.no_prompt and not args.symbol:
-        args.symbol = config["test_symbol"]["name"]
-        args.ins_code = config["test_symbol"]["ins_code"]
-        return config
-
-    # اگر نماد داده شده بود، از همان استفاده کن
+    # حالت ۱: نماد و کد داده شده → مستقیم
     if args.symbol and args.ins_code:
         return config
 
-    # اگر فقط symbol داده شده، کد را پیدا کن
+    # حالت ۲: فقط symbol داده شده → جستجو
     if args.symbol and not args.ins_code:
         print(f"\n🔍 جستجوی کد نماد '{args.symbol}' در TSETMC...")
         collector = MarketDataCollector(config)
@@ -87,14 +86,27 @@ def load_config_with_prompt(args) -> dict:
         if results:
             args.ins_code = results[0]["code"]
             print(f"✓ کد پیدا شد: {args.ins_code}")
-            # ذخیره در پیکربندی
             save_symbol_to_config(config, args.symbol, args.ins_code)
         else:
             print(f"❌ نماد '{args.symbol}' پیدا نشد!")
             sys.exit(1)
         return config
 
-    # در غیر این صورت، از کاربر بپرسد
+    # حالت ۳: --prompt داده شده → منوی تعاملی
+    if args.prompt:
+        return interactive_symbol_selection(args, config)
+
+    # حالت ۴ (پیش‌فرض): بدون پرسش، از پیکربندی استفاده کن
+    args.symbol = config["test_symbol"]["name"]
+    args.ins_code = config["test_symbol"]["ins_code"]
+    print(f"📋 نماد از پیکربندی: {args.symbol} (کد: {args.ins_code})")
+    print(f"💡 برای تغییر: در مرورگر داشبورد نماد جدید را انتخاب کنید")
+    print(f"   یا از پارامتر --symbol استفاده کنید")
+    return config
+
+
+def interactive_symbol_selection(args, config) -> dict:
+    """منوی تعاملی انتخاب نماد (فقط با --prompt)."""
     current_symbol = config["test_symbol"]["name"]
     current_code = config["test_symbol"]["ins_code"]
 
@@ -156,7 +168,6 @@ def load_config_with_prompt(args) -> dict:
                     args.symbol = new_symbol
                     args.ins_code = selected["code"]
                     print(f"\n✓ نماد انتخاب شده: {new_symbol} (کد: {args.ins_code})")
-                    # ذخیره در پیکربندی
                     save_symbol_to_config(config, new_symbol, args.ins_code)
                     break
                 else:
