@@ -51,19 +51,147 @@ def load_config() -> dict:
 
 def parse_args():
     p = argparse.ArgumentParser(description="TSE Early Warning - Live Mode (SQLite)")
-    p.add_argument("--symbol", default="ریتون", help="نام نماد")
-    p.add_argument("--ins-code", default="14035144070182412", help="کد TSETMC")
+    p.add_argument("--symbol", default=None, help="نام نماد (اگر ندهید، از شما می‌پرسد)")
+    p.add_argument("--ins-code", default=None, help="کد TSETMC (اگر ندهید، جستجو می‌شود)")
     p.add_argument("--interval", type=int, default=60, help="فاصله نمونه‌برداری (ثانیه)")
     p.add_argument("--max-samples", type=int, default=226, help="حداکثر تعداد نمونه")
     p.add_argument("--db", default="data/early_warning_live.sqlite", help="مسیر فایل SQLite")
     p.add_argument("--output", default="reports/early_warning_report_live.xlsx")
+    p.add_argument("--no-prompt", action="store_true",
+                   help="از کاربر نپرسد، از پیکربندی استفاده کند")
     return p.parse_args()
+
+
+def load_config_with_prompt(args) -> dict:
+    """
+    بارگذاری پیکربندی و اگر کاربر نماد نداده، از او می‌پرسد.
+    اگر نماد جدید بود، در پیکربندی ذخیره می‌کند.
+    """
+    config = load_config()
+
+    # اگر --no-prompt داده شد و نماد نداده، از پیکربندی استفاده کن
+    if args.no_prompt and not args.symbol:
+        args.symbol = config["test_symbol"]["name"]
+        args.ins_code = config["test_symbol"]["ins_code"]
+        return config
+
+    # اگر نماد داده شده بود، از همان استفاده کن
+    if args.symbol and args.ins_code:
+        return config
+
+    # اگر فقط symbol داده شده، کد را پیدا کن
+    if args.symbol and not args.ins_code:
+        print(f"\n🔍 جستجوی کد نماد '{args.symbol}' در TSETMC...")
+        collector = MarketDataCollector(config)
+        results = collector.search_symbol(args.symbol)
+        if results:
+            args.ins_code = results[0]["code"]
+            print(f"✓ کد پیدا شد: {args.ins_code}")
+            # ذخیره در پیکربندی
+            save_symbol_to_config(config, args.symbol, args.ins_code)
+        else:
+            print(f"❌ نماد '{args.symbol}' پیدا نشد!")
+            sys.exit(1)
+        return config
+
+    # در غیر این صورت، از کاربر بپرسد
+    current_symbol = config["test_symbol"]["name"]
+    current_code = config["test_symbol"]["ins_code"]
+
+    print("=" * 70)
+    print("  انتخاب نماد برای پایش زنده")
+    print("=" * 70)
+    print(f"\n📝 نماد فعلی: {current_symbol} (کد: {current_code})")
+    print()
+    print("گزینه‌ها:")
+    print(f"  1) استفاده از نماد فعلی ({current_symbol})")
+    print(f"  2) وارد کردن نماد جدید")
+    print(f"  3) خروج")
+    print()
+
+    while True:
+        try:
+            choice = input("انتخاب شما (1/2/3): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nخروج...")
+            sys.exit(0)
+
+        if choice == "1":
+            args.symbol = current_symbol
+            args.ins_code = current_code
+            print(f"\n✓ نماد: {args.symbol}")
+            break
+        elif choice == "2":
+            try:
+                new_symbol = input("نام نماد جدید (مثلا ریتون، دابور، فملی): ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nخروج...")
+                sys.exit(0)
+            if not new_symbol:
+                print("⚠ نام نماد خالی است!")
+                continue
+
+            print(f"\n🔍 جستجوی '{new_symbol}' در TSETMC...")
+            collector = MarketDataCollector(config)
+            results = collector.search_symbol(new_symbol)
+
+            if not results:
+                print(f"❌ نماد '{new_symbol}' پیدا نشد!")
+                print("   ممکن است نام اشتباه باشد یا اینترنت قطع باشد.")
+                continue
+
+            print(f"\n✓ {len(results)} نتیجه پیدا شد:")
+            for i, r in enumerate(results[:5], 1):
+                print(f"  {i}) کد: {r.get('code', 'N/A')}")
+                print(f"     نام فارسی: {r.get('name_fa', 'N/A')}")
+                print(f"     نام انگلیسی: {r.get('name_en', 'N/A')}")
+                print(f"     ISIN: {r.get('isin', 'N/A')}")
+                print()
+
+            try:
+                sel = input(f"کدام را انتخاب می‌کنید؟ (1-{min(5, len(results))}): ").strip()
+                sel_idx = int(sel) - 1
+                if 0 <= sel_idx < len(results):
+                    selected = results[sel_idx]
+                    args.symbol = new_symbol
+                    args.ins_code = selected["code"]
+                    print(f"\n✓ نماد انتخاب شده: {new_symbol} (کد: {args.ins_code})")
+                    # ذخیره در پیکربندی
+                    save_symbol_to_config(config, new_symbol, args.ins_code)
+                    break
+                else:
+                    print("⚠ انتخاب نامعتبر!")
+            except (ValueError, EOFError, KeyboardInterrupt):
+                print("⚠ ورودی نامعتبر!")
+        elif choice == "3":
+            print("خروج...")
+            sys.exit(0)
+        else:
+            print("⚠ انتخاب نامعتبر! 1، 2 یا 3 وارد کنید.")
+
+    return config
+
+
+def save_symbol_to_config(config: dict, symbol: str, ins_code: str):
+    """ذخیره نماد انتخاب‌شده در فایل پیکربندی."""
+    try:
+        config["test_symbol"]["name"] = symbol
+        config["test_symbol"]["ticker"] = symbol
+        config["test_symbol"]["ins_code"] = str(ins_code)
+        # اگر قیمت پایه تغییر نکرده، همان بماند
+        cfg_path = ROOT / "config" / "warning_thresholds.json"
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        print(f"✓ نماد '{symbol}' در پیکربندی ذخیره شد (برای دفعات بعد)")
+    except Exception as e:
+        print(f"⚠ خطا در ذخیره پیکربندی: {e}")
 
 
 def main():
     args = parse_args()
-    config = load_config()
+    config = load_config_with_prompt(args)
 
+    print()
     print("=" * 70)
     print(f"  TSE Early Warning Engine - حالت زنده (نسخه ۱.۱)")
     print(f"  نماد: {args.symbol}  |  کد: {args.ins_code}")
