@@ -349,30 +349,78 @@ class MarketDataCollector:
         return info
 
     def fetch_clienttype(self, ins_code: str) -> Optional[Dict]:
-        """دریافت اطلاعات حقیقی/حقوقی از API جدید."""
-        data = self._api_get(f"ClientType/GetClientType/{ins_code}/1/0")
-        if not data or not isinstance(data, dict):
+        """
+        دریافت اطلاعات حقیقی/حقوقی از API جدید.
+
+        این متد با چندین نام فیلد مختلف کار می‌کند چون APIهای TSETMC
+        قراردادهای نام‌گذاری مختلفی دارند.
+
+        همچنین اگر پاسخ خالی بود یا هیچ فیلد معتبری نداشت،
+        None برمی‌گرداند تا در نمونه ذخیره شود (نه صفر).
+        """
+        # تلاش با چندین پارامتر مختلف
+        for params in ["/1/0", "/0/0", "/2/0", ""]:
+            data = self._api_get(f"ClientType/GetClientType/{ins_code}{params}")
+            if data and isinstance(data, dict):
+                break
+        else:
             return None
 
-        # ساختار: {"clientType": {...}}
+        # ساختار ممکن است dict یا list باشد
         ct_data = data.get("clientType") or data.get("ClientType") or data
-        if not isinstance(ct_data, dict):
-            # ممکن است لیست باشد
-            if isinstance(ct_data, list) and len(ct_data) > 0:
-                ct_data = ct_data[-1]  # آخرین ردیف
-            else:
-                return None
+        if isinstance(ct_data, list) and len(ct_data) > 0:
+            ct_data = ct_data[-1]  # آخرین ردیف
+        elif not isinstance(ct_data, dict):
+            return None
 
-        return {
-            "real_buy_count": int(float(ct_data.get("nIndividualBuy") or 0)),
-            "real_sell_count": int(float(ct_data.get("nIndividualSell") or 0)),
-            "real_buy_volume": int(float(ct_data.get("nVolIndividualBuy") or 0)),
-            "real_sell_volume": int(float(ct_data.get("nVolIndividualSell") or 0)),
-            "legal_buy_count": int(float(ct_data.get("nCorporateBuy") or 0)),
-            "legal_sell_count": int(float(ct_data.get("nCorporateSell") or 0)),
-            "legal_buy_volume": int(float(ct_data.get("nVolCorporateBuy") or 0)),
-            "legal_sell_volume": int(float(ct_data.get("nVolCorporateSell") or 0)),
+        # تابع کمکی برای گرفتن مقدار از چندین نام فیلد ممکن
+        def get_field(ct, *possible_names):
+            for name in possible_names:
+                if name in ct and ct[name] is not None:
+                    try:
+                        return int(float(ct[name]))
+                    except (ValueError, TypeError):
+                        continue
+            return 0
+
+        # تلاش با چندین نام فیلد مختلف
+        result = {
+            "real_buy_count":   get_field(ct_data,
+                "nIndividualBuy", "nIndBuyCount", "buyCountInd",
+                "Buy_N_Individual", "buyCountReal", "real_buy_count"),
+            "real_sell_count":  get_field(ct_data,
+                "nIndividualSell", "nIndSellCount", "sellCountInd",
+                "Sell_N_Individual", "sellCountReal", "real_sell_count"),
+            "real_buy_volume":  get_field(ct_data,
+                "nVolIndividualBuy", "nIndBuyVol", "buyVolInd",
+                "Buy_Vol_Individual", "buyVolReal", "real_buy_volume"),
+            "real_sell_volume": get_field(ct_data,
+                "nVolIndividualSell", "nIndSellVol", "sellVolInd",
+                "Sell_Vol_Individual", "sellVolReal", "real_sell_volume"),
+            "legal_buy_count":  get_field(ct_data,
+                "nCorporateBuy", "nCorpBuyCount", "buyCountCorp",
+                "Buy_N_Corporate", "buyCountLegal", "legal_buy_count"),
+            "legal_sell_count": get_field(ct_data,
+                "nCorporateSell", "nCorpSellCount", "sellCountCorp",
+                "Sell_N_Corporate", "sellCountLegal", "legal_sell_count"),
+            "legal_buy_volume": get_field(ct_data,
+                "nVolCorporateBuy", "nCorpBuyVol", "buyVolCorp",
+                "Buy_Vol_Corporate", "buyVolLegal", "legal_buy_volume"),
+            "legal_sell_volume": get_field(ct_data,
+                "nVolCorporateSell", "nCorpSellVol", "sellVolCorp",
+                "Sell_Vol_Corporate", "sellVolLegal", "legal_sell_volume"),
         }
+
+        # اگر همه صفر بودند، احتمالا فیلدها پیدا نشده‌اند
+        # در این حالت None برمی‌گردانیم تا در نمونه ذخیره شود ولی
+        # فیلدهای clienttype به‌صورت NULL ذخیره شوند (نه صفر)
+        if all(v == 0 for v in result.values()):
+            if self.debug_mode:
+                print(f"  [!] clienttype: all fields are 0 (fields may be wrong)")
+                print(f"      Available keys: {list(ct_data.keys()) if isinstance(ct_data, dict) else 'list'}")
+            return None
+
+        return result
 
     def fetch_trades(self, ins_code: str) -> List[Trade]:
         """
