@@ -8,10 +8,10 @@
     "samples_per_hour": 60
   },
   "test_symbol": {
-    "name": "دابور",
-    "ticker": "دابور",
-    "ins_code": "61332057061846617",
-    "base_price": 13000
+    "name": "اهرم",
+    "ticker": "اهرم",
+    "ins_code": "17914401175772326",
+    "base_price": 5000
   },
   "sell_pressure": {
     "weights": {
