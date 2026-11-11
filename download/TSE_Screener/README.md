@@ -140,7 +140,7 @@ TSE_Screener/
 ### نصب وابستگی‌ها
 
 ```bash
-cd C:\TSE_Screener
+cd C:\TSE_Screener\Sell-Buy-Queue
 pip install -r requirements.txt
 ```
 
