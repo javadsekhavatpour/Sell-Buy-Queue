@@ -23,6 +23,10 @@ from .alert_engine import AlertEngine, AlertEvent
 from .speed_indicators import SpeedIndicatorEngine, SpeedIndicatorsResult
 from .excel_report import ExcelReportGenerator
 from .storage import MarketDataStorage
+from .price_range import (
+    RANGE_RULES, identify_category, compute_price_range,
+    save_price_range, get_price_range,
+)
 
 __all__ = [
     "MarketDataCollector",
@@ -41,4 +45,9 @@ __all__ = [
     "SpeedIndicatorsResult",
     "ExcelReportGenerator",
     "MarketDataStorage",
+    "RANGE_RULES",
+    "identify_category",
+    "compute_price_range",
+    "save_price_range",
+    "get_price_range",
 ]
