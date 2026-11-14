@@ -33,6 +33,7 @@ from early_warning import (
     SellPressureDetector,
     SmartAccumulationDetector,
     AlertEngine,
+    SpeedIndicatorEngine,
     ExcelReportGenerator,
     MarketDataStorage,
 )
@@ -119,14 +120,16 @@ def run_scenario(scenario: str, num_samples: int = 226) -> dict:
     )
     print(f"     → خروجی CSV: {csv_snap.name} و {csv_trades.name}")
 
-    # ۴) اجرای دو موتور به‌صورت هم‌زمان
-    print("[۴] اجرای موتور فشار فروش و موتور جمع‌آوری")
+    # ۴) اجرای سه موتور به‌صورت هم‌زمان
+    print("[۴] اجرای موتور فشار فروش، موتور جمع‌آوری و موتور شاخص‌های سرعتی")
     sp_detector = SellPressureDetector(config)
     acc_detector = SmartAccumulationDetector(config)
     alert_engine = AlertEngine(config)
+    speed_engine = SpeedIndicatorEngine(config)
 
     sp_results = []
     acc_results = []
+    speed_results = []
     combined_states = []
 
     for i, snap in enumerate(snapshots):
@@ -139,18 +142,25 @@ def run_scenario(scenario: str, num_samples: int = 226) -> dict:
             # برای حفظ ساختار
             history = []
             prev_snap = None
+            speed_res = None
 
         sp_res = sp_detector.evaluate(snap, prev_snap)
         acc_res = acc_detector.evaluate(snap, prev_snap, history)
-        combined = alert_engine.evaluate(sp_res, acc_res)
+        # بعد سوم: شاخص‌های سرعتی نردبان (فقط با تاریخچه پیوسته معنا دارد)
+        speed_res = (speed_engine.compute(snap, history)
+                     if snap.market_phase == "continuous" else None)
+        combined = alert_engine.evaluate(sp_res, acc_res, speed_res)
 
         sp_results.append(sp_res)
         acc_results.append(acc_res)
+        speed_results.append(speed_res)
         combined_states.append(combined)
 
     # ۵) جمع‌آوری هشدارها
     alert_events = alert_engine.get_all_events()
-    print(f"     → {len(alert_events)} رویداد هشدار صادر شد")
+    upgraded = sum(1 for ev in alert_events if ev.speed_confirmed)
+    print(f"     → {len(alert_events)} رویداد هشدار صادر شد "
+          f"({upgraded} مورد با تأیید سرعتی نردبان)")
     for ev in alert_events:
         if ev.level.value == "بدون هشدار":
             continue  # رخدادهای بازگشت به عادی را در چاپ نهایی نشان نده
@@ -159,18 +169,26 @@ def run_scenario(scenario: str, num_samples: int = 226) -> dict:
                 "🟠" if "نارنجی" in ev.level.value or "هم‌زمان" in ev.level.value else "🟡"
             )
         )
-        print(f"     {marker} [{ev.timestamp}] {ev.level.value}: {ev.title}")
+        tag = " ⚡تأیید سرعتی" if ev.speed_confirmed else ""
+        print(f"     {marker} [{ev.timestamp}] {ev.level.value}{tag}: {ev.title}")
 
     # ۶) نمایش امتیاز آخرین نمونه پیوسته
-    continuous_results = [(s, sp, acc, c) for s, sp, acc, c in zip(
-        snapshots, sp_results, acc_results, combined_states
+    continuous_results = [(s, sp, acc, spd, c) for s, sp, acc, spd, c in zip(
+        snapshots, sp_results, acc_results, speed_results, combined_states
     ) if s.market_phase == "continuous"]
 
     if continuous_results:
-        last_sp_snap, last_sp, last_acc, last_combined = continuous_results[-1]
+        last_sp_snap, last_sp, last_acc, last_speed, last_combined = continuous_results[-1]
         print(f"\n[۵] امتیاز آخرین نمونه پیوسته (t={last_sp_snap.tehran_time}):")
         print(f"     فشار فروش:   {last_sp.total_score:.1f}/100 - {last_sp.level}")
         print(f"     جمع‌آوری:    {last_acc.total_score:.1f}/100 - {last_acc.level}")
+        if last_speed is not None and last_speed.is_available:
+            sp_txt = (f"{last_speed.speed_pressure_score:.1f}"
+                      if last_speed.speed_pressure_score is not None else "—")
+            print(f"     فشار سرعتی نردبان: {sp_txt}/100 "
+                  f"(پنجره {last_speed.window_samples} نمونه، وضعیت {last_speed.data_status})")
+        else:
+            print("     فشار سرعتی نردبان: — (پنجره کامل نیست)")
         print(f"     وضعیت ترکیب: {last_combined.combination_label}")
         print(f"     آخرین قیمت: {last_sp_snap.last_price:.0f} | پایانی: {last_sp_snap.close_price:.0f}")
         print(f"     قدرت خریدار: {last_sp_snap.buyer_power:.2f}")
@@ -183,6 +201,7 @@ def run_scenario(scenario: str, num_samples: int = 226) -> dict:
         "trades": trades,
         "sp_results": sp_results,
         "acc_results": acc_results,
+        "speed_results": speed_results,
         "combined_states": combined_states,
         "alert_events": alert_events,
     }
@@ -210,7 +229,7 @@ def generate_excel_report(results: dict, output_path: Path, scenario: str):
 
 def main():
     print("=" * 70)
-    print("  TSE Early Warning Engine - اجرای نمونه ریتون (نسخه ۱.۱)")
+    print("  TSE Early Warning Engine - اجرای نمونه ریتون (نسخه ۱.۲)")
     print("  با پایگاه داده SQLite + معاملات + پیش‌گشایش")
     print("=" * 70)
 
@@ -238,6 +257,17 @@ def main():
     generate_excel_report(results_mixed,
                           ROOT / "reports" / "early_warning_report_mixed.xlsx",
                           "mixed")
+
+    # ----- سناریوی بعد سوم: تخلیه خاموش نردبان و ارتقای سرعتی زرد → قرمز -----
+    print("\n" + "=" * 70)
+    print(">>> سناریوی بعد سوم: تخلیه خاموش نردبان (ladder_collapse)")
+    print("    عمق نردبان خرید آب می‌رود ولی تاچ رفرش می‌شود؛")
+    print("    شاخص‌های سرعتی زودتر می‌بینند و زرد را به قرمز ارتقا می‌دهند")
+    print("=" * 70)
+    results_collapse = run_scenario("ladder_collapse", num_samples=226)
+    generate_excel_report(results_collapse,
+                          ROOT / "reports" / "early_warning_report_ladder_collapse.xlsx",
+                          "ladder_collapse")
 
     print("\n" + "=" * 70)
     print("  اجرای نمونه با موفقیت کامل شد!")

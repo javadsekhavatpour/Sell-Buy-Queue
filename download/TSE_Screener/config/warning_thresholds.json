@@ -86,6 +86,21 @@
       "requires_multiple_signals": false
     }
   },
+  "speed_indicators": {
+    "window_samples": 5,
+    "min_history_samples": 2,
+    "depletion_full_at": 0.5,
+    "supply_growth_full_at": 0.5,
+    "absorption_full_at": 0.6,
+    "blend_weights": {
+      "demand_depletion": 0.40,
+      "supply_growth": 0.35,
+      "absorption_inverse": 0.25
+    },
+    "confirmation_threshold": 60,
+    "upgrade_yellow_to_red": true,
+    "upgrade_rule": "فشار فروش در محدوده زرد (35-49) + جمع‌آوری ضعیف (< 40) + امتیاز فشار سرعتی >= confirmation_threshold → ارتقا به قرمز"
+  },
   "combination_matrix": {
     "high_pressure_low_accumulation":  "خطر خروج",
     "high_pressure_high_accumulation": "جذب عرضه توسط خریدار قوی",

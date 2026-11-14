@@ -620,10 +620,14 @@ class SimulationDataCollector:
     شبیه‌ساز داده تابلو با سناریوهای واقع‌نما برای تست موتورهای تحلیلی.
 
     سناریوها:
-      - 'normal':       روز عادی با نوسان ملایم
-      - 'sell_pressure': فشار فروش تدریجی منتهی به صف فروش
-      - 'accumulation':  جمع‌آوری پنهان در روز منفی
-      - 'mixed':         ترکیب فشار فروش و جمع‌آوری هم‌زمان
+      - 'normal':          روز عادی با نوسان ملایم
+      - 'sell_pressure':   فشار فروش تدریجی منتهی به صف فروش
+      - 'accumulation':    جمع‌آوری پنهان در روز منفی
+      - 'mixed':           ترکیب فشار فروش و جمع‌آوری هم‌زمان
+      - 'ladder_collapse': تخلیه خاموش نردبان خرید (صف فروش در حال
+        شکل‌گیری) - برای نمایش بعد سوم: عمق نردبان آب می‌رود ولی تاچ
+        رفرش می‌شود؛ موتورهای لحظه‌ای دیر واکنش می‌دهند ولی شاخص‌های
+        سرعتی کل نردبان را می‌بینند و هشدار زرد را به قرمز ارتقا می‌دهند
 
     پشتیبانی از فازهای بازار (گروه F):
       - 08:45-09:00 پیش‌گشایش (PRE_OPEN)
@@ -697,6 +701,14 @@ class SimulationDataCollector:
 
             if self.scenario == "normal":
                 last = self.base_price * (1 + 0.005 * math.sin(adjusted_idx * 0.3) + self.rng.gauss(0, 0.002))
+            elif self.scenario == "ladder_collapse":
+                # افت زودهنگام و سپس رکود: قیمت زود به کف روز می‌چسبد
+                # تا «نزدیکی به کف» در موتور فشار فروش از میانه روز فعال شود
+                last = self.base_price * (
+                    1 - 0.018 * min(1.0, 3.0 * adj_progress)
+                    - 0.002 * adj_progress
+                    + self.rng.gauss(0, 0.002)
+                )
             elif self.scenario == "sell_pressure":
                 drop = -(0.005 + 0.075 * adj_progress ** 1.3)
                 last = self.base_price * (1 + drop + self.rng.gauss(0, 0.002))
@@ -714,6 +726,9 @@ class SimulationDataCollector:
                 close = max(close, last * 1.001)
             elif self.scenario == "accumulation":
                 close = min(close, last * 0.999)
+            elif self.scenario == "ladder_collapse":
+                # پایانی کمی بالاتر از آخرین: گپ منفی کوچک (نشانه ضعف ملایم)
+                close = max(close, last * 1.002)
 
             if st["open_price"] == self.base_price and adjusted_idx == 0:
                 st["open_price"] = last
@@ -728,8 +743,13 @@ class SimulationDataCollector:
         best_sell_price = int(last * 1.002)
 
         if is_pre_open:
-            base_buy_vol = int(20000 * (1 + 0.05 * self.rng.gauss(0, 1)))
-            base_sell_vol = int(18000 * (1 + 0.05 * self.rng.gauss(0, 1)))
+            if self.scenario == "ladder_collapse":
+                # حجم پیش‌گشایش هم‌سطح پیوسته تا جهش کاذب نردبان در گشایش رخ ندهد
+                base_buy_vol = int(40000 * (1 + 0.05 * self.rng.gauss(0, 1)))
+                base_sell_vol = int(34000 * (1 + 0.05 * self.rng.gauss(0, 1)))
+            else:
+                base_buy_vol = int(20000 * (1 + 0.05 * self.rng.gauss(0, 1)))
+                base_sell_vol = int(18000 * (1 + 0.05 * self.rng.gauss(0, 1)))
         elif self.scenario == "sell_pressure":
             base_buy_vol = max(2000, int(50000 * (1 - 0.7 * progress)))
             base_sell_vol = int(40000 * (1 + 2.0 * progress))
@@ -739,32 +759,74 @@ class SimulationDataCollector:
         elif self.scenario == "mixed":
             base_buy_vol = int(70000 * (1 + 0.5 * progress))
             base_sell_vol = int(90000 * (1 + 0.7 * progress))
+        elif self.scenario == "ladder_collapse":
+            # نردبان‌ها در طول روز تقریباً ثابت‌اند؛ پویایی در فاز تخلیه است
+            base_buy_vol = int(40000 * (1 + 0.05 * self.rng.gauss(0, 1)))
+            base_sell_vol = int(34000 * (1 + 0.05 * self.rng.gauss(0, 1)))
         else:
             base_buy_vol = int(50000 * (1 + 0.05 * self.rng.gauss(0, 1)))
             base_sell_vol = int(45000 * (1 + 0.05 * self.rng.gauss(0, 1)))
 
+        # فاز پایانی سناریوها (ده نمونه آخر) - ضریب هر ردیف نردبان:
+        # sell_pressure: صف فروش - کل نردبان خرید تخلیه و کل نردبان فروش
+        #   موج عظیم می‌شود (رفتار ریزش آشکار)
+        # ladder_collapse: تخلیه خاموش - عمق نردبان خرید آب می‌رود ولی تاچ
+        #   (ردیف اول) با سفارش‌های جدید تا حدی refresh می‌شود؛ در سمت
+        #   فروش، عرضه در عمق انباشته می‌شود ولی تاچ فروش ملایم رشد می‌کند.
+        #   نتیجه: فاکتورهای «بهترین ردیف» موتور فشار فروش دیر واکنش
+        #   نشان می‌دهند ولی شاخص‌های سرعتی (کل نردبان) فوراً وضعیت را
+        #   می‌بینند - همان لبه اطلاعاتی بعد سوم.
+        row_factor_buy = [1.0] * 5
+        row_factor_sell = [1.0] * 5
+        if not is_pre_open and adj_progress >= 0.95:
+            c = (adj_progress - 0.95) / 0.05  # ۰ → ۱ در ده نمونه پایانی
+            if self.scenario == "sell_pressure":
+                for k in range(5):
+                    row_factor_buy[k] = 1.0 - 0.94 * c
+                    row_factor_sell[k] = 1.0 + 5.0 * c
+            elif self.scenario == "ladder_collapse":
+                for k in range(5):
+                    row_factor_buy[k] = (
+                        (0.60 + 0.40 * (1.0 - 0.93 * c)) if k == 0
+                        else (1.0 - 0.93 * c)
+                    )
+                    row_factor_sell[k] = 1.0 + (0.4 if k == 0 else 2.6) * c
+
         buy_rows = []
+        # نویز ردیف‌ها در سناریوی تخلیه خاموش کمتر است تا امتیاز فشار فروش
+        # در باند زرد بماند و اثر فاز تخلیه بر شاخص‌های سرعتی تمیز دیده شود
+        row_noise = 0.04 if self.scenario == "ladder_collapse" else 0.1
         for k in range(5):
             buy_rows.append(BestLimitRow(
                 price=best_buy_price - k * 10,
-                volume=max(100, int(base_buy_vol * (1 - 0.15 * k) * (1 + self.rng.gauss(0, 0.1)))),
+                volume=max(100, int(base_buy_vol * row_factor_buy[k]
+                                    * (1 - 0.15 * k) * (1 + self.rng.gauss(0, row_noise)))),
                 order_count=max(1, int(20 * (1 - 0.1 * k) + self.rng.gauss(0, 3))),
             ))
         sell_rows = []
         for k in range(5):
             sell_rows.append(BestLimitRow(
                 price=best_sell_price + k * 10,
-                volume=max(100, int(base_sell_vol * (1 - 0.15 * k) * (1 + self.rng.gauss(0, 0.1)))),
+                volume=max(100, int(base_sell_vol * row_factor_sell[k]
+                                    * (1 - 0.15 * k) * (1 + self.rng.gauss(0, row_noise)))),
                 order_count=max(1, int(20 * (1 - 0.1 * k) + self.rng.gauss(0, 3))),
             ))
 
         trades_in_minute: List[Trade] = []
         if not is_pre_open:
             num_trades = int(self.rng.uniform(20, 60))
+            # در فاز پایانیِ ریزش/تخلیه نقدشوندگی تقریباً خشک می‌شود:
+            # تعداد و حجم معامله‌ها به‌شدت افت می‌کند (نکته کلیدی:
+            # عرضه جدید روی نردبان می‌ماند و جذب نمی‌شود)
+            collapse_c = 0.0
+            if (self.scenario in ("sell_pressure", "ladder_collapse")
+                    and adj_progress >= 0.95):
+                collapse_c = (adj_progress - 0.95) / 0.05
+                num_trades = max(1, int(num_trades * (1.0 - 0.97 * collapse_c)))
             for _ in range(num_trades):
                 st["trade_seq"] += 1
                 t_price = last * (1 + self.rng.gauss(0, 0.001))
-                t_vol = int(self.rng.uniform(500, 5000))
+                t_vol = int(self.rng.uniform(500, 5000) * (1.0 - 0.95 * collapse_c))
                 aggressor = "buy" if self.rng.random() < 0.5 else "sell"
                 trades_in_minute.append(Trade(
                     trade_time=t.strftime("%H:%M:%S"),
@@ -804,6 +866,16 @@ class SimulationDataCollector:
             real_sell_share = 0.55
             legal_buy_share = 0.15
             legal_sell_share = 0.15
+        elif self.scenario == "ladder_collapse":
+            # تعداد خریدار/فروشنده متقارن و سهم‌ها نزدیک هم: جریان پول
+            # فقط خروج ملایم نشان می‌دهد و فشار فروش در باند زرد می‌ماند
+            # (در پیش‌گشایش این سهم‌ها بعداً صفر می‌شوند؛ progress همیشه تعریف شده)
+            end_buy_count = 3000
+            end_sell_count = 3000
+            real_buy_share = 0.34 - 0.02 * progress
+            real_sell_share = 0.395 - 0.012 * progress
+            legal_buy_share = 0.04
+            legal_sell_share = 0.04
         else:
             end_buy_count = 1500
             end_sell_count = 1500

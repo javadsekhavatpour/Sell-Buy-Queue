@@ -7,6 +7,16 @@ alert_engine.py
   - قرمز (ریسک خروج):  فشار فروش >= 50 با ضعف جمع‌آوری + حداقل ۲ نشانه مستقل
   - سبز (جذب عرضه):    جمع‌آوری >= 40 با شواهد جذب عرضه
 
+بعد سوم - ارتقای سرعتی (نسخه ۱.۲):
+  اگر فشار فروش در محدوده زرد (35-49) باشد، جمع‌آوری ضعیف باشد و موتور
+  شاخص‌های سرعتی نردبان (SpeedIndicatorEngine) تخلیه سریع تقاضا / رشد
+  سریع عرضه / جذب ضعیف را تأیید کند (امتیاز فشار سرعتی >=
+  confirmation_threshold)، هشدار زرد مستقیماً به قرمز ارتقا می‌یابد.
+  منطق: نردبان سفارش‌ها معمولا چند دقیقه زودتر از قیمت و جریان پول
+  واکنش نشان می‌دهد؛ تأیید سرعتی یعنی خطر واقعی است، نه نوسان معمول.
+  این قانون با کلید پیکربندی speed_indicators.upgrade_yellow_to_red
+  قابل خاموش کردن است و بدون خروجی سرعتی (None) هیچ اثری ندارد.
+
 منطق ترکیب (۴ وضعیت):
   فشار فروش بالا + جمع‌آوری ضعیف   → خطر خروج
   فشار فروش بالا + جمع‌آوری بالا   → جذب عرضه توسط خریدار قوی (خروج عجولانه توصیه نمی‌شود)
@@ -23,6 +33,7 @@ from enum import Enum
 from typing import List, Dict, Optional, Tuple
 from .sell_pressure import SellPressureResult
 from .smart_accumulation import AccumulationResult
+from .speed_indicators import SpeedIndicatorsResult
 
 
 class AlertLevel(Enum):
@@ -45,6 +56,7 @@ class AlertEvent:
     combination_state: str        # یکی از ۴ وضعیت ترکیب
     suggested_action: str
     is_critical: bool
+    speed_confirmed: bool = False  # آیا ارتقا/تأیید سرعتی نردبان در کار بود؟
 
     def to_dict(self) -> Dict:
         return {
@@ -57,6 +69,7 @@ class AlertEvent:
             "combination_state": self.combination_state,
             "suggested_action": self.suggested_action,
             "is_critical": self.is_critical,
+            "speed_confirmed": self.speed_confirmed,
         }
 
 
@@ -72,6 +85,8 @@ class CombinedState:
     alert: Optional[AlertEvent]
     sell_level: str
     acc_level: str
+    speed_pressure_score: Optional[float] = None  # امتیاز فشار سرعتی نردبان
+    speed_confirmed: bool = False                 # تأیید سرعتی برقرار است؟
 
     def to_dict(self) -> Dict:
         return {
@@ -84,6 +99,11 @@ class CombinedState:
             "alert": self.alert.to_dict() if self.alert else None,
             "sell_level": self.sell_level,
             "acc_level": self.acc_level,
+            "speed_pressure_score": (
+                round(self.speed_pressure_score, 2)
+                if self.speed_pressure_score is not None else None
+            ),
+            "speed_confirmed": self.speed_confirmed,
         }
 
 
@@ -99,6 +119,12 @@ class AlertEngine:
         self.red_threshold = 50       # فشار فروش >= 50
         self.green_threshold = 40     # جمع‌آوری >= 40
         self.weak_acc_threshold = 40
+        # پیکربندی بعد سوم: ارتقای سرعتی زرد → قرمز
+        speed_cfg = config.get("speed_indicators", {})
+        self.speed_confirmation_threshold = float(
+            speed_cfg.get("confirmation_threshold", 60))
+        self.speed_upgrade_enabled = bool(
+            speed_cfg.get("upgrade_yellow_to_red", True))
         # آخرین سطح فعال برای ضدتکرار
         self.last_level: AlertLevel = AlertLevel.NONE
         self.events: List[AlertEvent] = []
@@ -106,11 +132,29 @@ class AlertEngine:
     def evaluate(
         self,
         sp_result: SellPressureResult,
-        acc_result: AccumulationResult
+        acc_result: AccumulationResult,
+        speed_result: Optional[SpeedIndicatorsResult] = None,
     ) -> CombinedState:
-        """ترکیب دو خروجی و تعیین هشدار."""
+        """
+        ترکیب خروجی موتورها و تعیین هشدار.
+
+        speed_result اختیاری است (بعد سوم). اگر داده نشود یا پنجره
+        سرعتی کامل نباشد، رفتار دقیقاً مثل نسخه قبل است.
+        """
         sp_score = sp_result.total_score
         acc_score = acc_result.total_score
+
+        # ----- امتیاز سرعتی و تأیید آن (بعد سوم) -----
+        speed_score = (
+            speed_result.speed_pressure_score
+            if speed_result is not None else None
+        )
+        speed_confirmed = bool(
+            speed_result is not None
+            and speed_result.is_available
+            and speed_score is not None
+            and speed_score >= self.speed_confirmation_threshold
+        )
 
         # تعیین وضعیت ترکیب (۴ حالت)
         high_sp = sp_score >= self.red_threshold
@@ -141,9 +185,9 @@ class AlertEngine:
 
         combination_label = self.combination[state_key]
 
-        # تعیین سطح هشدار فعلی
+        # تعیین سطح هشدار فعلی (با بعد سوم: تأیید سرعتی)
         current_level = self._determine_alert_level(
-            sp_result, acc_result, state_key
+            sp_result, acc_result, state_key, speed_confirmed
         )
 
         # ضدتکرار: فقط هنگام تغییر سطح، هشدار جدید صادر کن
@@ -151,7 +195,8 @@ class AlertEngine:
         if current_level != self.last_level and current_level != AlertLevel.NONE:
             alert = self._make_alert(
                 current_level, sp_result, acc_result,
-                state_key, combination_label, interpretation
+                state_key, combination_label, interpretation,
+                speed_result, speed_confirmed,
             )
             self.events.append(alert)
         elif current_level == AlertLevel.NONE and self.last_level != AlertLevel.NONE:
@@ -181,13 +226,16 @@ class AlertEngine:
             alert=alert,
             sell_level=sp_result.level,
             acc_level=acc_result.level,
+            speed_pressure_score=speed_score,
+            speed_confirmed=speed_confirmed,
         )
 
     def _determine_alert_level(
         self,
         sp: SellPressureResult,
         acc: AccumulationResult,
-        state_key: str
+        state_key: str,
+        speed_confirmed: bool = False,
     ) -> AlertLevel:
         """تعیین سطح هشدار بر اساس امتیازها و قوانین."""
         # اولویت: قرمز > سبز > زرد > نارنجی > هیچ
@@ -213,6 +261,14 @@ class AlertEngine:
         if acc_score >= self.green_threshold and acc.absorption_evidence:
             return AlertLevel.GREEN
 
+        # ----- ارتقای سرعتی زرد → قرمز (بعد سوم) -----
+        # فشار فروش هنوز در محدوده زرد است ولی نردبان سفارش‌ها به‌صورت
+        # سرعتی آن را تأیید می‌کند (تخلیه سریع تقاضا + رشد عرضه + جذب ضعیف)
+        if (self.speed_upgrade_enabled and speed_confirmed and
+            self.yellow_threshold <= sp_score < self.red_threshold and
+            acc_score < self.weak_acc_threshold):
+            return AlertLevel.RED
+
         # ----- هشدار زرد (مراقبت) -----
         # فشار فروش >= 35
         if sp_score >= self.yellow_threshold:
@@ -227,16 +283,34 @@ class AlertEngine:
         acc: AccumulationResult,
         state_key: str,
         combination_label: str,
-        interpretation: str
+        interpretation: str,
+        speed_result: Optional[SpeedIndicatorsResult] = None,
+        speed_confirmed: bool = False,
     ) -> AlertEvent:
         """ساخت رویداد هشدار."""
         if level == AlertLevel.RED:
-            title = "هشدار جدی ریسک خروج"
-            message = (
-                f"فشار فروش در حال تشدید است (امتیاز {sp.total_score:.0f}). "
-                f"جمع‌آوری ضعیف است (امتیاز {acc.total_score:.0f}). "
-                f"{self.alerts_cfg['red']['message']}"
-            )
+            if (speed_confirmed and speed_result is not None and
+                speed_result.speed_pressure_score is not None and
+                sp.total_score < self.red_threshold):
+                # قرمزِ ناشی از ارتقای سرعتی (فشار فروش هنوز در محدوده زرد بود)
+                title = "هشدار قرمز - ارتقای سرعتی نردبان"
+                message = (
+                    f"فشار فروش در محدوده هشدار زودهنگام است "
+                    f"(امتیاز {sp.total_score:.0f})، اما نردبان سفارش‌ها آن را "
+                    f"تأیید می‌کند: امتیاز فشار سرعتی "
+                    f"{speed_result.speed_pressure_score:.0f} در پنجره "
+                    f"{speed_result.window_samples} نمونه‌ای "
+                    f"(تخلیه تقاضا {((speed_result.demand_depletion_rate or 0)*100):.0f}٪، "
+                    f"رشد عرضه {((speed_result.supply_growth_rate or 0)*100):.0f}٪). "
+                    f"{self.alerts_cfg['red']['message']}"
+                )
+            else:
+                title = "هشدار جدی ریسک خروج"
+                message = (
+                    f"فشار فروش در حال تشدید است (امتیاز {sp.total_score:.0f}). "
+                    f"جمع‌آوری ضعیف است (امتیاز {acc.total_score:.0f}). "
+                    f"{self.alerts_cfg['red']['message']}"
+                )
             action = "بررسی نقدشوندگی و احتمال خروج"
             critical = True
         elif level == AlertLevel.ORANGE:
@@ -281,6 +355,7 @@ class AlertEngine:
             combination_state=combination_label,
             suggested_action=action,
             is_critical=critical,
+            speed_confirmed=speed_confirmed,
         )
 
     def reset(self):

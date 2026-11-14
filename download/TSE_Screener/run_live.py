@@ -37,6 +37,7 @@ from early_warning import (
     SellPressureDetector,
     SmartAccumulationDetector,
     AlertEngine,
+    SpeedIndicatorEngine,
     ExcelReportGenerator,
     MarketDataStorage,
     MarketPhase,
@@ -211,7 +212,7 @@ def main():
 
     print()
     print("=" * 70)
-    print(f"  TSE Early Warning Engine - حالت زنده (نسخه ۱.۱)")
+    print(f"  TSE Early Warning Engine - حالت زنده (نسخه ۱.۲)")
     print(f"  نماد: {args.symbol}  |  کد: {args.ins_code}")
     print(f"  فاصله نمونه‌برداری: {args.interval} ثانیه")
     print(f"  پایگاه داده: {args.db}")
@@ -222,6 +223,7 @@ def main():
     sp_detector = SellPressureDetector(config)
     acc_detector = SmartAccumulationDetector(config)
     alert_engine = AlertEngine(config)
+    speed_engine = SpeedIndicatorEngine(config)
 
     db_path = ROOT / args.db
     storage = MarketDataStorage(db_path)
@@ -265,7 +267,9 @@ def main():
                         if s.market_phase == MarketPhase.CONTINUOUS.value]
             sp = sp_detector.evaluate(snap, prev_snap)
             acc = acc_detector.evaluate(snap, prev_snap, history)
-            combined = alert_engine.evaluate(sp, acc)
+            # بعد سوم: شاخص‌های سرعتی نردبان → تأیید/ارتقای هشدار زرد
+            speed = speed_engine.compute(snap, history)
+            combined = alert_engine.evaluate(sp, acc, speed)
 
             sp_results.append(sp)
             acc_results.append(acc)
@@ -273,6 +277,11 @@ def main():
 
             print(f"  Sell Pressure : {sp.total_score:5.1f}/100  - {sp.level}")
             print(f"  Accumulation  : {acc.total_score:5.1f}/100  - {acc.level}")
+            if speed.speed_pressure_score is not None:
+                print(f"  Speed Pressure: {speed.speed_pressure_score:5.1f}/100  "
+                      f"({speed.data_status})")
+            else:
+                print(f"  Speed Pressure:     —/100  ({speed.data_status})")
             print(f"  وضعیت ترکیب  : {combined.combination_label}")
             if combined.alert and combined.alert.level.value != "بدون هشدار":
                 print(f"  🚨 {combined.alert.level.value}")
