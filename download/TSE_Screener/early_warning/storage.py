@@ -148,12 +148,36 @@ CREATE TABLE IF NOT EXISTS metadata (
 );
 """
 
+# جدول پارامترهای ثابت روز — یک ردیف برای هر نماد در هر روز.
+# این مقادیر در طول روز تغییر نمی‌کنند و نباید در هر snapshot تکرار شوند:
+#   yesterday_price, min_allowed_price, max_allowed_price, first_price
+SCHEMA_DAILY_PARAMS = """
+CREATE TABLE IF NOT EXISTS daily_params (
+    param_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    date_jalali       TEXT NOT NULL,
+    symbol            TEXT NOT NULL,
+    ins_code          TEXT,
+    category          TEXT,
+    range_percent     REAL,
+    yesterday_price   REAL,
+    first_price       REAL,
+    min_allowed_price REAL,
+    max_allowed_price REAL,
+    computed_at       TEXT,
+    UNIQUE(date_jalali, symbol)
+);
+"""
+
 # ستون‌های جدول snapshots به ترتیب (به جز autoincrement)
+# توجه: yesterday_price، min_allowed_price، max_allowed_price از این جدول حذف
+# شدند چون در طول روز ثابت‌اند و در جدول daily_params (یک ردیف در روز) ذخیره
+# می‌شوند. ستون‌ها در اسکیمای قدیمی باقی می‌مانند (برای سازگاری بانک‌های
+# قبلی) اما در رکوردهای جدید NULL می‌شوند.
 SNAPSHOT_COLUMNS = [
     "date_jalali", "timestamp", "tehran_time", "symbol", "ins_code",
     "market_phase", "symbol_status", "source_update_time", "data_status", "fetch_error",
-    "last_price", "close_price", "open_price", "yesterday_price",
-    "daily_high", "daily_low", "min_allowed_price", "max_allowed_price",
+    "last_price", "close_price", "open_price",
+    "daily_high", "daily_low",
     "best_buy_price", "best_buy_volume", "best_sell_price", "best_sell_volume",
     "buy_order_count", "sell_order_count",
     "bid_price_1", "bid_volume_1", "bid_count_1",
@@ -176,6 +200,13 @@ SNAPSHOT_COLUMNS = [
     "buyer_power", "per_capita_buy_real", "per_capita_sell_real",
     "real_money_flow", "real_money_flow_ratio",
     "data_complete", "missing_fields",
+]
+
+# ستون‌های جدول daily_params (پارامترهای ثابت روز — یک ردیف در روز)
+DAILY_PARAMS_COLUMNS = [
+    "date_jalali", "symbol", "ins_code", "category", "range_percent",
+    "yesterday_price", "first_price", "min_allowed_price", "max_allowed_price",
+    "computed_at",
 ]
 
 TRADE_COLUMNS = [
@@ -204,6 +235,7 @@ class MarketDataStorage:
         cur.executescript(SCHEMA_SNAPSHOTS)
         cur.executescript(SCHEMA_TRADES)
         cur.executescript(SCHEMA_METADATA)
+        cur.executescript(SCHEMA_DAILY_PARAMS)
         self.conn.commit()
 
     # ----- snapshots -----
@@ -274,6 +306,61 @@ class MarketDataStorage:
         cur.execute(sql, [meta[c] for c in cols])
         self.conn.commit()
         return cur.lastrowid
+
+    # ----- daily_params (پارامترهای ثابت روز — یک ردیف در روز) -----
+    def upsert_daily_params(self, params: Dict) -> int:
+        """
+        درج یا به‌روزرسانی پارامترهای ثابت روز برای یک نماد.
+
+        اگر رکوردی برای (date_jalali, symbol) وجود داشته باشد، به‌روزرسانی
+        می‌شود؛ در غیر این صورت ردیف جدید درج می‌شود. این تابع یک بار در
+        ابتدای اجرای run_live.py فراخوانی می‌شود.
+        """
+        cur = self.conn.cursor()
+        date_jalali = params.get("date_jalali", "")
+        symbol = params.get("symbol", "")
+        cur.execute(
+            "SELECT param_id FROM daily_params WHERE date_jalali=? AND symbol=?",
+            (date_jalali, symbol),
+        )
+        existing = cur.fetchone()
+        cols = DAILY_PARAMS_COLUMNS
+        values = [params.get(c) for c in cols]
+        if existing:
+            param_id = existing[0]
+            set_clause = ", ".join(f"{c}=?" for c in cols)
+            cur.execute(f"UPDATE daily_params SET {set_clause} WHERE param_id=?",
+                        (*values, param_id))
+        else:
+            placeholders = ", ".join(["?"] * len(cols))
+            col_names = ", ".join(cols)
+            cur.execute(f"INSERT INTO daily_params ({col_names}) VALUES ({placeholders})",
+                        values)
+            param_id = cur.lastrowid
+        self.conn.commit()
+        return param_id
+
+    def get_daily_params(self, symbol: str,
+                         date_jalali: Optional[str] = None) -> Optional[Dict]:
+        """
+        خواندن پارامترهای ثابت روز برای یک نماد.
+
+        اگر date_jalali داده نشود، آخرین رکورد نماد برمی‌گردد.
+        """
+        cur = self.conn.cursor()
+        if date_jalali:
+            cur.execute(
+                "SELECT * FROM daily_params WHERE symbol=? AND date_jalali=? "
+                "ORDER BY param_id DESC LIMIT 1",
+                (symbol, date_jalali),
+            )
+        else:
+            cur.execute(
+                "SELECT * FROM daily_params WHERE symbol=? ORDER BY param_id DESC LIMIT 1",
+                (symbol,),
+            )
+        row = cur.fetchone()
+        return dict(row) if row else None
 
     # ----- پرس‌وجو -----
     def get_snapshots_for_symbol(self, symbol: str,

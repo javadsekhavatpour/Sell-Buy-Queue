@@ -283,8 +283,35 @@ def fetch_payload(db_path: Path, symbol_filter: str | None, window: int) -> dict
             })
             return base
 
+        # --- پارامترهای ثابت روز از جدول daily_params ---
+        # yesterday_price/min_allowed/max_allowed دیگر در snapshots ذخیره نمی‌شوند
+        # (در طول روز ثابت‌اند)؛ از جدول daily_params خوانده می‌شوند.
+        def _enrich_with_daily_params(row_dict):
+            date_j = (row_dict.get("date_jalali") or "").strip()
+            sym = row_dict.get("symbol") or symbol
+            if date_j:
+                cur.execute(
+                    "SELECT * FROM daily_params WHERE symbol=? AND date_jalali=? "
+                    "ORDER BY param_id DESC LIMIT 1",
+                    (sym, date_j),
+                )
+            else:
+                cur.execute(
+                    "SELECT * FROM daily_params WHERE symbol=? ORDER BY param_id DESC LIMIT 1",
+                    (sym,),
+                )
+            dp = cur.fetchone()
+            if dp:
+                dp = dict(dp)
+                for k in ("yesterday_price", "min_allowed_price", "max_allowed_price"):
+                    if not row_dict.get(k):
+                        row_dict[k] = dp.get(k)
+            return row_dict
+
+        last_row = _enrich_with_daily_params(dict(last_row))
+
         # --- پنجره نمودار: نمونه‌های همان روزِ آخرین نمونه (تا window نمونه) ---
-        date_f = (last_row["date_jalali"] or "").strip()
+        date_f = (last_row.get("date_jalali") or "").strip()
         if date_f:
             cur.execute(
                 "SELECT * FROM snapshots WHERE symbol=? AND date_jalali=? "
@@ -296,7 +323,7 @@ def fetch_payload(db_path: Path, symbol_filter: str | None, window: int) -> dict
                 "SELECT * FROM snapshots WHERE symbol=? ORDER BY snapshot_id DESC LIMIT ?",
                 (symbol, window),
             )
-        hist = [dict(r) for r in reversed(cur.fetchall())]
+        hist = [_enrich_with_daily_params(dict(r)) for r in reversed(cur.fetchall())]
 
         # --- آمار بانک برای گروه F ---
         cur.execute("SELECT COUNT(*) FROM snapshots WHERE symbol=?", (symbol,))

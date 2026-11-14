@@ -29,7 +29,7 @@ import sys
 import json
 import time
 import argparse
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 
 ROOT = Path(__file__).parent
@@ -45,6 +45,11 @@ from early_warning import (
     ExcelReportGenerator,
     MarketDataStorage,
     MarketPhase,
+    load_range_rules,
+    get_symbol_category,
+    get_category_percent,
+    compute_daily_params,
+    to_jalali,
 )
 
 
@@ -214,6 +219,118 @@ def save_symbol_to_config(config: dict, symbol: str, ins_code: str):
         print(f"⚠ خطا در ذخیره پیکربندی: {e}")
 
 
+def load_price_range(args, config: dict, collector, storage):
+    """
+    محاسبه، ذخیره و بارگذاری پارامترهای ثابت روز — یک بار در ابتدای اجرا.
+
+    مراحل:
+      ۱. دسته نماد از config/symbol_categories.json (نگاشت دستی) خوانده می‌شود
+      ۲. درصد مجاز از config/tse_range_rules.json خوانده می‌شود
+      ۳. yesterday_price از اولین فراخوانی API دریافت می‌شود
+      ۴. min/max_allowed_price = yesterday_price × (1 ± pct/100) محاسبه می‌شود
+      ۵. مقادیر در جدول daily_params بانک ذخیره می‌شوند (یک ردیف در روز)
+      ۶. مقادیر ثابت در config['test_symbol']['fixed_price_range'] تزریق می‌شوند
+
+    این مقادیر در طول روز ثابت می‌مانند و در هر رکورد snapshot تکرار نمی‌شوند.
+    data_collector در هر نمونه فقط fixed_price_range را از پیکربندی می‌خواند.
+
+    fallback: اگر دسته نماد در symbol_categories.json نبود، هشدار می‌دهد و
+    از limit_percent پیکربندی استفاده می‌کند.
+    """
+    symbol = args.symbol or config.get("test_symbol", {}).get("name", "")
+    ins_code = args.ins_code or config.get("test_symbol", {}).get("ins_code", "")
+    config_dir = ROOT / "config"
+    if not symbol:
+        return
+
+    print("─" * 60)
+    print("  محاسبه پارامترهای ثابت روز (یک بار، ثابت برای کل جلسه)")
+    print("─" * 60)
+
+    # ── ۱. دسته نماد از symbol_categories.json (دستی) ──
+    category = get_symbol_category(symbol, config_dir)
+    if not category:
+        print(f"  ⚠ نماد «{symbol}» در config/symbol_categories.json یافت نشد.")
+        print(f"    لطفاً دسته این نماد را در فایل اضافه کنید.")
+        print(f"    دسته‌های موجود در tse_range_rules.json:")
+        for r in load_range_rules(config_dir):
+            print(f"      • {r['cat']} ({r['pct']}%)")
+        print(f"  ⚠ از limit_percent پیکربندی استفاده می‌شود.")
+        print("─" * 60)
+        return
+
+    # ── ۲. درصد مجاز از tse_range_rules.json ──
+    pct = get_category_percent(category, config_dir)
+    if pct is None:
+        print(f"  ⚠ دسته «{category}» در tse_range_rules.json یافت نشد.")
+        print(f"  ⚠ از limit_percent پیکربندی استفاده می‌شود.")
+        print("─" * 60)
+        return
+
+    print(f"  ✓ نماد: {symbol}")
+    print(f"  ✓ دسته (از symbol_categories.json): {category}")
+    print(f"  ✓ درصد مجاز (از tse_range_rules.json): {pct}%")
+
+    # ── ۳. دریافت yesterday_price از TSETMC ──
+    yesterday_price = 0.0
+    if ins_code:
+        inst = collector.fetch_intraday(str(ins_code))
+        if inst:
+            yesterday_price = float(inst.get("yesterday_price", 0) or 0)
+    if yesterday_price <= 0:
+        base = float(config.get("test_symbol", {}).get("base_price", 0) or 0)
+        if base > 0:
+            yesterday_price = base
+            print(f"  ⚠ yesterday_price از API دریافت نشد — استفاده از base_price: {yesterday_price:,.0f}")
+        else:
+            print("  [!] قیمت دیروز دریافت نشد — محاسبه کف/سقف ممکن نیست.")
+            print("─" * 60)
+            return
+    else:
+        print(f"  ✓ قیمت دیروز (yesterday_price): {yesterday_price:,.0f}")
+
+    # ── ۴. محاسبه min/max ──
+    params = compute_daily_params(symbol, yesterday_price, config_dir)
+    if not params:
+        print("  [!] محاسبه پارامترها ناموفق بود.")
+        print("─" * 60)
+        return
+
+    print(f"  ✓ کف مجاز: {params['min_allowed_price']:,.0f}")
+    print(f"  ✓ سقف مجاز: {params['max_allowed_price']:,.0f}")
+
+    # ── ۵. ذخیره در جدول daily_params (یک ردیف در روز) ──
+    date_jalali = to_jalali(date.today())
+    daily_record = {
+        "date_jalali": date_jalali,
+        "symbol": symbol,
+        "ins_code": str(ins_code),
+        "category": params["category"],
+        "range_percent": params["range_percent"],
+        "yesterday_price": params["yesterday_price"],
+        "first_price": None,  # بعداً از اولین معامله پر می‌شود
+        "min_allowed_price": params["min_allowed_price"],
+        "max_allowed_price": params["max_allowed_price"],
+        "computed_at": datetime.now().isoformat(),
+    }
+    storage.upsert_daily_params(daily_record)
+    print(f"  ✓ در جدول daily_params بانک ذخیره شد (یک ردیف برای امروز).")
+
+    # ── ۶. تزریق مقادیر ثابت در پیکربندی نماد ──
+    cfg_sym = config.setdefault("test_symbol", {})
+    cfg_sym["fixed_price_range"] = {
+        "yesterday_price": params["yesterday_price"],
+        "min_allowed_price": params["min_allowed_price"],
+        "max_allowed_price": params["max_allowed_price"],
+        "range_percent": params["range_percent"],
+        "category": params["category"],
+    }
+    cfg_sym["limit_percent"] = params["range_percent"]
+    cfg_sym["base_price"] = params["yesterday_price"]
+
+    print("─" * 60)
+
+
 def main():
     args = parse_args()
     config = load_config_with_prompt(args)
@@ -237,14 +354,22 @@ def main():
     print("=" * 70)
 
     collector = MarketDataCollector(config)
+    db_path = ROOT / args.db
+    storage = MarketDataStorage(db_path)
+
+    # ----- محاسبه پارامترهای ثابت روز (یک بار، ثابت برای کل جلسه) -----
+    # ابتدا collector و storage ساخته می‌شوند چون load_price_range از collector
+    # برای دریافت yesterday_price و از storage برای ذخیره در daily_params
+    # استفاده می‌کند. مقادیر محاسبه‌شده در config تزریق می‌شود و چون collector
+    # به همان reference نگه‌داری می‌کند، در تمام نمونه‌های بعدی از
+    # fixed_price_range ثابت استفاده می‌کند.
+    load_price_range(args, config, collector, storage)
+
     validator = DataValidator()
     sp_detector = SellPressureDetector(config)
     acc_detector = SmartAccumulationDetector(config)
     alert_engine = AlertEngine(config)
     speed_engine = SpeedIndicatorEngine(config)
-
-    db_path = ROOT / args.db
-    storage = MarketDataStorage(db_path)
 
     snapshots = []            # همه نمونه‌ها (هر interval ثانیه) - برای بانک و CSV
     engine_snapshots = []     # نمونه‌های لحظه اجرای موتورها (هر analysis_interval ثانیه)
