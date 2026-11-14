@@ -47,6 +47,9 @@ from early_warning import (
     MarketPhase,
 )
 
+# ماژول محاسبه کف/سقف مجاز روز (یک بار در ابتدای اجرا از بانک خوانده می‌شود)
+from calc_price_range import get_price_range as _load_price_range
+
 
 def load_config() -> dict:
     cfg_path = ROOT / "config" / "warning_thresholds.json"
@@ -214,6 +217,51 @@ def save_symbol_to_config(config: dict, symbol: str, ins_code: str):
         print(f"⚠ خطا در ذخیره پیکربندی: {e}")
 
 
+def load_price_range(args, config: dict):
+    """
+    خواندن کف/سقف مجاز روز از جدول price_range بانک اطلاعاتی.
+
+    این تابع یک بار در ابتدای اجرا فراخوانی می‌شود و مقادیر ثابتِ روز
+    (range_percent، yesterday_price، min/max_allowed_price) را در پیکربندی
+    نماد قرار می‌دهد تا collector در تمام نمونه‌ها از همان مقادیر استفاده کند
+    و در هر نمونه مجدد محاسبه نکند.
+
+    اگر رکوردی در price_range نبود، هشدار می‌دهد و از رفتار قدیمی
+    (limit_percent از پیکربندی) استفاده می‌کند.
+    """
+    db_path = ROOT / args.db
+    symbol = args.symbol or config.get("test_symbol", {}).get("name", "")
+    if not symbol:
+        return
+
+    pr = _load_price_range(db_path, symbol)
+    if not pr:
+        print(f"⚠ رکورد price_range برای نماد «{symbol}» در بانک یافت نشد.")
+        print(f"  ابتدا اجرا کنید: python calc_price_range.py {symbol}")
+        print(f"  (تا وقتی اجرا نکنید، از limit_percent پیکربندی استفاده می‌شود)")
+        return
+
+    # تزریق مقادیر ثابت در پیکربندی نماد
+    cfg_sym = config.setdefault("test_symbol", {})
+    cfg_sym["fixed_price_range"] = {
+        "yesterday_price": float(pr.get("yesterday_price", 0)),
+        "min_allowed_price": float(pr.get("min_allowed_price", 0)),
+        "max_allowed_price": float(pr.get("max_allowed_price", 0)),
+        "range_percent": float(pr.get("range_percent", 0)),
+        "category": pr.get("category", ""),
+    }
+    # به‌روزرسانی limit_percent و base_price نیز (برای سازگاری با کد قدیمی)
+    cfg_sym["limit_percent"] = float(pr.get("range_percent", cfg_sym.get("limit_percent", 10)))
+    cfg_sym["base_price"] = float(pr.get("yesterday_price", cfg_sym.get("base_price", 13000)))
+
+    print(f"✓ کف/سقف مجاز از جدول price_range بارگذاری شد (یک بار، ثابت برای کل جلسه):")
+    print(f"   دسته             : {pr.get('category', '?')}")
+    print(f"   درصد نوسان مجاز  : {pr.get('range_percent', 0)}%")
+    print(f"   قیمت دیروز       : {float(pr.get('yesterday_price', 0)):,.0f}")
+    print(f"   کف مجاز          : {float(pr.get('min_allowed_price', 0)):,.0f}")
+    print(f"   سقف مجاز         : {float(pr.get('max_allowed_price', 0)):,.0f}")
+
+
 def main():
     args = parse_args()
     config = load_config_with_prompt(args)
@@ -235,6 +283,9 @@ def main():
     print(f"  حداکثر نمونه: {max_samples}")
     print(f"  پایگاه داده: {args.db}")
     print("=" * 70)
+
+    # ----- خواندن کف/سقف مجاز روز از جدول price_range (یک بار، ثابت) -----
+    load_price_range(args, config)
 
     collector = MarketDataCollector(config)
     validator = DataValidator()

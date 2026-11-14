@@ -298,14 +298,23 @@ class MarketDataCollector:
             "max_allowed": 0,
         }
 
-        # کف و سقف مجاز روز - این فیلدها در API جدید نیستند؛ از قیمت دیروز
-        # با درصد محدودیت پیکربندی (limit_percent، پیش‌فرض ۱۰٪) محاسبه می‌شود
-        limit_pct = float(cfg_sym.get("limit_percent", 10))
-        low_factor = 1 - limit_pct / 100.0
-        high_factor = 1 + limit_pct / 100.0
-        if info["yesterday_price"] > 0:
-            info["min_allowed"] = round(info["yesterday_price"] * low_factor, 0)
-            info["max_allowed"] = round(info["yesterday_price"] * high_factor, 0)
+        # کف و سقف مجاز روز - اگر fixed_price_range در پیکربندی باشد (از جدول
+        # price_range توسط calc_price_range.py محاسبه و در run_live.py تزریق شده)،
+        # از همان مقادیر ثابت استفاده می‌کنیم؛ در غیر این صورت از limit_percent.
+        fixed_pr = cfg_sym.get("fixed_price_range")
+        if fixed_pr and float(fixed_pr.get("min_allowed_price", 0)) > 0:
+            info["min_allowed"] = float(fixed_pr["min_allowed_price"])
+            info["max_allowed"] = float(fixed_pr["max_allowed_price"])
+            # قیمت دیروز نیز ثابت (از price_range)، نه از API زنده
+            if float(fixed_pr.get("yesterday_price", 0)) > 0:
+                info["yesterday_price"] = float(fixed_pr["yesterday_price"])
+        else:
+            limit_pct = float(cfg_sym.get("limit_percent", 10))
+            low_factor = 1 - limit_pct / 100.0
+            high_factor = 1 + limit_pct / 100.0
+            if info["yesterday_price"] > 0:
+                info["min_allowed"] = round(info["yesterday_price"] * low_factor, 0)
+                info["max_allowed"] = round(info["yesterday_price"] * high_factor, 0)
 
         # دریافت BestLimits (۵ ردیف سفارش)
         limits_data = self._api_get(f"BestLimits/{ins_code}")
@@ -489,6 +498,16 @@ class MarketDataCollector:
         if not inst or (inst.get("last_price", 0) == 0 and inst.get("close_price", 0) == 0):
             # ساخت یک نمونه خالی ولی با اطلاعات زمانی
             now = datetime.now()
+            cfg_sym_err = self.cfg.get("test_symbol", {}) if isinstance(self.cfg, dict) else {}
+            fixed_pr_err = cfg_sym_err.get("fixed_price_range")
+            if fixed_pr_err and float(fixed_pr_err.get("yesterday_price", 0)) > 0:
+                yp = float(fixed_pr_err["yesterday_price"])
+                min_a = float(fixed_pr_err["min_allowed_price"])
+                max_a = float(fixed_pr_err["max_allowed_price"])
+            else:
+                yp = cfg_sym_err.get("base_price", 13000)
+                min_a = yp * 0.95
+                max_a = yp * 1.05
             snap = MarketSnapshot(
                 timestamp=now.isoformat(),
                 tehran_time=now.strftime("%H:%M:%S"),
@@ -497,19 +516,38 @@ class MarketDataCollector:
                 market_phase=self._detect_market_phase(),
                 data_status="error",
                 fetch_error="داده از TSETMC دریافت نشد - بررسی اتصال یا کد نماد",
-                yesterday_price=self.cfg.get("test_symbol", {}).get("base_price", 13000),
-                min_allowed_price=self.cfg.get("test_symbol", {}).get("base_price", 13000) * 0.95,
-                max_allowed_price=self.cfg.get("test_symbol", {}).get("base_price", 13000) * 1.05,
+                yesterday_price=yp,
+                min_allowed_price=min_a,
+                max_allowed_price=max_a,
             )
             return snap, []
 
         # ساخت نمونه
         now = datetime.now()
         cfg_sym = self.cfg.get("test_symbol", {}) if isinstance(self.cfg, dict) else {}
-        limit_pct = float(cfg_sym.get("limit_percent", 10))
-        low_factor = 1 - limit_pct / 100.0
-        high_factor = 1 + limit_pct / 100.0
-        yesterday_price = inst.get("yesterday_price") or cfg_sym.get("base_price", 13000)
+        fixed_pr = cfg_sym.get("fixed_price_range")
+        # yesterday_price: اگر fixed_price_range موجود است، ثابت از آن؛
+        # در غیر این صورت از داده زنده API یا base_price پیکربندی.
+        if fixed_pr and float(fixed_pr.get("yesterday_price", 0)) > 0:
+            yesterday_price = float(fixed_pr["yesterday_price"])
+        else:
+            yesterday_price = inst.get("yesterday_price") or cfg_sym.get("base_price", 13000)
+        # min/max_allowed: اولویت با inst (که fetch_intraday تنظیم کرده)؛
+        # در غیر این صورت از fixed_price_range یا محاسبه با limit_percent.
+        min_allowed = inst.get("min_allowed", 0)
+        max_allowed = inst.get("max_allowed", 0)
+        if min_allowed == 0:
+            if fixed_pr and float(fixed_pr.get("min_allowed_price", 0)) > 0:
+                min_allowed = float(fixed_pr["min_allowed_price"])
+            elif yesterday_price > 0:
+                limit_pct = float(cfg_sym.get("limit_percent", 10))
+                min_allowed = round(yesterday_price * (1 - limit_pct / 100.0), 0)
+        if max_allowed == 0:
+            if fixed_pr and float(fixed_pr.get("max_allowed_price", 0)) > 0:
+                max_allowed = float(fixed_pr["max_allowed_price"])
+            elif yesterday_price > 0:
+                limit_pct = float(cfg_sym.get("limit_percent", 10))
+                max_allowed = round(yesterday_price * (1 + limit_pct / 100.0), 0)
         snap = MarketSnapshot(
             timestamp=now.isoformat(),
             tehran_time=now.strftime("%H:%M:%S"),
@@ -525,8 +563,8 @@ class MarketDataCollector:
             yesterday_price=yesterday_price,
             daily_high=inst.get("daily_high", 0),
             daily_low=inst.get("daily_low", 0),
-            min_allowed_price=inst.get("min_allowed", 0) or (round(yesterday_price * low_factor, 0) if yesterday_price > 0 else 0),
-            max_allowed_price=inst.get("max_allowed", 0) or (round(yesterday_price * high_factor, 0) if yesterday_price > 0 else 0),
+            min_allowed_price=min_allowed,
+            max_allowed_price=max_allowed,
             base_volume=inst.get("base_volume", 100000),
             best_buy_price=inst["buy_rows"][0]["price"] if inst.get("buy_rows") else 0,
             best_buy_volume=inst["buy_rows"][0]["volume"] if inst.get("buy_rows") else 0,
