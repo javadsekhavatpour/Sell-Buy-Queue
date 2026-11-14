@@ -45,10 +45,10 @@ from early_warning import (
     ExcelReportGenerator,
     MarketDataStorage,
     MarketPhase,
+    compute_price_range,
+    save_price_range,
+    get_price_range,
 )
-
-# ماژول محاسبه کف/سقف مجاز روز (یک بار در ابتدای اجرا از بانک خوانده می‌شود)
-from calc_price_range import get_price_range as _load_price_range
 
 
 def load_config() -> dict:
@@ -217,49 +217,65 @@ def save_symbol_to_config(config: dict, symbol: str, ins_code: str):
         print(f"⚠ خطا در ذخیره پیکربندی: {e}")
 
 
-def load_price_range(args, config: dict):
+def load_price_range(args, config: dict, collector, db_path):
     """
-    خواندن کف/سقف مجاز روز از جدول price_range بانک اطلاعاتی.
+    محاسبه، ذخیره و بارگذاری کف/سقف مجاز روز — یک بار در ابتدای اجرا.
 
-    این تابع یک بار در ابتدای اجرا فراخوانی می‌شود و مقادیر ثابتِ روز
-    (range_percent، yesterday_price، min/max_allowed_price) را در پیکربندی
-    نماد قرار می‌دهد تا collector در تمام نمونه‌ها از همان مقادیر استفاده کند
-    و در هر نمونه مجدد محاسبه نکند.
+    این تابع با استفاده از collector، اطلاعات پایه نماد را از TSETMC دریافت
+    می‌کند، دسته نماد را تشخیص می‌دهد، درصد نوسان مجاز را از RANGE_RULES
+    می‌خواند، کف/سقف را نسبت به yesterday_price محاسبه و در جدول price_range
+    بانک ذخیره می‌کند. سپس مقادیر ثابت را در config['test_symbol']
+    ['fixed_price_range'] تزریق می‌کند تا collector در تمام نمونه‌ها از
+    همان مقادیر استفاده کند.
 
-    اگر رکوردی در price_range نبود، هشدار می‌دهد و از رفتار قدیمی
-    (limit_percent از پیکربندی) استفاده می‌کند.
+    اگر محاسبه تازه ناموفق بود (خطای شبکه)، رکورد قبلی بانک را می‌خواند.
+    اگر رکوردی هم نبود، از limit_percent پیکربندی استفاده می‌کند.
     """
-    db_path = ROOT / args.db
     symbol = args.symbol or config.get("test_symbol", {}).get("name", "")
+    ins_code = args.ins_code or config.get("test_symbol", {}).get("ins_code", "")
     if not symbol:
         return
 
-    pr = _load_price_range(db_path, symbol)
-    if not pr:
-        print(f"⚠ رکورد price_range برای نماد «{symbol}» در بانک یافت نشد.")
-        print(f"  ابتدا اجرا کنید: python calc_price_range.py {symbol}")
-        print(f"  (تا وقتی اجرا نکنید، از limit_percent پیکربندی استفاده می‌شود)")
-        return
+    print("─" * 50)
+    print("  محاسبه کف/سقف مجاز روز از TSETMC (یک بار، ثابت برای کل جلسه)")
+    print("─" * 50)
+
+    record = compute_price_range(collector, symbol, str(ins_code))
+
+    if record:
+        # ذخیره در بانک
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        save_price_range(db_path, record)
+        print(f"  ✓ در جدول price_range بانک ذخیره شد.")
+    else:
+        # fallback: رکورد قبلی بانک
+        print("  ⚠ محاسبه تازه ناموفق — تلاش برای خواندن رکورد قبلی بانک ...")
+        record = get_price_range(db_path, symbol)
+        if record:
+            print(f"  ✓ رکورد قبلی بانک پیدا شد.")
+        else:
+            print(f"  ⚠ رکوردی در بانک نیست — از limit_percent پیکربندی استفاده می‌شود.")
+            return
 
     # تزریق مقادیر ثابت در پیکربندی نماد
     cfg_sym = config.setdefault("test_symbol", {})
     cfg_sym["fixed_price_range"] = {
-        "yesterday_price": float(pr.get("yesterday_price", 0)),
-        "min_allowed_price": float(pr.get("min_allowed_price", 0)),
-        "max_allowed_price": float(pr.get("max_allowed_price", 0)),
-        "range_percent": float(pr.get("range_percent", 0)),
-        "category": pr.get("category", ""),
+        "yesterday_price": float(record["yesterday_price"]),
+        "min_allowed_price": float(record["min_allowed_price"]),
+        "max_allowed_price": float(record["max_allowed_price"]),
+        "range_percent": float(record["range_percent"]),
+        "category": record.get("category", ""),
     }
     # به‌روزرسانی limit_percent و base_price نیز (برای سازگاری با کد قدیمی)
-    cfg_sym["limit_percent"] = float(pr.get("range_percent", cfg_sym.get("limit_percent", 10)))
-    cfg_sym["base_price"] = float(pr.get("yesterday_price", cfg_sym.get("base_price", 13000)))
+    cfg_sym["limit_percent"] = float(record["range_percent"])
+    cfg_sym["base_price"] = float(record["yesterday_price"])
 
-    print(f"✓ کف/سقف مجاز از جدول price_range بارگذاری شد (یک بار، ثابت برای کل جلسه):")
-    print(f"   دسته             : {pr.get('category', '?')}")
-    print(f"   درصد نوسان مجاز  : {pr.get('range_percent', 0)}%")
-    print(f"   قیمت دیروز       : {float(pr.get('yesterday_price', 0)):,.0f}")
-    print(f"   کف مجاز          : {float(pr.get('min_allowed_price', 0)):,.0f}")
-    print(f"   سقف مجاز         : {float(pr.get('max_allowed_price', 0)):,.0f}")
+    print(f"  دسته             : {record.get('category', '?')}")
+    print(f"  درصد نوسان مجاز  : {record['range_percent']}%")
+    print(f"  قیمت دیروز       : {float(record['yesterday_price']):,.0f}")
+    print(f"  کف مجاز          : {float(record['min_allowed_price']):,.0f}")
+    print(f"  سقف مجاز         : {float(record['max_allowed_price']):,.0f}")
+    print("─" * 50)
 
 
 def main():
@@ -284,17 +300,21 @@ def main():
     print(f"  پایگاه داده: {args.db}")
     print("=" * 70)
 
-    # ----- خواندن کف/سقف مجاز روز از جدول price_range (یک بار، ثابت) -----
-    load_price_range(args, config)
-
+    # ----- محاسبه و ذخیره کف/سقف مجاز روز (یک بار، ثابت) -----
+    # ابتدا collector ساخته می‌شود چون load_price_range از آن برای ارتباط
+    # با TSETMC استفاده می‌کند. مقادیر محاسبه‌شده در config تزریق می‌شود
+    # و چون collector به همان reference نگه‌داری می‌کند، در نمونه‌های بعدی
+    # از fixed_price_range استفاده می‌کند.
     collector = MarketDataCollector(config)
+    db_path = ROOT / args.db
+    load_price_range(args, config, collector, db_path)
+
     validator = DataValidator()
     sp_detector = SellPressureDetector(config)
     acc_detector = SmartAccumulationDetector(config)
     alert_engine = AlertEngine(config)
     speed_engine = SpeedIndicatorEngine(config)
 
-    db_path = ROOT / args.db
     storage = MarketDataStorage(db_path)
 
     snapshots = []            # همه نمونه‌ها (هر interval ثانیه) - برای بانک و CSV
