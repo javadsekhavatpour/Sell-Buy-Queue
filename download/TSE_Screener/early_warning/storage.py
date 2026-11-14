@@ -169,15 +169,15 @@ CREATE TABLE IF NOT EXISTS daily_params (
 """
 
 # ستون‌های جدول snapshots به ترتیب (به جز autoincrement)
-# توجه: yesterday_price، min_allowed_price، max_allowed_price از این جدول حذف
-# شدند چون در طول روز ثابت‌اند و در جدول daily_params (یک ردیف در روز) ذخیره
-# می‌شوند. ستون‌ها در اسکیمای قدیمی باقی می‌مانند (برای سازگاری بانک‌های
-# قبلی) اما در رکوردهای جدید NULL می‌شوند.
+# توجه: yesterday_price، min_allowed_price، max_allowed_price همچنان در
+# snapshots ذخیره می‌شوند (با مقدار ثابت از fixed_price_range / daily_params)
+# تا داشبورد مستقیماً از snapshots بخواند. مقدار منبع مرجع در جدول
+# daily_params (یک ردیف در روز) است و در snapshots تکرار می‌شود.
 SNAPSHOT_COLUMNS = [
     "date_jalali", "timestamp", "tehran_time", "symbol", "ins_code",
     "market_phase", "symbol_status", "source_update_time", "data_status", "fetch_error",
-    "last_price", "close_price", "open_price",
-    "daily_high", "daily_low",
+    "last_price", "close_price", "open_price", "yesterday_price",
+    "daily_high", "daily_low", "min_allowed_price", "max_allowed_price",
     "best_buy_price", "best_buy_volume", "best_sell_price", "best_sell_volume",
     "buy_order_count", "sell_order_count",
     "bid_price_1", "bid_volume_1", "bid_count_1",

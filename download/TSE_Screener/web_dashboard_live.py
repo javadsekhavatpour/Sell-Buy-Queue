@@ -66,6 +66,12 @@ from early_warning.data_collector import (
     MarketSnapshot,
     Trade,
 )
+from early_warning.price_range import (
+    load_range_rules,
+    get_symbol_category,
+    get_category_percent,
+    compute_daily_params,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +108,90 @@ def load_cfg() -> dict:
     p = ROOT / "config" / "warning_thresholds.json"
     with open(p, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def load_price_range_live(cfg: dict, symbol: str, ins_code: str) -> None:
+    """
+    محاسبه پارامترهای ثابت روز برای داشبورد لایو و تزریق در cfg.
+
+    مراحل:
+      ۱. دسته نماد از config/symbol_categories.json (دستی)
+      ۲. درصد مجاز از config/tse_range_rules.json
+      ۳. yesterday_price از TSETMC (یا base_price به‌عنوان fallback)
+      ۴. min/max = yesterday_price × (1 ± pct/100)
+      ۵. تزریق در cfg['test_symbol']['fixed_price_range']
+
+    این مقادیر ثابت در طول روز هستند و data_collector از همان استفاده می‌کند.
+    داشبورد لایو بانک ندارد، پس فقط در config تزریق می‌شود (بدون daily_params).
+    """
+    config_dir = ROOT / "config"
+    print("─" * 60)
+    print("  محاسبه پارامترهای ثابت روز (داشبورد لایو)")
+    print("─" * 60)
+
+    # ── ۱. دسته نماد ──
+    category = get_symbol_category(symbol, config_dir)
+    if not category:
+        print(f"  ⚠ نماد «{symbol}» در config/symbol_categories.json یافت نشد.")
+        print(f"    دسته‌های موجود در tse_range_rules.json:")
+        for r in load_range_rules(config_dir):
+            print(f"      • {r['cat']} ({r['pct']}%)")
+        print(f"  ⚠ از limit_percent پیش‌فرض استفاده می‌شود.")
+        print("─" * 60)
+        return
+
+    # ── ۲. درصد مجاز ──
+    pct = get_category_percent(category, config_dir)
+    if pct is None:
+        print(f"  ⚠ دسته «{category}» در tse_range_rules.json یافت نشد.")
+        print("─" * 60)
+        return
+
+    print(f"  ✓ نماد: {symbol}")
+    print(f"  ✓ دسته: {category}")
+    print(f"  ✓ درصد مجاز: {pct}%")
+
+    # ── ۳. yesterday_price از TSETMC ──
+    yesterday_price = 0.0
+    if ins_code:
+        tmp_collector = MarketDataCollector(cfg)
+        inst = tmp_collector.fetch_intraday(str(ins_code))
+        if inst:
+            yesterday_price = float(inst.get("yesterday_price", 0) or 0)
+    if yesterday_price <= 0:
+        base = float(cfg.get("test_symbol", {}).get("base_price", 0) or 0)
+        if base > 0:
+            yesterday_price = base
+            print(f"  ⚠ yesterday_price از API دریافت نشد — base_price: {yesterday_price:,.0f}")
+        else:
+            print("  [!] قیمت دیروز دریافت نشد — محاسبه کف/سقف ممکن نیست.")
+            print("─" * 60)
+            return
+    else:
+        print(f"  ✓ قیمت دیروز: {yesterday_price:,.0f}")
+
+    # ── ۴. محاسبه min/max ──
+    params = compute_daily_params(symbol, yesterday_price, config_dir)
+    if not params:
+        print("  [!] محاسبه پارامترها ناموفق بود.")
+        print("─" * 60)
+        return
+
+    print(f"  ✓ کف مجاز: {params['min_allowed_price']:,.0f}")
+    print(f"  ✓ سقف مجاز: {params['max_allowed_price']:,.0f}")
+
+    # ── ۵. تزریق در config ──
+    cfg_sym = cfg.setdefault("test_symbol", {})
+    cfg_sym["fixed_price_range"] = {
+        "yesterday_price": params["yesterday_price"],
+        "min_allowed_price": params["min_allowed_price"],
+        "max_allowed_price": params["max_allowed_price"],
+        "range_percent": params["range_percent"],
+        "category": params["category"],
+    }
+    cfg_sym["limit_percent"] = params["range_percent"]
+    cfg_sym["base_price"] = params["yesterday_price"]
+    print("─" * 60)
 
 
 # ---------------------------------------------------------------------------
@@ -795,6 +885,14 @@ def main():
             print(f"کد پیدا شد: {args.ins_code}")
         else:
             print(f"نماد '{args.symbol}' پیدا نشد - از کد پیکربندی استفاده می‌شود.")
+
+    # ----- محاسبه پارامترهای ثابت روز (کف/سقف مجاز) -----
+    # در حالت live: دسته و درصد از فایل‌های دستی، yesterday_price از API
+    # در حالت demo: از base_price پیکربندی استفاده می‌شود
+    sym_final = args.symbol or cfg.get("test_symbol", {}).get("name", "")
+    ins_final = args.ins_code or cfg.get("test_symbol", {}).get("ins_code", "")
+    if args.mode == "live" and sym_final:
+        load_price_range_live(cfg, sym_final, ins_final)
 
     MONITOR = LiveMonitor(
         cfg,
