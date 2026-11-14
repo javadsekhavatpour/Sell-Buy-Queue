@@ -7,11 +7,15 @@ run_live.py
 
 نحوه اجرا (Windows 10):
     cd C:\\TSE_Screener
-    python run_live.py --symbol دابور --ins-code 4674107287748763521
+    python run_live.py
 
-این اسکریپت هر ۶۰ ثانیه یک نمونه از تابلو دریافت می‌کند، در SQLite
-ذخیره می‌کند و موتورها را به‌صورت زنده اجرا می‌کند. هشدارها در کنسول
-چاپ می‌شوند و در پایان یک گزارش Excel کامل تولید می‌شود.
+نمونه‌برداری و تحلیل (نسخه ۱.۲):
+  - تابلو هر `sampling.interval_seconds` ثانیه (پیش‌فرض ۵ ثانیه) جمع‌آوری
+    و در SQLite ذخیره می‌شود (برای داشبورد زنده و گروه E)
+  - موتورهای تحلیلی با گام `sampling.analysis_interval_seconds`
+    (پیش‌فرض ۶۰ ثانیه) اجرا می‌شوند تا کالیبراسیون آستانه‌ها که برای
+    نمونه‌های ۶۰ ثانیه‌ای تنظیم شده حفظ شود
+  - حداکثر نمونه‌ها به‌صورت خودکار پوشش کامل جلسه (08:45 تا 12:30) است
 
 زمان‌بندی پیشنهادی:
     08:45-09:00  پیش‌گشایش (دریافت و ذخیره، بدون موتورها)
@@ -61,8 +65,12 @@ def parse_args():
     p = argparse.ArgumentParser(description="TSE Early Warning - Live Mode (SQLite)")
     p.add_argument("--symbol", default=None, help="نام نماد (اگر ندهید، از پیکربندی استفاده می‌شود)")
     p.add_argument("--ins-code", default=None, help="کد TSETMC (اگر ندهید، از پیکربندی استفاده می‌شود)")
-    p.add_argument("--interval", type=int, default=60, help="فاصله نمونه‌برداری (ثانیه)")
-    p.add_argument("--max-samples", type=int, default=226, help="حداکثر تعداد نمونه")
+    p.add_argument("--interval", type=int, default=None,
+                   help="فاصله نمونه‌برداری (ثانیه) - پیش‌فرض: sampling.interval_seconds پیکربندی (۵)")
+    p.add_argument("--analysis-interval", type=int, default=None,
+                   help="فاصله اجرای موتورهای تحلیلی (ثانیه) - پیش‌فرض: sampling.analysis_interval_seconds پیکربندی (۶۰)")
+    p.add_argument("--max-samples", type=int, default=None,
+                   help="حداکثر تعداد نمونه - پیش‌فرض: پوشش کامل جلسه معاملاتی")
     p.add_argument("--db", default="data/early_warning_live.sqlite", help="مسیر فایل SQLite")
     p.add_argument("--output", default="reports/early_warning_report_live.xlsx")
     p.add_argument("--prompt", action="store_true",
@@ -210,11 +218,21 @@ def main():
     args = parse_args()
     config = load_config_with_prompt(args)
 
+    # ----- حل پارامترهای زمان‌بندی (CLI > پیکربندی > مقدار پیش‌فرض) -----
+    sampling = config.get("sampling", {})
+    interval = args.interval if args.interval else int(sampling.get("interval_seconds", 60))
+    analysis_interval = (args.analysis_interval if args.analysis_interval
+                         else int(sampling.get("analysis_interval_seconds", 60)))
+    # پوشش کامل جلسه 08:45 تا 12:30 (۱۳۵۰۰ ثانیه) + حاشیه پیش‌گشایش
+    max_samples = args.max_samples if args.max_samples else int(13500 / interval) + 15
+
     print()
     print("=" * 70)
     print(f"  TSE Early Warning Engine - حالت زنده (نسخه ۱.۲)")
     print(f"  نماد: {args.symbol}  |  کد: {args.ins_code}")
-    print(f"  فاصله نمونه‌برداری: {args.interval} ثانیه")
+    print(f"  فاصله نمونه‌برداری: {interval} ثانیه")
+    print(f"  گام تحلیل موتورها: {analysis_interval} ثانیه")
+    print(f"  حداکثر نمونه: {max_samples}")
     print(f"  پایگاه داده: {args.db}")
     print("=" * 70)
 
@@ -228,15 +246,19 @@ def main():
     db_path = ROOT / args.db
     storage = MarketDataStorage(db_path)
 
-    snapshots = []
+    snapshots = []            # همه نمونه‌ها (هر interval ثانیه) - برای بانک و CSV
+    engine_snapshots = []     # نمونه‌های لحظه اجرای موتورها (هر analysis_interval ثانیه)
+    engine_prev = None        # نمونه قبلی از دید موتورها (گام تحلیل)
+    engine_history = []       # تاریخچه پیوسته برای موتور جمع‌آوری و شاخص‌های سرعتی
+    last_engine_eval = 0.0
     sp_results = []
     acc_results = []
     combined_states = []
     all_trades = []
 
-    for i in range(args.max_samples):
+    for i in range(max_samples):
         now = datetime.now()
-        print(f"\n[نمونه {i+1}/{args.max_samples}] {now.strftime('%H:%M:%S')}")
+        print(f"\n[نمونه {i+1}/{max_samples}] {now.strftime('%H:%M:%S')}")
 
         # ۱) دریافت داده + معاملات
         prev_snap = snapshots[-1] if snapshots else None
@@ -247,52 +269,63 @@ def main():
         )
         if snap is None:
             print("  ⚠ خطا در دریافت داده - تلاش مجدد در دوره بعد")
-            time.sleep(args.interval)
+            time.sleep(interval)
             continue
 
         # ۲) اعتبارسنجی
         q = validator.validate(snap)
         print(f"  فاز: {snap.market_phase}  |  کمال: {q.completeness_pct:.0f}%  |  معتبر: {q.is_valid}")
 
-        # ۳) ذخیره در SQLite
+        # ۳) ذخیره در SQLite (همه نمونه‌ها ذخیره می‌شوند - داشبورد از همین می‌خواند)
         snap_id = storage.insert_snapshot(snap)
         if trades:
             storage.insert_trades(trades, symbol=args.symbol,
                                    snapshot_time=snap.tehran_time)
         snap.snapshot_id = snap_id
 
-        # ۴) اجرای موتورها فقط در فاز پیوسته
+        # ۴) اجرای موتورها - فقط در فاز پیوسته و با گام تحلیل
+        # تابلو هر interval ثانیه جمع می‌شود ولی موتورهای تحلیلی با گام
+        # analysis_interval (پیش‌فرض ۶۰ ثانیه) اجرا می‌شوند تا کالیبراسیون
+        # آستانه‌ها (که برای نمونه‌های ۶۰ ثانیه‌ای تنظیم شده) حفظ شود.
         if snap.market_phase == MarketPhase.CONTINUOUS.value:
-            history = [s for s in snapshots[-5:]
-                        if s.market_phase == MarketPhase.CONTINUOUS.value]
-            sp = sp_detector.evaluate(snap, prev_snap)
-            acc = acc_detector.evaluate(snap, prev_snap, history)
-            # بعد سوم: شاخص‌های سرعتی نردبان → تأیید/ارتقای هشدار زرد
-            speed = speed_engine.compute(snap, history)
-            combined = alert_engine.evaluate(sp, acc, speed)
+            now_ts = time.time()
+            due = (last_engine_eval == 0.0 or
+                   (now_ts - last_engine_eval) >= analysis_interval)
+            if due:
+                sp = sp_detector.evaluate(snap, engine_prev)
+                acc = acc_detector.evaluate(snap, engine_prev, engine_history[-5:])
+                # بعد سوم: شاخص‌های سرعتی نردبان → تأیید/ارتقای هشدار زرد
+                speed = speed_engine.compute(snap, engine_history)
+                combined = alert_engine.evaluate(sp, acc, speed)
 
-            sp_results.append(sp)
-            acc_results.append(acc)
-            combined_states.append(combined)
+                engine_prev = snap
+                engine_history.append(snap)
+                engine_history = engine_history[-5:]
+                engine_snapshots.append(snap)
+                last_engine_eval = now_ts
 
-            print(f"  Sell Pressure : {sp.total_score:5.1f}/100  - {sp.level}")
-            print(f"  Accumulation  : {acc.total_score:5.1f}/100  - {acc.level}")
-            if speed.speed_pressure_score is not None:
-                print(f"  Speed Pressure: {speed.speed_pressure_score:5.1f}/100  "
-                      f"({speed.data_status})")
-            else:
-                print(f"  Speed Pressure:     —/100  ({speed.data_status})")
-            print(f"  وضعیت ترکیب  : {combined.combination_label}")
-            if combined.alert and combined.alert.level.value != "بدون هشدار":
-                print(f"  🚨 {combined.alert.level.value}")
-                print(f"     {combined.alert.message}")
+                sp_results.append(sp)
+                acc_results.append(acc)
+                combined_states.append(combined)
+
+                print(f"  Sell Pressure : {sp.total_score:5.1f}/100  - {sp.level}")
+                print(f"  Accumulation  : {acc.total_score:5.1f}/100  - {acc.level}")
+                if speed.speed_pressure_score is not None:
+                    print(f"  Speed Pressure: {speed.speed_pressure_score:5.1f}/100  "
+                          f"({speed.data_status})")
+                else:
+                    print(f"  Speed Pressure:     —/100  ({speed.data_status})")
+                print(f"  وضعیت ترکیب  : {combined.combination_label}")
+                if combined.alert and combined.alert.level.value != "بدون هشدار":
+                    print(f"  🚨 {combined.alert.level.value}")
+                    print(f"     {combined.alert.message}")
 
         snapshots.append(snap)
         all_trades.extend(trades)
 
         # ۵) انتظار تا نمونه بعدی
-        if i < args.max_samples - 1:
-            time.sleep(args.interval)
+        if i < max_samples - 1:
+            time.sleep(interval)
 
     # ۶) ثبت metadata
     if snapshots:
@@ -329,6 +362,7 @@ def main():
     )
 
     # ۸) تولید گزارش Excel نهایی
+    # تاریخچه موتورها با نمونه‌های لحظه تحلیل هم‌تراز است (نه همه نمونه‌ها)
     print("\n" + "=" * 70)
     print("  تولید گزارش Excel نهایی...")
     out_path = ROOT / args.output
@@ -337,7 +371,7 @@ def main():
     gen = ExcelReportGenerator(config)
     gen.generate(
         symbol=args.symbol,
-        snapshots=snapshots,
+        snapshots=engine_snapshots if engine_snapshots else snapshots,
         sp_results=sp_results,
         acc_results=acc_results,
         combined_states=combined_states,

@@ -1,17 +1,18 @@
 {
   "version": "1.0",
   "sampling": {
-    "interval_seconds": 60,
+    "interval_seconds": 5,
+    "analysis_interval_seconds": 60,
     "market_open": "09:00",
     "market_close": "12:30",
     "timezone": "Asia/Tehran",
-    "samples_per_hour": 60
+    "samples_per_hour": 720
   },
   "test_symbol": {
-    "name": "ریتون",
-    "ticker": "ریتون",
-    "ins_code": "14035144070182412",
-    "base_price": 23000
+    "name": "اهرم",
+    "ticker": "اهرم",
+    "ins_code": "17914401175772326",
+    "base_price": 93450
   },
   "sell_pressure": {
     "weights": {
