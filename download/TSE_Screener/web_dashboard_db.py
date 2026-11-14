@@ -284,28 +284,55 @@ def fetch_payload(db_path: Path, symbol_filter: str | None, window: int) -> dict
             return base
 
         # --- پارامترهای ثابت روز از جدول daily_params ---
-        # yesterday_price/min_allowed/max_allowed دیگر در snapshots ذخیره نمی‌شوند
-        # (در طول روز ثابت‌اند)؛ از جدول daily_params خوانده می‌شوند.
+        # فیلدهای yesterday_price/min_allowed/max_allowed/date_jalali ممکن است
+        # در snapshotهای قدیمی خالی باشند. در این صورت از جدول daily_params
+        # (با توجه به تاریخ روز) پر می‌شوند.
+        from datetime import date as _date
+        try:
+            from early_warning.price_range import to_jalali as _to_jalali
+        except Exception:
+            _to_jalali = None
+        _today_jalali = _to_jalali(_date.today()) if _to_jalali else ""
+
         def _enrich_with_daily_params(row_dict):
-            date_j = (row_dict.get("date_jalali") or "").strip()
             sym = row_dict.get("symbol") or symbol
-            if date_j:
-                cur.execute(
-                    "SELECT * FROM daily_params WHERE symbol=? AND date_jalali=? "
-                    "ORDER BY param_id DESC LIMIT 1",
-                    (sym, date_j),
-                )
-            else:
-                cur.execute(
-                    "SELECT * FROM daily_params WHERE symbol=? ORDER BY param_id DESC LIMIT 1",
-                    (sym,),
-                )
-            dp = cur.fetchone()
+            # اگر date_jalali در snapshot خالی است، از تاریخ امروز پر می‌شود
+            if not (row_dict.get("date_jalali") or "").strip():
+                row_dict["date_jalali"] = _today_jalali
+            date_j = (row_dict.get("date_jalali") or "").strip()
+            # جستجو در daily_params — اول با تاریخ snapshot، سپس با تاریخ امروز،
+            # سپس آخرین رکورد موجود نماد
+            dp = None
+            try:
+                if date_j:
+                    cur.execute(
+                        "SELECT * FROM daily_params WHERE symbol=? AND date_jalali=? "
+                        "ORDER BY param_id DESC LIMIT 1",
+                        (sym, date_j),
+                    )
+                    dp = cur.fetchone()
+                if not dp and _today_jalali:
+                    cur.execute(
+                        "SELECT * FROM daily_params WHERE symbol=? AND date_jalali=? "
+                        "ORDER BY param_id DESC LIMIT 1",
+                        (sym, _today_jalali),
+                    )
+                    dp = cur.fetchone()
+                if not dp:
+                    cur.execute(
+                        "SELECT * FROM daily_params WHERE symbol=? ORDER BY param_id DESC LIMIT 1",
+                        (sym,),
+                    )
+                    dp = cur.fetchone()
+            except Exception:
+                dp = None
             if dp:
                 dp = dict(dp)
                 for k in ("yesterday_price", "min_allowed_price", "max_allowed_price"):
                     if not row_dict.get(k):
                         row_dict[k] = dp.get(k)
+                if not (row_dict.get("date_jalali") or "").strip():
+                    row_dict["date_jalali"] = dp.get("date_jalali") or _today_jalali
             return row_dict
 
         last_row = _enrich_with_daily_params(dict(last_row))

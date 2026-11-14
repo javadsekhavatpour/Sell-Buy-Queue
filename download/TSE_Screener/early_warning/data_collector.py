@@ -19,12 +19,14 @@ import time
 import math
 import re
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from enum import Enum
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any
 
 import requests
+
+from .price_range import to_jalali
 
 
 # ---------------------------------------------------------------------------
@@ -512,6 +514,7 @@ class MarketDataCollector:
             snap = MarketSnapshot(
                 timestamp=now.isoformat(),
                 tehran_time=now.strftime("%H:%M:%S"),
+                date_jalali=to_jalali(date.today()),
                 symbol=symbol,
                 ins_code=ins_code,
                 market_phase=self._detect_market_phase(),
@@ -552,6 +555,7 @@ class MarketDataCollector:
         snap = MarketSnapshot(
             timestamp=now.isoformat(),
             tehran_time=now.strftime("%H:%M:%S"),
+            date_jalali=to_jalali(date.today()),
             symbol=symbol,
             ins_code=ins_code,
             market_phase=self._detect_market_phase(),

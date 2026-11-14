@@ -154,10 +154,13 @@ def load_price_range_live(cfg: dict, symbol: str, ins_code: str) -> None:
     # ── ۳. yesterday_price از TSETMC ──
     yesterday_price = 0.0
     if ins_code:
-        tmp_collector = MarketDataCollector(cfg)
-        inst = tmp_collector.fetch_intraday(str(ins_code))
-        if inst:
-            yesterday_price = float(inst.get("yesterday_price", 0) or 0)
+        try:
+            tmp_collector = MarketDataCollector(cfg)
+            inst = tmp_collector.fetch_intraday(str(ins_code))
+            if inst:
+                yesterday_price = float(inst.get("yesterday_price", 0) or 0)
+        except Exception as e:
+            print(f"  ⚠ خطا در دریافت yesterday_price از API: {e}")
     if yesterday_price <= 0:
         base = float(cfg.get("test_symbol", {}).get("base_price", 0) or 0)
         if base > 0:
