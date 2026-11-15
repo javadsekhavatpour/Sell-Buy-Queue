@@ -401,6 +401,16 @@ def main():
         q = validator.validate(snap)
         print(f"  فاز: {snap.market_phase}  |  کمال: {q.completeness_pct:.0f}%  |  معتبر: {q.is_valid}")
 
+        # ۲.۵) اعتبارسنجی رنج قیمت — bid/ask باید در [min, max] باشند
+        range_ok, out_of_range = snap.validate_bid_ask_range()
+        if not range_ok:
+            print(f"  ⚠ قیمت‌های bid/ask خارج از رنج مجاز — ذخیره در بانک رد شد")
+            for o in out_of_range:
+                print(f"    {o['side']}_{o['level']}: {o['price']:,.0f}  (مجاز: {o['min']:,.0f}–{o['max']:,.0f})")
+            snapshots.append(snap)  # در حافظه نگه می‌داریم برای موتورها
+            time.sleep(interval)
+            continue
+
         # ۳) ذخیره در SQLite (همه نمونه‌ها ذخیره می‌شوند - داشبورد از همین می‌خواند)
         snap_id = storage.insert_snapshot(snap)
         if trades:

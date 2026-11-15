@@ -159,6 +159,48 @@ class MarketSnapshot:
         d["missing_fields"] = ", ".join(self.missing_fields) if self.missing_fields else ""
         return d
 
+    def validate_bid_ask_range(self) -> tuple:
+        """
+        بررسی اینکه آیا قیمت‌های bid/ask در رنج مجاز [min, max] هستند.
+
+        بررسی می‌کند:
+          - ask_price_1 تا ask_price_5 (sell_rows)
+          - bid_price_1 تا bid_price_5 (buy_rows)
+
+        فقط قیمت‌های غیرصفر بررسی می‌شوند (صفر = ردیف خالی).
+
+        خروجی: (is_valid, out_of_range_list)
+          is_valid: True اگر همه قیمت‌ها در رنج هستند
+          out_of_range_list: لیست دیکشنری‌های {side, level, price} که خارج از رنج هستند
+        """
+        lo = self.min_allowed_price
+        hi = self.max_allowed_price
+        out_of_range = []
+
+        # اگر کف/سقف محاسبه نشده، اعتبارسنجی معنا ندارد → معتبر
+        if lo <= 0 or hi <= 0:
+            return (True, [])
+
+        # بررسی buy_rows (bid)
+        for i, row in enumerate(self.buy_rows[:5], 1):
+            if row.price and row.price > 0:
+                if not (lo <= row.price <= hi):
+                    out_of_range.append({
+                        "side": "bid", "level": i,
+                        "price": row.price, "min": lo, "max": hi,
+                    })
+
+        # بررسی sell_rows (ask)
+        for i, row in enumerate(self.sell_rows[:5], 1):
+            if row.price and row.price > 0:
+                if not (lo <= row.price <= hi):
+                    out_of_range.append({
+                        "side": "ask", "level": i,
+                        "price": row.price, "min": lo, "max": hi,
+                    })
+
+        return (len(out_of_range) == 0, out_of_range)
+
 
 # ---------------------------------------------------------------------------
 # کلکتور واقعی - TSETMC (نسخه ۲.۰ با fallback و diagnostic)

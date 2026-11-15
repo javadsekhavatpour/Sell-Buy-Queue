@@ -45,7 +45,7 @@ from datetime import datetime
 from pathlib import Path
 
 try:
-    from flask import Flask, jsonify
+    from flask import Flask, jsonify, request
 except ImportError:
     print("کتابخانه Flask نصب نیست.")
     print("نصب با: pip install flask")
@@ -391,10 +391,15 @@ class LiveMonitor:
             })
             return base
         s = hist[-1]
+        range_ok, out_of_range = s.validate_bid_ask_range()
         base.update({
             "ok": True,
             "samples": len(hist),
             "snapshot": s.to_dict(),
+            "range_validation": {
+                "ok": range_ok,
+                "out_of_range": out_of_range,
+            },
             "derived": self._derived(hist),
             "trades": [
                 {
@@ -435,6 +440,149 @@ def api_live():
     if MONITOR is None:
         return jsonify({"ok": False, "message": "مانیتور راه‌اندازی نشده است"}), 500
     return jsonify(MONITOR.payload())
+
+
+# ---------------------------------------------------------------------------
+# ویرایشگر وب درصد نوسان مجاز (config/tse_range_rules.html)
+# ---------------------------------------------------------------------------
+
+@app.route("/range-rules")
+def range_rules_editor():
+    """صفحه ویرایش درصد نوسان مجاز بر اساس پیشوند ISIN."""
+    from early_warning.isin_checker import parse_range_rules_html
+    html_path = ROOT / "config" / "tse_range_rules.html"
+    rules = parse_range_rules_html(html_path)
+
+    rows_html = ""
+    for prefix in sorted(rules.keys()):
+        cat, pct = rules[prefix]
+        rows_html += f"""
+        <tr>
+          <td class="prefix">{prefix}</td>
+          <td><input type="text" name="cat_{prefix}" value="{cat}" class="cat-input"></td>
+          <td><input type="number" name="pct_{prefix}" value="{pct}" step="0.5" min="0" max="100" class="pct-input"> ٪</td>
+        </tr>"""
+
+    return f"""<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>ویرایشگر درصد نوسان مجاز</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css">
+<style>
+body{{font-family:Vazirmatn,Tahoma,Arial,sans-serif;margin:30px;background:#f5f5f5}}
+h1{{color:#1a5276;font-size:20px}}
+table{{border-collapse:collapse;width:100%;max-width:800px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.1);margin:15px 0}}
+th,td{{border:1px solid #ddd;padding:10px 14px;text-align:center}}
+th{{background:#1a5276;color:#fff}}
+td.prefix{{font-family:monospace;font-weight:bold;color:#1a5276;font-size:15px}}
+.cat-input{{width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:3px;font-family:inherit}}
+.pct-input{{width:70px;padding:6px 8px;border:1px solid #ccc;border-radius:3px;font-family:inherit;text-align:center;font-weight:bold;color:#c0392b}}
+button{{background:#1a5276;color:#fff;border:none;padding:10px 30px;font-size:15px;border-radius:4px;cursor:pointer;font-family:inherit;margin:10px 0}}
+button:hover{{background:#21618c}}
+.note{{background:#fef9e7;border:1px solid #f9e79f;padding:12px 16px;margin:15px 0;border-radius:4px;font-size:13px;max-width:800px}}
+.msg{{padding:10px 16px;margin:10px 0;border-radius:4px;display:none;max-width:800px}}
+.msg.ok{{background:#e6f5ec;color:#0a8f3c;display:block}}
+.msg.err{{background:#fdeaea;color:#c62828;display:block}}
+</style>
+</head>
+<body>
+<h1>ویرایشگر درصد نوسان مجاز — بر اساس پیشوند ISIN</h1>
+<div class="note">
+  درصد نوسان مجاز هر دسته نماد بر اساس پیشوند ISIN تعیین می‌شود.<br>
+  برای تغییر، فقط عدد درصد را ویرایش کنید و دکمه «ذخیره» را بزنید.<br>
+  تغییرات در فایل <code>config/tse_range_rules.html</code> ذخیره می‌شود.
+</div>
+<div id="msg" class="msg"></div>
+<form id="form" method="post" action="/range-rules/save">
+<table>
+<thead><tr><th>پیشوند ISIN</th><th>دسته نماد</th><th>نوسان مجاز</th></tr></thead>
+<tbody>{rows_html}
+</tbody>
+</table>
+<button type="submit">ذخیره تغییرات</button>
+</form>
+</body>
+</html>"""
+
+
+@app.route("/range-rules/save", methods=["POST"])
+def range_rules_save():
+    """ذخیره درصد نوسان مجاز ویرایش‌شده در فایل HTML."""
+    from early_warning.isin_checker import parse_range_rules_html
+    html_path = ROOT / "config" / "tse_range_rules.html"
+    old_rules = parse_range_rules_html(html_path)
+
+    # خواندن مقادیر جدید از فرم
+    updated = {}
+    for prefix in old_rules.keys():
+        cat = request.form.get(f"cat_{prefix}", old_rules[prefix][0])
+        pct_str = request.form.get(f"pct_{prefix}", str(old_rules[prefix][1]))
+        try:
+            pct = float(pct_str)
+        except ValueError:
+            return jsonify({"ok": False, "message": f"درصد نامعتبر برای {prefix}: {pct_str}"}), 400
+        updated[prefix] = (cat, pct)
+
+    # بازنویسی فایل HTML با مقادیر جدید
+    try:
+        new_html = _build_range_rules_html(updated)
+        html_path.write_text(new_html, encoding="utf-8")
+        return jsonify({"ok": True, "message": "تغییرات ذخیره شد", "updated": len(updated)})
+    except Exception as e:
+        return jsonify({"ok": False, "message": f"خطا در ذخیره: {e}"}), 500
+
+
+def _build_range_rules_html(rules: dict) -> str:
+    """ساخت محتوای فایل HTML کانفیگ از دیکشنری قوانین."""
+    rows = []
+    for prefix in sorted(rules.keys()):
+        cat, pct = rules[prefix]
+        rows.append(
+            f'<tr><td class="prefix" data-prefix="{prefix}">{prefix}</td>'
+            f'<td class="cat">{cat}</td>'
+            f'<td class="pct" data-pct="{pct}">± {pct} ٪</td></tr>'
+        )
+    rows_html = "\n".join(rows)
+    return f"""<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>درصد نوسان مجاز بر اساس ISIN — بورس تهران</title>
+<style>
+body{{font-family:Tahoma,Arial,sans-serif;margin:20px;background:#f5f5f5}}
+h1{{color:#1a5276;font-size:18px}}
+table{{border-collapse:collapse;width:100%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.1)}}
+th,td{{border:1px solid #ddd;padding:10px 14px;text-align:center}}
+th{{background:#1a5276;color:#fff;font-weight:bold}}
+td.prefix{{font-family:monospace;font-weight:bold;color:#1a5276;font-size:15px}}
+td.cat{{text-align:right}}
+td.pct{{font-weight:bold;color:#c0392b}}
+tr:nth-child(even){{background:#f9f9f9}}
+.note{{background:#fef9e7;border:1px solid #f9e79f;padding:10px 14px;margin:15px 0;border-radius:4px;font-size:13px}}
+</style>
+</head>
+<body>
+
+<h1>درصد نوسان مجاز روزانه — بر اساس پیشوند ISIN</h1>
+
+<div class="note">
+  این صفحه فایل پیکربندی برنامه است. percentages توسط ماژول
+  <code>isin_checker</code> به‌صورت خودکار از این جدول خوانده می‌شوند.
+  برای ویرایش از راه مرورگر: <a href="/range-rules">ویرایشگر وب</a>
+</div>
+
+<table id="range-rules">
+<thead>
+<tr><th>پیشوند ISIN</th><th>دسته نماد</th><th>نوسان مجاز</th></tr>
+</thead>
+<tbody>
+{rows_html}
+</tbody>
+</table>
+
+</body>
+</html>"""
 
 
 # ---------------------------------------------------------------------------
