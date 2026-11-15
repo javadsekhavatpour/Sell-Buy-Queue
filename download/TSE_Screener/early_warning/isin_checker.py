@@ -26,10 +26,16 @@ def parse_range_rules_html(html_path: Path | str) -> Dict[str, Tuple[str, float]
     """
     خواندن جدول درصد نوسان مجاز از فایل HTML.
 
-    فایل HTML باید یک جدول با data-attributeهای زیر داشته باشد:
-      <td data-prefix="IRO7" ...>IRO7</td>
-      <td ...>صندوق‌های سرمایه‌گذاری (ETF)</td>
-      <td data-pct="10" ...>± 10 ٪</td>
+    دو فرمت پشتیبانی می‌شود:
+
+    فرمت ۱ (input fieldها — ویرایشگر):
+      <td><input type="number" name="pct_IRO7" value="10" data-prefix="IRO7"></td>
+      <td><input type="text" name="cat_IRO7" value="صندوق‌های سرمایه‌گذاری (ETF)"></td>
+
+    فرمت ۲ (data-attributeها — نمایشی):
+      <td data-prefix="IRO7">IRO7</td>
+      <td class="cat">صندوق‌های سرمایه‌گذاری (ETF)</td>
+      <td data-pct="10">± 10 ٪</td>
 
     خروجی: { "IRO7": ("صندوق‌های سرمایه‌گذاری (ETF)", 10.0), ... }
     """
@@ -39,34 +45,72 @@ def parse_range_rules_html(html_path: Path | str) -> Dict[str, Tuple[str, float]
 
     html = html_path.read_text(encoding="utf-8")
 
-    # استخراج ردیف‌های <tr> داخل <tbody>
-    # هر ردیف باید شامل data-prefix و data-pct باشد
     rules: Dict[str, Tuple[str, float]] = {}
 
-    # الگو: یک ردیف کامل <tr>...</tr> که data-prefix و data-pct دارد
-    # Group 1: prefix (از data-prefix)
-    # Group 2: محتوای td دوم (دسته) — می‌تواند شامل data-attribute هم باشد
-    # Group 3: pct (از data-pct)
-    row_pattern = re.compile(
-        r"<tr[^>]*>"                        # شروع ردیف
-        r".*?data-prefix\s*=\s*\"([^\"]+)\""  # پیشوند ISIN
-        r".*?<td[^>]*class=\"cat\"[^>]*>(.*?)</td>"  # دسته نماد
-        r".*?data-pct\s*=\s*\"([^\"]+)\""   # درصد
-        r".*?</tr>",
-        re.DOTALL | re.IGNORECASE,
-    )
+    # تقسیم به ردیف‌های <tr>...</tr>
+    tr_pattern = re.compile(r"<tr[^>]*>(.*?)</tr>", re.DOTALL | re.IGNORECASE)
 
-    for m in row_pattern.finditer(html):
-        prefix = m.group(1).strip().upper()
-        category_raw = m.group(2).strip()
-        # حذف تگ‌های HTML از نام دسته
-        category = re.sub(r"<[^>]+>", "", category_raw).strip()
-        try:
-            pct = float(m.group(3).strip())
-        except ValueError:
+    for tr_match in tr_pattern.finditer(html):
+        row_html = tr_match.group(1)
+
+        # ۱. استخراج پیشوند ISIN از data-prefix
+        prefix_m = re.search(r'data-prefix\s*=\s*"([^"]+)"', row_html, re.IGNORECASE)
+        if not prefix_m:
             continue
-        if prefix and pct > 0:
-            rules[prefix] = (category, pct)
+        prefix = prefix_m.group(1).strip().upper()
+
+        # ۲. استخراج درصد: اول از input value، بعد از data-pct
+        pct = None
+        # الگو: input با name="pct_..." و value="..."
+        pct_input_m = re.search(
+            r'<input[^>]*name\s*=\s*"pct_[^"]*"[^>]*value\s*=\s*"([^"]*)"',
+            row_html, re.IGNORECASE,
+        )
+        if not pct_input_m:
+            # الگو معکوس: value قبل از name
+            pct_input_m = re.search(
+                r'<input[^>]*value\s*=\s*"([^"]*)"[^>]*name\s*=\s*"pct_[^"]*"',
+                row_html, re.IGNORECASE,
+            )
+        if pct_input_m:
+            try:
+                pct = float(pct_input_m.group(1).strip())
+            except ValueError:
+                pct = None
+        if pct is None:
+            # fallback: data-pct روی td
+            pct_td_m = re.search(r'data-pct\s*=\s*"([^"]+)"', row_html, re.IGNORECASE)
+            if pct_td_m:
+                try:
+                    pct = float(pct_td_m.group(1).strip())
+                except ValueError:
+                    pct = None
+        if pct is None or pct <= 0:
+            continue
+
+        # ۳. استخراج دسته: اول از input value، بعد از td با class="cat"
+        category = ""
+        cat_input_m = re.search(
+            r'<input[^>]*name\s*=\s*"cat_[^"]*"[^>]*value\s*=\s*"([^"]*)"',
+            row_html, re.IGNORECASE,
+        )
+        if not cat_input_m:
+            cat_input_m = re.search(
+                r'<input[^>]*value\s*=\s*"([^"]*)"[^>]*name\s*=\s*"cat_[^"]*"',
+                row_html, re.IGNORECASE,
+            )
+        if cat_input_m:
+            category = cat_input_m.group(1).strip()
+        else:
+            # fallback: td با class="cat"
+            cat_td_m = re.search(
+                r'<td[^>]*class\s*=\s*"[^"]*cat[^"]*"[^>]*>(.*?)</td>',
+                row_html, re.DOTALL | re.IGNORECASE,
+            )
+            if cat_td_m:
+                category = re.sub(r"<[^>]+>", "", cat_td_m.group(1)).strip()
+
+        rules[prefix] = (category, pct)
 
     return rules
 

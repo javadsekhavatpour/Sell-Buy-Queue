@@ -448,62 +448,11 @@ def api_live():
 
 @app.route("/range-rules")
 def range_rules_editor():
-    """صفحه ویرایش درصد نوسان مجاز بر اساس پیشوند ISIN."""
-    from early_warning.isin_checker import parse_range_rules_html
+    """صفحه ویرایش درصد نوسان مجاز — سرو مستقیم فایل HTML کانفیگ."""
     html_path = ROOT / "config" / "tse_range_rules.html"
-    rules = parse_range_rules_html(html_path)
-
-    rows_html = ""
-    for prefix in sorted(rules.keys()):
-        cat, pct = rules[prefix]
-        rows_html += f"""
-        <tr>
-          <td class="prefix">{prefix}</td>
-          <td><input type="text" name="cat_{prefix}" value="{cat}" class="cat-input"></td>
-          <td><input type="number" name="pct_{prefix}" value="{pct}" step="0.5" min="0" max="100" class="pct-input"> ٪</td>
-        </tr>"""
-
-    return f"""<!DOCTYPE html>
-<html lang="fa" dir="rtl">
-<head>
-<meta charset="UTF-8">
-<title>ویرایشگر درصد نوسان مجاز</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css">
-<style>
-body{{font-family:Vazirmatn,Tahoma,Arial,sans-serif;margin:30px;background:#f5f5f5}}
-h1{{color:#1a5276;font-size:20px}}
-table{{border-collapse:collapse;width:100%;max-width:800px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.1);margin:15px 0}}
-th,td{{border:1px solid #ddd;padding:10px 14px;text-align:center}}
-th{{background:#1a5276;color:#fff}}
-td.prefix{{font-family:monospace;font-weight:bold;color:#1a5276;font-size:15px}}
-.cat-input{{width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:3px;font-family:inherit}}
-.pct-input{{width:70px;padding:6px 8px;border:1px solid #ccc;border-radius:3px;font-family:inherit;text-align:center;font-weight:bold;color:#c0392b}}
-button{{background:#1a5276;color:#fff;border:none;padding:10px 30px;font-size:15px;border-radius:4px;cursor:pointer;font-family:inherit;margin:10px 0}}
-button:hover{{background:#21618c}}
-.note{{background:#fef9e7;border:1px solid #f9e79f;padding:12px 16px;margin:15px 0;border-radius:4px;font-size:13px;max-width:800px}}
-.msg{{padding:10px 16px;margin:10px 0;border-radius:4px;display:none;max-width:800px}}
-.msg.ok{{background:#e6f5ec;color:#0a8f3c;display:block}}
-.msg.err{{background:#fdeaea;color:#c62828;display:block}}
-</style>
-</head>
-<body>
-<h1>ویرایشگر درصد نوسان مجاز — بر اساس پیشوند ISIN</h1>
-<div class="note">
-  درصد نوسان مجاز هر دسته نماد بر اساس پیشوند ISIN تعیین می‌شود.<br>
-  برای تغییر، فقط عدد درصد را ویرایش کنید و دکمه «ذخیره» را بزنید.<br>
-  تغییرات در فایل <code>config/tse_range_rules.html</code> ذخیره می‌شود.
-</div>
-<div id="msg" class="msg"></div>
-<form id="form" method="post" action="/range-rules/save">
-<table>
-<thead><tr><th>پیشوند ISIN</th><th>دسته نماد</th><th>نوسان مجاز</th></tr></thead>
-<tbody>{rows_html}
-</tbody>
-</table>
-<button type="submit">ذخیره تغییرات</button>
-</form>
-</body>
-</html>"""
+    if not html_path.exists():
+        return ("فایل config/tse_range_rules.html وجود ندارد.", 404)
+    return html_path.read_text(encoding="utf-8")
 
 
 @app.route("/range-rules/save", methods=["POST"])
@@ -524,7 +473,7 @@ def range_rules_save():
             return jsonify({"ok": False, "message": f"درصد نامعتبر برای {prefix}: {pct_str}"}), 400
         updated[prefix] = (cat, pct)
 
-    # بازنویسی فایل HTML با مقادیر جدید
+    # بازنویسی فایل HTML با مقادیر جدید (فرمت ویرایشگر با input fieldها)
     try:
         new_html = _build_range_rules_html(updated)
         html_path.write_text(new_html, encoding="utf-8")
@@ -534,45 +483,59 @@ def range_rules_save():
 
 
 def _build_range_rules_html(rules: dict) -> str:
-    """ساخت محتوای فایل HTML کانفیگ از دیکشنری قوانین."""
+    """ساخت محتوای فایل HTML ویرایشگر از دیکشنری قوانین (با input fieldها)."""
     rows = []
     for prefix in sorted(rules.keys()):
         cat, pct = rules[prefix]
         rows.append(
-            f'<tr><td class="prefix" data-prefix="{prefix}">{prefix}</td>'
-            f'<td class="cat">{cat}</td>'
-            f'<td class="pct" data-pct="{pct}">± {pct} ٪</td></tr>'
+            f'<tr>\n'
+            f'  <td class="prefix">{prefix}</td>\n'
+            f'  <td class="cat-cell"><input type="text" name="cat_{prefix}" value="{cat}" class="cat-input"></td>\n'
+            f'  <td class="pct-cell"><input type="number" name="pct_{prefix}" value="{pct:g}" step="0.5" min="0" max="100" class="pct-input" data-prefix="{prefix}"> ٪</td>\n'
+            f'</tr>'
         )
     rows_html = "\n".join(rows)
     return f"""<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<title>درصد نوسان مجاز بر اساس ISIN — بورس تهران</title>
+<title>درصد نوسان مجاز بر اساس ISIN — ویرایشگر</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css">
 <style>
-body{{font-family:Tahoma,Arial,sans-serif;margin:20px;background:#f5f5f5}}
-h1{{color:#1a5276;font-size:18px}}
+body{{font-family:Vazirmatn,Tahoma,Arial,sans-serif;margin:30px;background:#f5f5f5}}
+h1{{color:#1a5276;font-size:20px}}
+form{{max-width:850px;margin:0 auto}}
 table{{border-collapse:collapse;width:100%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.1)}}
 th,td{{border:1px solid #ddd;padding:10px 14px;text-align:center}}
 th{{background:#1a5276;color:#fff;font-weight:bold}}
 td.prefix{{font-family:monospace;font-weight:bold;color:#1a5276;font-size:15px}}
-td.cat{{text-align:right}}
-td.pct{{font-weight:bold;color:#c0392b}}
+td.cat-cell{{text-align:right}}
+td.pct-cell{{white-space:nowrap}}
+.cat-input{{width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:3px;font-family:inherit;font-size:14px}}
+.pct-input{{width:70px;padding:6px 8px;border:1px solid #ccc;border-radius:3px;font-family:inherit;text-align:center;font-weight:bold;color:#c0392b;font-size:15px}}
 tr:nth-child(even){{background:#f9f9f9}}
-.note{{background:#fef9e7;border:1px solid #f9e79f;padding:10px 14px;margin:15px 0;border-radius:4px;font-size:13px}}
+button{{background:#1a5276;color:#fff;border:none;padding:12px 35px;font-size:16px;border-radius:5px;cursor:pointer;font-family:inherit;margin:15px 0}}
+button:hover{{background:#21618c}}
+.note{{background:#fef9e7;border:1px solid #f9e79f;padding:12px 16px;margin:15px 0;border-radius:4px;font-size:13px;max-width:850px}}
+.msg{{padding:10px 16px;margin:10px 0;border-radius:4px;max-width:850px}}
+.msg.ok{{background:#e6f5ec;color:#0a8f3c}}
+.msg.err{{background:#fdeaea;color:#c62828}}
 </style>
 </head>
 <body>
 
-<h1>درصد نوسان مجاز روزانه — بر اساس پیشوند ISIN</h1>
+<h1>ویرایشگر درصد نوسان مجاز — بر اساس پیشوند ISIN</h1>
 
 <div class="note">
-  این صفحه فایل پیکربندی برنامه است. percentages توسط ماژول
-  <code>isin_checker</code> به‌صورت خودکار از این جدول خوانده می‌شوند.
-  برای ویرایش از راه مرورگر: <a href="/range-rules">ویرایشگر وب</a>
+  برای تغییر درصد نوسان مجاز، فقط عدد درصد را در فیلد مربوطه ویرایش کنید
+  و دکمه «ذخیره تغییرات» را بزنید.<br>
+  تغییرات در همین فایل ذخیره می‌شوند و در اجرای بعدی برنامه اعمال می‌گردند.
 </div>
 
-<table id="range-rules">
+<div id="msg" class="msg" style="display:none;"></div>
+
+<form id="range-form" method="post" action="/range-rules/save">
+<table>
 <thead>
 <tr><th>پیشوند ISIN</th><th>دسته نماد</th><th>نوسان مجاز</th></tr>
 </thead>
@@ -580,6 +543,33 @@ tr:nth-child(even){{background:#f9f9f9}}
 {rows_html}
 </tbody>
 </table>
+<button type="submit">ذخیره تغییرات</button>
+</form>
+
+<script>
+document.getElementById('range-form').addEventListener('submit', async function(e) {{
+  e.preventDefault();
+  const formData = new FormData(this);
+  const msg = document.getElementById('msg');
+  msg.style.display = 'none';
+  try {{
+    const resp = await fetch('/range-rules/save', {{method: 'POST', body: formData}});
+    const data = await resp.json();
+    if (data.ok) {{
+      msg.className = 'msg ok';
+      msg.textContent = '✓ ' + data.message + ' (' + data.updated + ' قانون)';
+    }} else {{
+      msg.className = 'msg err';
+      msg.textContent = '⚠ ' + data.message;
+    }}
+    msg.style.display = 'block';
+  }} catch(err) {{
+    msg.className = 'msg err';
+    msg.textContent = '⚠ خطا در ارتباط: ' + err;
+    msg.style.display = 'block';
+  }}
+}});
+</script>
 
 </body>
 </html>"""

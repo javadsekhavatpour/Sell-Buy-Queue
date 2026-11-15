@@ -2,56 +2,120 @@
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<title>درصد نوسان مجاز بر اساس ISIN — بورس تهران</title>
+<title>درصد نوسان مجاز بر اساس ISIN — ویرایشگر</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css">
 <style>
-body{font-family:Tahoma,Arial,sans-serif;margin:20px;background:#f5f5f5}
-h1{color:#1a5276;font-size:18px}
+body{font-family:Vazirmatn,Tahoma,Arial,sans-serif;margin:30px;background:#f5f5f5}
+h1{color:#1a5276;font-size:20px}
+form{max-width:850px;margin:0 auto}
 table{border-collapse:collapse;width:100%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.1)}
 th,td{border:1px solid #ddd;padding:10px 14px;text-align:center}
 th{background:#1a5276;color:#fff;font-weight:bold}
 td.prefix{font-family:monospace;font-weight:bold;color:#1a5276;font-size:15px}
-td.cat{text-align:right}
-td.pct{font-weight:bold;color:#c0392b}
+td.cat-cell{text-align:right}
+td.pct-cell{white-space:nowrap}
+.cat-input{width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:3px;font-family:inherit;font-size:14px}
+.pct-input{width:70px;padding:6px 8px;border:1px solid #ccc;border-radius:3px;font-family:inherit;text-align:center;font-weight:bold;color:#c0392b;font-size:15px}
 tr:nth-child(even){background:#f9f9f9}
-.note{background:#fef9e7;border:1px solid #f9e79f;padding:10px 14px;margin:15px 0;border-radius:4px;font-size:13px}
+button{background:#1a5276;color:#fff;border:none;padding:12px 35px;font-size:16px;border-radius:5px;cursor:pointer;font-family:inherit;margin:15px 0}
+button:hover{background:#21618c}
+.note{background:#fef9e7;border:1px solid #f9e79f;padding:12px 16px;margin:15px 0;border-radius:4px;font-size:13px;max-width:850px}
+.msg{padding:10px 16px;margin:10px 0;border-radius:4px;max-width:850px}
+.msg.ok{background:#e6f5ec;color:#0a8f3c}
+.msg.err{background:#fdeaea;color:#c62828}
 </style>
 </head>
 <body>
 
-<h1>درصد نوسان مجاز روزانه — بر اساس پیشوند ISIN</h1>
+<h1>ویرایشگر درصد نوسان مجاز — بر اساس پیشوند ISIN</h1>
 
 <div class="note">
-  این صفحه فایل پیکربندی برنامه است. percentages توسط ماژول
-  <code>isin_checker</code> به‌صورت خودکار از این جدول خوانده می‌شوند.
-  اگر قوانین بورس تغییر کرد، فقط این فایل HTML را ویرایش کنید.
+  برای تغییر درصد نوسان مجاز، فقط عدد درصد را در فیلد مربوطه ویرایش کنید
+  و دکمه «ذخیره تغییرات» را بزنید.<br>
+  تغییرات در همین فایل ذخیره می‌شوند و در اجرای بعدی برنامه اعمال می‌گردند.
 </div>
+
+<div id="msg" class="msg" style="display:none;"></div>
 
 <!--
   جدول درصد نوسان مجاز
-  هر ردیف: data-prefix (پیشوند ISIN) | data-pct (درصد)
-  isin_checker این data-attributeها را می‌خواند.
+  هر ردیف شامل:
+    - data-prefix روی input درصد (پیشوند ISIN)
+    - name="cat_<PREFIX>" برای نام دسته
+    - name="pct_<PREFIX>" برای درصد
+  isin_checker این فایل را می‌خواند و از value فیلدها استفاده می‌کند.
 -->
-<table id="range-rules">
+<form id="range-form" method="post" action="/range-rules/save">
+<table>
 <thead>
 <tr><th>پیشوند ISIN</th><th>دسته نماد</th><th>نوسان مجاز</th></tr>
 </thead>
 <tbody>
-<tr><td class="prefix" data-prefix="IRO1">IRO1</td><td class="cat">سهام بازار اصلی (تابلوی اصلی و فرعی)</td><td class="pct" data-pct="3">± 3 ٪</td></tr>
-<tr><td class="prefix" data-prefix="IRO4">IRO4</td><td class="cat">سهام بازار پایه / بازارهای دیگر</td><td class="pct" data-pct="3">± 3 ٪</td></tr>
-<tr><td class="prefix" data-prefix="IRO3">IRO3</td><td class="cat">حق تقدم</td><td class="pct" data-pct="6">± 6 ٪</td></tr>
-<tr><td class="prefix" data-prefix="IRO7">IRO7</td><td class="cat">صندوق‌های سرمایه‌گذاری (ETF)</td><td class="pct" data-pct="10">± 10 ٪</td></tr>
-<tr><td class="prefix" data-prefix="IRO5">IRO5</td><td class="cat">اوراق بدهی و مشتقه</td><td class="pct" data-pct="5">± 5 ٪</td></tr>
-<tr><td class="prefix" data-prefix="IRO6">IRO6</td><td class="cat">گواهی سپرده کالایی</td><td class="pct" data-pct="5">± 5 ٪</td></tr>
-<tr><td class="prefix" data-prefix="IRO8">IRO8</td><td class="cat">قرارداد آتی</td><td class="pct" data-pct="5">± 5 ٪</td></tr>
+<tr>
+  <td class="prefix">IRO1</td>
+  <td class="cat-cell"><input type="text" name="cat_IRO1" value="سهام بازار اصلی (تابلوی اصلی و فرعی)" class="cat-input"></td>
+  <td class="pct-cell"><input type="number" name="pct_IRO1" value="3" step="0.5" min="0" max="100" class="pct-input" data-prefix="IRO1"> ٪</td>
+</tr>
+<tr>
+  <td class="prefix">IRO4</td>
+  <td class="cat-cell"><input type="text" name="cat_IRO4" value="سهام بازار پایه / بازارهای دیگر" class="cat-input"></td>
+  <td class="pct-cell"><input type="number" name="pct_IRO4" value="3" step="0.5" min="0" max="100" class="pct-input" data-prefix="IRO4"> ٪</td>
+</tr>
+<tr>
+  <td class="prefix">IRO3</td>
+  <td class="cat-cell"><input type="text" name="cat_IRO3" value="حق تقدم" class="cat-input"></td>
+  <td class="pct-cell"><input type="number" name="pct_IRO3" value="6" step="0.5" min="0" max="100" class="pct-input" data-prefix="IRO3"> ٪</td>
+</tr>
+<tr>
+  <td class="prefix">IRO7</td>
+  <td class="cat-cell"><input type="text" name="cat_IRO7" value="صندوق‌های سرمایه‌گذاری (ETF)" class="cat-input"></td>
+  <td class="pct-cell"><input type="number" name="pct_IRO7" value="10" step="0.5" min="0" max="100" class="pct-input" data-prefix="IRO7"> ٪</td>
+</tr>
+<tr>
+  <td class="prefix">IRO5</td>
+  <td class="cat-cell"><input type="text" name="cat_IRO5" value="اوراق بدهی و مشتقه" class="cat-input"></td>
+  <td class="pct-cell"><input type="number" name="pct_IRO5" value="5" step="0.5" min="0" max="100" class="pct-input" data-prefix="IRO5"> ٪</td>
+</tr>
+<tr>
+  <td class="prefix">IRO6</td>
+  <td class="cat-cell"><input type="text" name="cat_IRO6" value="گواهی سپرده کالایی" class="cat-input"></td>
+  <td class="pct-cell"><input type="number" name="pct_IRO6" value="5" step="0.5" min="0" max="100" class="pct-input" data-prefix="IRO6"> ٪</td>
+</tr>
+<tr>
+  <td class="prefix">IRO8</td>
+  <td class="cat-cell"><input type="text" name="cat_IRO8" value="قرارداد آتی" class="cat-input"></td>
+  <td class="pct-cell"><input type="number" name="pct_IRO8" value="5" step="0.5" min="0" max="100" class="pct-input" data-prefix="IRO8"> ٪</td>
+</tr>
 </tbody>
 </table>
+<button type="submit">ذخیره تغییرات</button>
+</form>
 
-<div class="note">
-  <b>روش کار:</b><br>
-  ۱. نام نماد → ISIN از TSE دریافت می‌شود (مثلاً IRO7TSEF0121)<br>
-  ۲. پیشوند ISIN (۴ حرف اول، مثل IRO7) در این جدول جستجو می‌شود<br>
-  ۳. درصد متناظر → محاسبه کف/سقف: min = yesterday × (1−pct/100)، max = yesterday × (1+pct/100)
-</div>
+<script>
+// ارسال فرم با AJAX و نمایش پیام نتیجه
+document.getElementById('range-form').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const formData = new FormData(this);
+  const msg = document.getElementById('msg');
+  msg.style.display = 'none';
+  try {
+    const resp = await fetch('/range-rules/save', {method: 'POST', body: formData});
+    const data = await resp.json();
+    if (data.ok) {
+      msg.className = 'msg ok';
+      msg.textContent = '✓ ' + data.message + ' (' + data.updated + ' قانون)';
+    } else {
+      msg.className = 'msg err';
+      msg.textContent = '⚠ ' + data.message;
+    }
+    msg.style.display = 'block';
+  } catch(err) {
+    msg.className = 'msg err';
+    msg.textContent = '⚠ خطا در ارتباط: ' + err;
+    msg.style.display = 'block';
+  }
+});
+</script>
 
 </body>
 </html>
