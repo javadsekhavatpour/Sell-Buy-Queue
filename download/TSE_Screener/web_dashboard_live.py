@@ -71,7 +71,9 @@ from early_warning.price_range import (
     get_symbol_category,
     get_category_percent,
     compute_daily_params,
+    to_jalali,
 )
+from early_warning.storage import MarketDataStorage
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +112,8 @@ def load_cfg() -> dict:
         return json.load(f)
 
 
-def load_price_range_live(cfg: dict, symbol: str, ins_code: str) -> None:
+def load_price_range_live(cfg: dict, symbol: str, ins_code: str,
+                          storage: MarketDataStorage | None = None) -> None:
     """
     محاسبه پارامترهای ثابت روز برای داشبورد لایو و تزریق در cfg.
 
@@ -120,10 +123,13 @@ def load_price_range_live(cfg: dict, symbol: str, ins_code: str) -> None:
       ۳. yesterday_price از TSETMC (یا base_price به‌عنوان fallback)
       ۴. min/max = yesterday_price × (1 ± pct/100)
       ۵. تزریق در cfg['test_symbol']['fixed_price_range']
+      ۶. ذخیره در جدول daily_params بانک (اگر storage داده شده باشد)
 
     این مقادیر ثابت در طول روز هستند و data_collector از همان استفاده می‌کند.
-    داشبورد لایو بانک ندارد، پس فقط در config تزریق می‌شود (بدون daily_params).
+    اگر storage داده شود، مقادیر در daily_params ذخیره می‌شوند تا داشبورد بانک
+    نیز بتواند از همان استفاده کند.
     """
+    from datetime import date as _date
     config_dir = ROOT / "config"
     print("─" * 60)
     print("  محاسبه پارامترهای ثابت روز (داشبورد لایو)")
@@ -133,10 +139,11 @@ def load_price_range_live(cfg: dict, symbol: str, ins_code: str) -> None:
     category = get_symbol_category(symbol, config_dir)
     if not category:
         print(f"  ⚠ نماد «{symbol}» در config/symbol_categories.json یافت نشد.")
+        print(f"    لطفاً دسته این نماد را در فایل اضافه کنید تا درصد صحیح اعمال شود.")
         print(f"    دسته‌های موجود در tse_range_rules.json:")
         for r in load_range_rules(config_dir):
             print(f"      • {r['cat']} ({r['pct']}%)")
-        print(f"  ⚠ از limit_percent پیش‌فرض استفاده می‌شود.")
+        print(f"  ⚠ از limit_percent پیش‌فرض (۱۰٪) استفاده می‌شود — کف/سقف اشتباه!")
         print("─" * 60)
         return
 
@@ -144,6 +151,7 @@ def load_price_range_live(cfg: dict, symbol: str, ins_code: str) -> None:
     pct = get_category_percent(category, config_dir)
     if pct is None:
         print(f"  ⚠ دسته «{category}» در tse_range_rules.json یافت نشد.")
+        print(f"  ⚠ از limit_percent پیش‌فرض (۱۰٪) استفاده می‌شود — کف/سقف اشتباه!")
         print("─" * 60)
         return
 
@@ -194,6 +202,28 @@ def load_price_range_live(cfg: dict, symbol: str, ins_code: str) -> None:
     }
     cfg_sym["limit_percent"] = params["range_percent"]
     cfg_sym["base_price"] = params["yesterday_price"]
+
+    # ── ۶. ذخیره در جدول daily_params بانک ──
+    if storage is not None:
+        try:
+            today_j = to_jalali(_date.today())
+            daily_record = {
+                "date_jalali": today_j,
+                "symbol": symbol,
+                "ins_code": ins_code or "",
+                "category": params["category"],
+                "range_percent": params["range_percent"],
+                "yesterday_price": params["yesterday_price"],
+                "first_price": None,
+                "min_allowed_price": params["min_allowed_price"],
+                "max_allowed_price": params["max_allowed_price"],
+                "computed_at": datetime.now().isoformat(timespec="seconds"),
+            }
+            storage.upsert_daily_params(daily_record)
+            print(f"  ✓ ذخیره در daily_params (بانک): {today_j}")
+        except Exception as e:
+            print(f"  ⚠ خطا در ذخیره daily_params: {e}")
+
     print("─" * 60)
 
 
@@ -872,6 +902,7 @@ def main():
     ap.add_argument("--ins-code", default=None, help="کد TSETMC نماد")
     ap.add_argument("--interval", type=int, default=None, help="فاصله نمونه‌برداری (ثانیه)")
     ap.add_argument("--samples", type=int, default=226, help="تعداد نمونه شبیه‌ساز (حالت demo)")
+    ap.add_argument("--db", default="data/early_warning_live.sqlite", help="مسیر فایل SQLite برای daily_params")
     ap.add_argument("--port", type=int, default=8051)
     ap.add_argument("--host", default="127.0.0.1")
     args = ap.parse_args()
@@ -891,11 +922,19 @@ def main():
 
     # ----- محاسبه پارامترهای ثابت روز (کف/سقف مجاز) -----
     # در حالت live: دسته و درصد از فایل‌های دستی، yesterday_price از API
-    # در حالت demo: از base_price پیکربندی استفاده می‌شود
+    # مقادیر در config تزریق و در جدول daily_params بانک ذخیره می‌شوند
     sym_final = args.symbol or cfg.get("test_symbol", {}).get("name", "")
     ins_final = args.ins_code or cfg.get("test_symbol", {}).get("ins_code", "")
+    live_storage = None
     if args.mode == "live" and sym_final:
-        load_price_range_live(cfg, sym_final, ins_final)
+        db_path = ROOT / args.db
+        try:
+            live_storage = MarketDataStorage(db_path)
+            load_price_range_live(cfg, sym_final, ins_final, storage=live_storage)
+        except Exception as e:
+            print(f"  ⚠ خطا در ایجاد storage برای daily_params: {e}")
+            print(f"  ⚠ daily_params ذخیره نمی‌شود اما داشبورد ادامه می‌دهد.")
+            load_price_range_live(cfg, sym_final, ins_final)
 
     MONITOR = LiveMonitor(
         cfg,
@@ -910,14 +949,23 @@ def main():
 
     src = "TSETMC زنده" if args.mode == "live" else f"شبیه‌ساز (سناریو: {args.scenario})"
     print("=" * 60)
-    print("داشبورد رصد زنده تابلو - فقط نمایش، بدون ذخیره‌سازی")
+    print("داشبورد رصد زنده تابلو - نمایش زنده + ذخیره daily_params")
     print(f"منبع داده : {src}")
     print(f"نماد      : {MONITOR.symbol} (کد: {MONITOR.ins_code})")
     print(f"نمونه‌برداری: هر {MONITOR.interval} ثانیه")
+    if live_storage:
+        print(f"بانک       : {ROOT / args.db} (daily_params)")
     print(f"آدرس      : http://localhost:{args.port}")
     print("=" * 60)
 
-    app.run(host=args.host, port=args.port, threaded=True, debug=False, use_reloader=False)
+    try:
+        app.run(host=args.host, port=args.port, threaded=True, debug=False, use_reloader=False)
+    finally:
+        if live_storage:
+            try:
+                live_storage.close()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
