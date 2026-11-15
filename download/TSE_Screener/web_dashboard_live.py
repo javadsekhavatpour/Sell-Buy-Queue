@@ -3,7 +3,7 @@ web_dashboard_live.py (نسخه جدید داشبورد رصد و تایید ب�
 داشبورد وب زنده برای نمایش شش گروه داده تابلو در یک صفحه، شبیه تابلوی TSETMC.
 
 چیدمان صفحه (راست به چپ، مطابق تابلوی معاملاتی):
-  سطر اول:  راست = گروه A (اطلاعات پایه و قیمت) | مرکز = گروه C (حجم/ارزش تجمعی) | چپ = گروه E (معاملات انجام‌شده)
+  سطر اول:  راست = گروه A (اطلاعات پایه و قیمت) | مرکز = گروه C (حجم/ارزش تجمعی) | چپ = گروه E (خروجی موتورهای تحلیلی)
   سطر دوم:  راست = گروه B (عمق بازار - پنج ردیف)  | مرکز = گروه D (حقیقی/حقوقی)   | چپ = گروه F (وضعیت بازار)
   سطر سوم:  نمودار روند قیمت در نمونه‌های اخیر
 
@@ -80,6 +80,7 @@ from early_warning.isin_checker import (
     compute_range_from_isin,
 )
 from early_warning.storage import MarketDataStorage
+from early_warning.sell_pressure import SellPressureDetector
 
 
 # ---------------------------------------------------------------------------
@@ -285,6 +286,12 @@ class LiveMonitor:
         self.collector = None
         self._demo_snaps: list[MarketSnapshot] = []
         self._trades_by_time: dict[str, list[Trade]] = {}
+        # موتور تحلیلی فشار فروش (برای نمایش در گروه E)
+        try:
+            self.sell_pressure = SellPressureDetector(cfg)
+        except Exception as e:
+            print(f"  ⚠ SellPressureDetector راه‌اندازی نشد: {e}")
+            self.sell_pressure = None
 
     # --- اجرای حلقه پس‌زمینه ---
 
@@ -349,10 +356,13 @@ class LiveMonitor:
         d["last_to_close_diff"] = round(s.last_price - s.close_price, 2) if s.close_price > 0 else None
         d["last_to_close_pct"] = (round((s.last_price - s.close_price) / s.close_price * 100, 2)
                                   if s.close_price > 0 else None)
-        d["dist_to_floor_pct"] = (round((s.min_allowed_price - s.last_price) / s.min_allowed_price * 100, 2)
-                                  if s.min_allowed_price > 0 else None)
-        d["dist_to_ceiling_pct"] = (round((s.max_allowed_price - s.last_price) / s.max_allowed_price * 100, 2)
-                                    if s.max_allowed_price > 0 else None)
+        # فاصله تا کف/سقف مجاز — نسبت به yesterday_price (قیمت پایه)
+        d["dist_to_floor_abs"] = round(s.last_price - s.min_allowed_price, 0) if s.min_allowed_price > 0 else None
+        d["dist_to_ceiling_abs"] = round(s.max_allowed_price - s.last_price, 0) if s.max_allowed_price > 0 else None
+        d["dist_to_floor_pct"] = (round((s.last_price - s.min_allowed_price) / y * 100, 2)
+                                  if y > 0 and s.min_allowed_price > 0 else None)
+        d["dist_to_ceiling_pct"] = (round((s.max_allowed_price - s.last_price) / y * 100, 2)
+                                    if y > 0 and s.max_allowed_price > 0 else None)
         # سرعت تغییر قیمت آخرین (ریال بر دقیقه) بر اساس فاصله واقعی زمانی نمونه‌ها
         d["speed_per_min"] = None
         if len(hist) >= 6:
@@ -368,6 +378,23 @@ class LiveMonitor:
         d["volume_vs_base_pct"] = (round(s.total_volume / s.base_volume * 100, 1)
                                    if s.base_volume and s.base_volume > 0 else None)
         return d
+
+    # --- خروجی موتورهای تحلیلی (برای گروه E) ---
+
+    def _engine_output(self, hist: list[MarketSnapshot]) -> dict:
+        """اجرای موتورهای تحلیلی روی آخرین نمونه و ساخت خروجی برای داشبورد."""
+        out: dict = {"available": False}
+        if not self.sell_pressure or not hist:
+            return out
+        s = hist[-1]
+        prev = hist[-2] if len(hist) >= 2 else None
+        try:
+            result = self.sell_pressure.evaluate(s, prev)
+            out = result.to_dict()
+            out["available"] = True
+        except Exception as e:
+            out = {"available": False, "error": str(e)}
+        return out
 
     # --- بار JSON برای صفحه ---
 
@@ -411,6 +438,7 @@ class LiveMonitor:
                 }
                 for t in list(reversed(trades[-12:]))
             ],
+            "engines": self._engine_output(hist),
             "history": {
                 "time": [h.tehran_time for h in hist],
                 "last": [h.last_price for h in hist],
@@ -654,7 +682,7 @@ td.num{direction:ltr;text-align:right;font-variant-numeric:tabular-nums}
 .bar.sell i{background:rgba(198,40,40,.13)}
 .bar b{position:relative;z-index:1;font-size:11px;font-weight:600;direction:ltr}
 .spread{display:flex;justify-content:space-between;background:#f4f7fa;border-radius:6px;padding:5px 10px;margin-top:8px;font-size:12px}
-/* معاملات گروه E */
+/* خروجی موتور گروه E */
 .ttable td,.ttable th{padding:3px 6px;text-align:center}
 .ttable th{font-size:11px;color:var(--muted);border-bottom:1px solid var(--line)}
 .side-buy{color:var(--up);font-weight:700}
@@ -698,7 +726,7 @@ td.num{direction:ltr;text-align:right;font-variant-numeric:tabular-nums}
       <div class="body" id="p-c"><div class="wait">در انتظار داده...</div></div>
     </section>
     <section class="panel">
-      <h2><span class="gnum">E</span> معاملات انجام‌شده</h2>
+      <h2><span class="gnum">E</span> خروجی موتورهای تحلیلی</h2>
       <div class="body" id="p-e"><div class="wait">در انتظار داده...</div></div>
     </section>
   </div>
@@ -834,33 +862,61 @@ function renderC(d) {
     <div class="hint">مقادیر فاصله‌ای از تفاضل دو نمونه آخر به‌دست می‌آیند (در نخستین نمونه صفر هستند).</div>`;
 }
 
-/* ---------- گروه E ---------- */
+/* ---------- گروه E: خروجی موتورهای تحلیلی ---------- */
 function renderE(d) {
   const el = document.getElementById("p-e");
-  const trs = d.trades || [];
-  if (!trs.length) {
-    const msg = d.mode==="live"
-      ? "در نسخه فعلی جمع‌کننده زنده، فهرست لحظه‌ای معاملات از منبع در دسترس نیست (ستون اختیاری گروه E)."
-      : "در انتظار معاملات...";
-    el.innerHTML = `<div class="wait">${msg}</div>`;
+  const eng = d.engines || {};
+  if (!eng.available) {
+    el.innerHTML = `<div class="wait">${eng.error ? "خطای موتور: " + eng.error : "در حال اجرای موتور تحلیلی..."}</div>`;
     return;
   }
-  let rows = "";
-  for (const t of trs) {
-    rows += `<tr>
-      <td class="num">${t.trade_time}</td>
-      <td class="num">${N(t.trade_price)}</td>
-      <td class="num">${N(t.trade_volume)}</td>
-      <td class="num" style="font-size:10px;color:#5a6b7f">${t.trade_id||"—"}</td>
-      <td>${SIDE(t.aggressor_side)}</td>
+  const sp = eng;
+  const factors = sp.factors || [];
+  const ind1 = factors.find(f => f.name === "buyer_power_weakness") || {};
+
+  // امتیاز کل فشار فروش
+  const totalScore = sp.total_score || 0;
+  const scorePct = Math.min(100, totalScore);
+  const scoreColor = totalScore >= 65 ? "#c62828" : totalScore >= 35 ? "#f9a825" : "#2e7d32";
+
+  // ردیف‌های شاخص‌ها
+  let factorRows = "";
+  for (const f of factors) {
+    const isInd1 = f.name === "buyer_power_weakness";
+    const fScore = f.score || 0;
+    const fMax = f.max_points || 0;
+    const fPct = fMax > 0 ? Math.round(fScore / fMax * 100) : 0;
+    const fColor = fPct >= 50 ? "#c62828" : fPct >= 25 ? "#f9a825" : "#2e7d32";
+    factorRows += `<tr${isInd1 ? ' style="background:#fffde7;font-weight:bold"' : ''}>
+      <td>${isInd1 ? "★ " : ""}${f.label}</td>
+      <td class="num" style="color:${fColor}">${N(fScore, 1)} / ${N(fMax, 0)}</td>
+      <td class="num">${N(f.normalized * 100, 0)}٪</td>
+      <td class="num" style="font-size:10px">${N(f.raw_value, 3)} ${f.raw_unit}</td>
     </tr>`;
   }
+
   el.innerHTML = `
-    <table class="ttable">
-      <thead><tr><th>زمان</th><th>قیمت</th><th>حجم</th><th>شناسه</th><th>آغازگر</th></tr></thead>
-      <tbody>${rows}</tbody>
+    <div style="padding:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <b style="font-size:13px">امتیاز کل فشار فروش</b>
+        <span style="font-size:20px;font-weight:bold;color:${scoreColor}">${N(totalScore, 1)}<span style="font-size:12px;color:#888"> / ۱۰۰</span></span>
+      </div>
+      <div style="height:14px;background:#f0f0f0;border-radius:7px;overflow:hidden;margin-bottom:4px">
+        <div style="height:100%;width:${scorePct}%;background:${scoreColor};transition:width .5s"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:#5a6b7f;margin-bottom:8px">
+        <span>سطح: <b>${sp.level || "—"}</b></span>
+        <span>سیگنال‌های مستقل ≥ ۵۰٪: <b>${sp.independent_signals_count || 0}</b></span>
+        <span>${sp.is_critical ? '<b style="color:#c62828">منطقه خطر</b>' : '<b style="color:#2e7d32">ایمن</b>'}</span>
+      </div>
+    </div>
+    <table class="ttable" style="font-size:11px">
+      <thead><tr><th>شاخص</th><th>امتیاز</th><th>نرمال</th><th>مقدار خام</th></tr></thead>
+      <tbody>${factorRows}</tbody>
     </table>
-    <div class="hint">۱۲ معامله آخر در حافظه - جدیدترین در بالا.</div>`;
+    ${ind1.description ? `<div class="hint" style="background:#fffde7;padding:6px;margin:4px;border-right:3px solid #f9a825"><b>★ شاخص ۱ (۲۰ امتیاز):</b> ${ind1.description}</div>` : ""}
+    ${sp.data_quality_warning ? `<div class="hint" style="color:#c62828">⚠ ${sp.data_quality_warning}</div>` : ""}
+    <div class="hint">★ = شاخص ۱: ضعف قدرت خریدار حقیقی (۲۰ امتیاز) — خریدار ضعیف ← امتیاز بالا</div>`;
 }
 
 /* ---------- گروه B ---------- */
