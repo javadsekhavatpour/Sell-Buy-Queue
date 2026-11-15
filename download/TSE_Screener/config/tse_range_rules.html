@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>درصد نوسان مجاز بر اساس ISIN — بورس تهران</title>
+<style>
+body{font-family:Tahoma,Arial,sans-serif;margin:20px;background:#f5f5f5}
+h1{color:#1a5276;font-size:18px}
+table{border-collapse:collapse;width:100%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+th,td{border:1px solid #ddd;padding:10px 14px;text-align:center}
+th{background:#1a5276;color:#fff;font-weight:bold}
+td.prefix{font-family:monospace;font-weight:bold;color:#1a5276;font-size:15px}
+td.cat{text-align:right}
+td.pct{font-weight:bold;color:#c0392b}
+tr:nth-child(even){background:#f9f9f9}
+.note{background:#fef9e7;border:1px solid #f9e79f;padding:10px 14px;margin:15px 0;border-radius:4px;font-size:13px}
+</style>
+</head>
+<body>
+
+<h1>درصد نوسان مجاز روزانه — بر اساس پیشوند ISIN</h1>
+
+<div class="note">
+  این صفحه فایل پیکربندی برنامه است. percentages توسط ماژول
+  <code>isin_checker</code> به‌صورت خودکار از این جدول خوانده می‌شوند.
+  اگر قوانین بورس تغییر کرد، فقط این فایل HTML را ویرایش کنید.
+</div>
+
+<!--
+  جدول درصد نوسان مجاز
+  هر ردیف: data-prefix (پیشوند ISIN) | data-pct (درصد)
+  isin_checker این data-attributeها را می‌خواند.
+-->
+<table id="range-rules">
+<thead>
+<tr><th>پیشوند ISIN</th><th>دسته نماد</th><th>نوسان مجاز</th></tr>
+</thead>
+<tbody>
+<tr><td class="prefix" data-prefix="IRO1">IRO1</td><td class="cat">سهام بازار اصلی (تابلوی اصلی و فرعی)</td><td class="pct" data-pct="3">± 3 ٪</td></tr>
+<tr><td class="prefix" data-prefix="IRO4">IRO4</td><td class="cat">سهام بازار پایه / بازارهای دیگر</td><td class="pct" data-pct="3">± 3 ٪</td></tr>
+<tr><td class="prefix" data-prefix="IRO3">IRO3</td><td class="cat">حق تقدم</td><td class="pct" data-pct="6">± 6 ٪</td></tr>
+<tr><td class="prefix" data-prefix="IRO7">IRO7</td><td class="cat">صندوق‌های سرمایه‌گذاری (ETF)</td><td class="pct" data-pct="10">± 10 ٪</td></tr>
+<tr><td class="prefix" data-prefix="IRO5">IRO5</td><td class="cat">اوراق بدهی و مشتقه</td><td class="pct" data-pct="5">± 5 ٪</td></tr>
+<tr><td class="prefix" data-prefix="IRO6">IRO6</td><td class="cat">گواهی سپرده کالایی</td><td class="pct" data-pct="5">± 5 ٪</td></tr>
+<tr><td class="prefix" data-prefix="IRO8">IRO8</td><td class="cat">قرارداد آتی</td><td class="pct" data-pct="5">± 5 ٪</td></tr>
+</tbody>
+</table>
+
+<div class="note">
+  <b>روش کار:</b><br>
+  ۱. نام نماد → ISIN از TSE دریافت می‌شود (مثلاً IRO7TSEF0121)<br>
+  ۲. پیشوند ISIN (۴ حرف اول، مثل IRO7) در این جدول جستجو می‌شود<br>
+  ۳. درصد متناظر → محاسبه کف/سقف: min = yesterday × (1−pct/100)، max = yesterday × (1+pct/100)
+</div>
+
+</body>
+</html>

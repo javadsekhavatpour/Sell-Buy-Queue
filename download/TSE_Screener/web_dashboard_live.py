@@ -73,6 +73,12 @@ from early_warning.price_range import (
     compute_daily_params,
     to_jalali,
 )
+from early_warning.isin_checker import (
+    parse_range_rules_html,
+    get_isin_prefix,
+    get_range_percent_by_isin,
+    compute_range_from_isin,
+)
 from early_warning.storage import MarketDataStorage
 
 
@@ -118,49 +124,26 @@ def load_price_range_live(cfg: dict, symbol: str, ins_code: str,
     محاسبه پارامترهای ثابت روز برای داشبورد لایو و تزریق در cfg.
 
     مراحل:
-      ۱. دسته نماد از config/symbol_categories.json (دستی)
-      ۲. درصد مجاز از config/tse_range_rules.json
-      ۳. yesterday_price از TSETMC (یا base_price به‌عنوان fallback)
-      ۴. min/max = yesterday_price × (1 ± pct/100)
-      ۵. تزریق در cfg['test_symbol']['fixed_price_range']
-      ۶. ذخیره در جدول daily_params بانک (اگر storage داده شده باشد)
-
-    این مقادیر ثابت در طول روز هستند و data_collector از همان استفاده می‌کند.
-    اگر storage داده شود، مقادیر در daily_params ذخیره می‌شوند تا داشبورد بانک
-    نیز بتواند از همان استفاده کند.
+      ۱. yesterday_price از TSETMC (یا base_price به‌عنوان fallback)
+      ۲. ISIN از TSETMC دریافت می‌شود
+      ۳. درصد مجاز از config/tse_range_rules.html بر اساس پیشوند ISIN
+      ۴. (fallback) اگر ISIN دریافت نشد → از symbol_categories.json
+      ۵. min/max = yesterday_price × (1 ± pct/100)
+      ۶. تزریق در cfg['test_symbol']['fixed_price_range']
+      ۷. ذخیره در جدول daily_params بانک (اگر storage داده شده باشد)
     """
     from datetime import date as _date
     config_dir = ROOT / "config"
+    html_path = config_dir / "tse_range_rules.html"
     print("─" * 60)
     print("  محاسبه پارامترهای ثابت روز (داشبورد لایو)")
     print("─" * 60)
-
-    # ── ۱. دسته نماد ──
-    category = get_symbol_category(symbol, config_dir)
-    if not category:
-        print(f"  ⚠ نماد «{symbol}» در config/symbol_categories.json یافت نشد.")
-        print(f"    لطفاً دسته این نماد را در فایل اضافه کنید تا درصد صحیح اعمال شود.")
-        print(f"    دسته‌های موجود در tse_range_rules.json:")
-        for r in load_range_rules(config_dir):
-            print(f"      • {r['cat']} ({r['pct']}%)")
-        print(f"  ⚠ از limit_percent پیش‌فرض (۱۰٪) استفاده می‌شود — کف/سقف اشتباه!")
-        print("─" * 60)
-        return
-
-    # ── ۲. درصد مجاز ──
-    pct = get_category_percent(category, config_dir)
-    if pct is None:
-        print(f"  ⚠ دسته «{category}» در tse_range_rules.json یافت نشد.")
-        print(f"  ⚠ از limit_percent پیش‌فرض (۱۰٪) استفاده می‌شود — کف/سقف اشتباه!")
-        print("─" * 60)
-        return
-
     print(f"  ✓ نماد: {symbol}")
-    print(f"  ✓ دسته: {category}")
-    print(f"  ✓ درصد مجاز: {pct}%")
 
-    # ── ۳. yesterday_price از TSETMC ──
+    # ── ۱. yesterday_price از TSETMC ──
     yesterday_price = 0.0
+    isin = ""
+    tmp_collector = None
     if ins_code:
         try:
             tmp_collector = MarketDataCollector(cfg)
@@ -181,29 +164,69 @@ def load_price_range_live(cfg: dict, symbol: str, ins_code: str,
     else:
         print(f"  ✓ قیمت دیروز: {yesterday_price:,.0f}")
 
-    # ── ۴. محاسبه min/max ──
-    params = compute_daily_params(symbol, yesterday_price, config_dir)
-    if not params:
-        print("  [!] محاسبه پارامترها ناموفق بود.")
-        print("─" * 60)
-        return
+    # ── ۲. ISIN از TSETMC ──
+    if tmp_collector and ins_code:
+        try:
+            isin = tmp_collector.fetch_isin(str(ins_code)) or ""
+        except Exception as e:
+            print(f"  ⚠ خطا در دریافت ISIN از API: {e}")
+    if isin:
+        print(f"  ✓ ISIN: {isin}  (پیشوند: {get_isin_prefix(isin)})")
 
-    print(f"  ✓ کف مجاز: {params['min_allowed_price']:,.0f}")
-    print(f"  ✓ سقف مجاز: {params['max_allowed_price']:,.0f}")
+    # ── ۳. درصد مجاز بر اساس ISIN (از HTML کانفیگ) ──
+    category = None
+    pct = None
+    if isin and html_path.exists():
+        rules = parse_range_rules_html(html_path)
+        result = get_range_percent_by_isin(isin, rules=rules)
+        if result:
+            category, pct = result
+            print(f"  ✓ دسته (از ISIN): {category}")
+            print(f"  ✓ درصد مجاز (از HTML): {pct}%")
 
-    # ── ۵. تزریق در config ──
+    # ── ۴. fallback: symbol_categories.json + tse_range_rules.json ──
+    if pct is None:
+        if isin:
+            print(f"  ⚠ پیشوند «{get_isin_prefix(isin)}» در tse_range_rules.html یافت نشد.")
+        print(f"  ⚠ fallback → جستجو در symbol_categories.json...")
+        category_fb = get_symbol_category(symbol, config_dir)
+        if category_fb:
+            pct_fb = get_category_percent(category_fb, config_dir)
+            if pct_fb is not None:
+                category = category_fb
+                pct = pct_fb
+                print(f"  ✓ دسته (fallback): {category}")
+                print(f"  ✓ درصد مجاز (fallback): {pct}%")
+        if pct is None:
+            print(f"  ⚠ نماد در هیچ منبعی یافت نشد.")
+            print(f"    دسته‌های موجود در tse_range_rules.html:")
+            if html_path.exists():
+                for prefix, (cat, p) in parse_range_rules_html(html_path).items():
+                    print(f"      • {prefix} → {cat} ({p}%)")
+            print(f"  ⚠ از limit_percent پیش‌فرض (۱۰٪) استفاده می‌شود — کف/سقف اشتباه!")
+            print("─" * 60)
+            return
+
+    # ── ۵. محاسبه min/max ──
+    min_allowed = round(yesterday_price * (1 - pct / 100.0), 0)
+    max_allowed = round(yesterday_price * (1 + pct / 100.0), 0)
+    print(f"  ✓ کف مجاز: {min_allowed:,.0f}")
+    print(f"  ✓ سقف مجاز: {max_allowed:,.0f}")
+
+    # ── ۶. تزریق در config ──
     cfg_sym = cfg.setdefault("test_symbol", {})
     cfg_sym["fixed_price_range"] = {
-        "yesterday_price": params["yesterday_price"],
-        "min_allowed_price": params["min_allowed_price"],
-        "max_allowed_price": params["max_allowed_price"],
-        "range_percent": params["range_percent"],
-        "category": params["category"],
+        "yesterday_price": yesterday_price,
+        "min_allowed_price": min_allowed,
+        "max_allowed_price": max_allowed,
+        "range_percent": pct,
+        "category": category or "",
+        "isin": isin,
     }
-    cfg_sym["limit_percent"] = params["range_percent"]
-    cfg_sym["base_price"] = params["yesterday_price"]
+    cfg_sym["limit_percent"] = pct
+    cfg_sym["base_price"] = yesterday_price
 
-    # ── ۶. ذخیره در جدول daily_params بانک ──
+    # ── ۷. ذخیره در جدول daily_params بانک ──
     if storage is not None:
         try:
             today_j = to_jalali(_date.today())
@@ -211,12 +234,12 @@ def load_price_range_live(cfg: dict, symbol: str, ins_code: str,
                 "date_jalali": today_j,
                 "symbol": symbol,
                 "ins_code": ins_code or "",
-                "category": params["category"],
-                "range_percent": params["range_percent"],
-                "yesterday_price": params["yesterday_price"],
+                "category": category or "",
+                "range_percent": pct,
+                "yesterday_price": yesterday_price,
                 "first_price": None,
-                "min_allowed_price": params["min_allowed_price"],
-                "max_allowed_price": params["max_allowed_price"],
+                "min_allowed_price": min_allowed,
+                "max_allowed_price": max_allowed,
                 "computed_at": datetime.now().isoformat(timespec="seconds"),
             }
             storage.upsert_daily_params(daily_record)

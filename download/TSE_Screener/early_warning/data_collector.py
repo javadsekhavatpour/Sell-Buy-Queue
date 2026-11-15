@@ -450,6 +450,46 @@ class MarketDataCollector:
 
         return result
 
+    # -----------------------------------------------------------------
+    # دریافت اطلاعات سازمت (شامل ISIN) از API جدید
+    # -----------------------------------------------------------------
+
+    def fetch_instrument_info(self, ins_code: str) -> Optional[Dict]:
+        """
+        دریافت اطلاعات سازمت از Instrument/GetInstrumentInfo/{InsCode}.
+
+        این endpoint فیلدهایی مثل cIsin (کد ISIN)، lVal18AFC (نماد) و
+        lVal30 (نام کامل) را برمی‌گرداند.
+        """
+        data = self._api_get(f"Instrument/GetInstrumentInfo/{ins_code}")
+        if not data or not isinstance(data, dict):
+            return None
+        info = data.get("instrumentInfo") or data.get("InstrumentInfo")
+        if isinstance(info, list) and info:
+            info = info[0]
+        if not isinstance(info, dict):
+            # گاهی کل پاسخ خود instrumentInfo است
+            if "cIsin" in data or "cISIN" in data:
+                info = data
+            else:
+                return None
+        return info
+
+    def fetch_isin(self, ins_code: str) -> Optional[str]:
+        """
+        دریافت کد ISIN نماد از API.
+
+        مثال: ins_code=17914401175772326 → ISIN="IRO7TSEF0121"
+        پیشوند ISIN (مثل IRO7) دسته نماد را مشخص می‌کند.
+        """
+        info = self.fetch_instrument_info(ins_code)
+        if not info:
+            return None
+        isin = info.get("cIsin") or info.get("cISIN") or info.get("isin")
+        if isin:
+            return str(isin).strip().upper()
+        return None
+
     def fetch_trades(self, ins_code: str) -> List[Trade]:
         """
         دریافت معاملات انجام‌شده اخیر از API جدید.
