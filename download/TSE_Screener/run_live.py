@@ -39,7 +39,7 @@ from early_warning import (
     MarketDataCollector,
     DataValidator,
     SellPressureDetector,
-    SmartAccumulationDetector,
+    BuyPressureDetector,
     AlertEngine,
     SpeedIndicatorEngine,
     ExcelReportGenerator,
@@ -367,7 +367,7 @@ def main():
 
     validator = DataValidator()
     sp_detector = SellPressureDetector(config)
-    acc_detector = SmartAccumulationDetector(config)
+    buy_detector = BuyPressureDetector(config)
     alert_engine = AlertEngine(config)
     speed_engine = SpeedIndicatorEngine(config)
 
@@ -377,7 +377,7 @@ def main():
     engine_history = []       # تاریخچه پیوسته برای موتور جمع‌آوری و شاخص‌های سرعتی
     last_engine_eval = 0.0
     sp_results = []
-    acc_results = []
+    buy_results = []
     combined_states = []
     all_trades = []
 
@@ -428,28 +428,29 @@ def main():
                    (now_ts - last_engine_eval) >= analysis_interval)
             if due:
                 sp = sp_detector.evaluate(snap, engine_prev)
-                acc = acc_detector.evaluate(snap, engine_prev, engine_history[-5:])
-                # بعد سوم: شاخص‌های سرعتی نردبان → تأیید/ارتقای هشدار زرد
+                buy = buy_detector.evaluate(snap, engine_prev, engine_history)
+                # شاخص‌های سرعتی نردبان (فقط برای نمایش؛ در v2 جزو alert_engine نیست)
                 speed = speed_engine.compute(snap, engine_history)
-                combined = alert_engine.evaluate(sp, acc, speed)
+                combined = alert_engine.evaluate(sp, buy)
 
                 engine_prev = snap
                 engine_history.append(snap)
-                engine_history = engine_history[-5:]
+                engine_history = engine_history[-36:]   # buy_support به ۳۶ نمونه نیاز دارد
                 engine_snapshots.append(snap)
                 last_engine_eval = now_ts
 
                 sp_results.append(sp)
-                acc_results.append(acc)
+                buy_results.append(buy)
                 combined_states.append(combined)
 
                 print(f"  Sell Pressure : {sp.total_score:5.1f}/100  - {sp.level}")
-                print(f"  Accumulation  : {acc.total_score:5.1f}/100  - {acc.level}")
+                print(f"  Buy Pressure  : {buy.total_score:5.1f}/100  - {buy.level}")
                 if speed.speed_pressure_score is not None:
                     print(f"  Speed Pressure: {speed.speed_pressure_score:5.1f}/100  "
                           f"({speed.data_status})")
                 else:
                     print(f"  Speed Pressure:     —/100  ({speed.data_status})")
+                print(f"  طبقه‌بندی    : {combined.classification}")
                 print(f"  وضعیت ترکیب  : {combined.combination_label}")
                 if combined.alert and combined.alert.level.value != "بدون هشدار":
                     print(f"  🚨 {combined.alert.level.value}")
@@ -508,7 +509,7 @@ def main():
         symbol=args.symbol,
         snapshots=engine_snapshots if engine_snapshots else snapshots,
         sp_results=sp_results,
-        acc_results=acc_results,
+        acc_results=buy_results,   # buy_results → acc_results (نام پارامتر در ExcelReport)
         combined_states=combined_states,
         alert_events=alert_engine.get_all_events(),
         output_path=out_path,

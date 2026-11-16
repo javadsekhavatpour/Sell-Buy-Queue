@@ -26,7 +26,7 @@ from openpyxl.chart import LineChart, BarChart, Reference
 from openpyxl.chart.label import DataLabelList
 
 from .sell_pressure import SellPressureResult
-from .smart_accumulation import AccumulationResult
+from .smart_accumulation import BuyPressureResult, AccumulationResult   # AccumulationResult = alias
 from .alert_engine import CombinedState, AlertEvent, AlertLevel
 from .data_collector import MarketSnapshot, Trade
 
@@ -254,7 +254,7 @@ class ExcelReportGenerator:
                     bg = Colors.CRITICAL
                     fg = "FFFFFF"
                     msg = last.alert.title
-                elif level == AlertLevel.ORANGE:
+                elif level == AlertLevel.PURPLE:
                     bg = Colors.ORANGE
                     fg = "FFFFFF"
                     msg = last.alert.title
@@ -262,7 +262,15 @@ class ExcelReportGenerator:
                     bg = Colors.GREEN_ALERT
                     fg = "FFFFFF"
                     msg = last.alert.title
-                elif level == AlertLevel.YELLOW:
+                elif level == AlertLevel.EARLY_SELL:
+                    bg = Colors.WARNING
+                    fg = "1F4E78"
+                    msg = last.alert.title
+                elif level == AlertLevel.EARLY_BUY:
+                    bg = Colors.GREEN_ALERT
+                    fg = "1F4E78"
+                    msg = last.alert.title
+                elif level == AlertLevel.WATCH:
                     bg = Colors.WARNING
                     fg = "1F4E78"
                     msg = last.alert.title
@@ -327,18 +335,23 @@ class ExcelReportGenerator:
                     ev.level.value,
                     ev.title,
                     ev.message,
-                    f"{ev.sell_pressure_score:.0f}",
-                    f"{ev.accumulation_score:.0f}",
+                    f"{ev.sell_score:.0f}",
+                    f"{ev.buy_score:.0f}",
+                    ev.classification,
                     ev.suggested_action,
                 ]
                 # رنگ بر اساس سطح
                 if ev.level == AlertLevel.RED:
                     bg = Colors.CRITICAL; fg = "FFFFFF"
-                elif ev.level == AlertLevel.ORANGE:
+                elif ev.level == AlertLevel.PURPLE:
                     bg = Colors.ORANGE; fg = "FFFFFF"
                 elif ev.level == AlertLevel.GREEN:
                     bg = Colors.GREEN_ALERT; fg = "FFFFFF"
-                elif ev.level == AlertLevel.YELLOW:
+                elif ev.level == AlertLevel.EARLY_SELL:
+                    bg = Colors.WARNING; fg = "1F4E78"
+                elif ev.level == AlertLevel.EARLY_BUY:
+                    bg = Colors.GREEN_ALERT; fg = "1F4E78"
+                elif ev.level == AlertLevel.WATCH:
                     bg = Colors.WARNING; fg = "1F4E78"
                 else:
                     bg = Colors.NEUTRAL; fg = "1F4E78"
@@ -658,8 +671,8 @@ class ExcelReportGenerator:
                 snap.total_value,
                 round(snap.buyer_power, 2),
                 money_label,
-                round(state.sell_pressure_score, 1),
-                round(state.accumulation_score, 1),
+                round(state.sell_score, 1),
+                round(state.buy_score, 1),
                 state.combination_label,
             ]
             for j, v in enumerate(row_data, 1):
@@ -670,11 +683,11 @@ class ExcelReportGenerator:
 
             # رنگ فشار فروش
             ws.cell(row=r, column=12).fill = PatternFill(
-                "solid", fgColor=_score_color(state.sell_pressure_score)
+                "solid", fgColor=_score_color(state.sell_score)
             )
-            # رنگ جمع‌آوری
+            # رنگ فشار خرید
             ws.cell(row=r, column=13).fill = PatternFill(
-                "solid", fgColor=_acc_color(state.accumulation_score)
+                "solid", fgColor=_acc_color(state.buy_score)
             )
 
         # جدول خلاصه در پایان
@@ -684,10 +697,10 @@ class ExcelReportGenerator:
         ws.merge_cells(start_row=summary_row, end_row=summary_row, start_column=1, end_column=4)
 
         if combined_states:
-            max_sp = max(s.sell_pressure_score for s in combined_states)
-            max_acc = max(s.accumulation_score for s in combined_states)
-            avg_sp = sum(s.sell_pressure_score for s in combined_states) / len(combined_states)
-            avg_acc = sum(s.accumulation_score for s in combined_states) / len(combined_states)
+            max_sp = max(s.sell_score for s in combined_states)
+            max_acc = max(s.buy_score for s in combined_states)
+            avg_sp = sum(s.sell_score for s in combined_states) / len(combined_states)
+            avg_acc = sum(s.buy_score for s in combined_states) / len(combined_states)
 
             summary_data = [
                 ("بیشینه فشار فروش", round(max_sp, 1)),
