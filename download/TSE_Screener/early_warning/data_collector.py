@@ -127,6 +127,12 @@ class MarketSnapshot:
     real_money_flow_ratio: float = 0.0
     interval_real_buy_volume: int = 0
     interval_real_sell_volume: int = 0
+    interval_real_buy_value: float = 0.0
+    interval_real_sell_value: float = 0.0
+    interval_real_buy_count: int = 0
+    interval_real_sell_count: int = 0
+    ask5_volume: float = 0.0   # مجموع حجم ۵ ردیف عرضه (محاسبه‌شده)
+    bid5_volume: float = 0.0   # مجموع حجم ۵ ردیف تقاضا (محاسبه‌شده)
 
     # ===== کیفیت داده =====
     data_complete: bool = True
@@ -674,13 +680,21 @@ class MarketDataCollector:
             legal_sell_count=ct.get("legal_sell_count", 0) if ct else 0,
         )
 
-        # مقادیر بازه‌ای از تفاضل نمونه قبلی
+        # مقادیر بازه‌ای از تفاضل نمونه قبلی (جلوگیری از دوباره‌شماری داده تجمعی)
         if prev_snap is not None:
             snap.interval_volume = max(0, snap.total_volume - prev_snap.total_volume)
             snap.interval_value = max(0, snap.total_value - prev_snap.total_value)
             snap.interval_trade_count = max(0, snap.total_trade_count - prev_snap.total_trade_count)
             snap.interval_real_buy_volume = max(0, snap.real_buy_volume - prev_snap.real_buy_volume)
             snap.interval_real_sell_volume = max(0, snap.real_sell_volume - prev_snap.real_sell_volume)
+            snap.interval_real_buy_value = max(0.0, snap.real_buy_value - prev_snap.real_buy_value)
+            snap.interval_real_sell_value = max(0.0, snap.real_sell_value - prev_snap.real_sell_value)
+            snap.interval_real_buy_count = max(0, snap.real_buy_count - prev_snap.real_buy_count)
+            snap.interval_real_sell_count = max(0, snap.real_sell_count - prev_snap.real_sell_count)
+
+        # مجموع حجم ۵ ردیف عرضه/تقاضا (برای موتورهای فروش/خرید)
+        snap.ask5_volume = float(sum(r.volume for r in (snap.sell_rows or [])[:5]))
+        snap.bid5_volume = float(sum(r.volume for r in (snap.buy_rows or [])[:5]))
 
         # محاسبه شاخص‌های مشتق
         self._compute_derived(snap)

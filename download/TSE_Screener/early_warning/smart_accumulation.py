@@ -1,23 +1,30 @@
 """
 smart_accumulation.py
-موتور تشخیص جمع‌آوری سهم توسط خریداران قدرتمند (۰-۱۰۰).
+موتور خرید — نسخه ۲.۰ (فرمول‌های features.py + نرمال‌سازی آستانه ثابت).
 
 شش شاخص مستقل (مجموع امتیاز = ۱۰۰):
-  1. قدرت خرید حقیقی                    - 20
-  2. ورود پول حقیقی                     - 20
-  3. برتری تعداد خریداران حقیقی         - 10
-  4. جذب عرضه و ماندگاری تقاضا          - 20
-  5. مقاومت قیمت در برابر فشار فروش    - 20
-  6. تداوم رفتار خرید در چند بازه زمانی - 10
+  1. buy_breadth    — گستردگی مشارکت خریداران حقیقی   (15)  (Nb−Ns)/(Nb+Ns)
+  2. buy_flow       — ورود پول حقیقی                   (20)  (Vb−Vs)/(Vb+Vs)
+  3. buy_ticket     — برتری اندازه معاملات خرید         (15)  ln(V̄b/V̄s)
+  4. buy_price      — واکنش مثبت قیمت (۳۰ث)            (15)  ln(Pt/Pt−30s)
+  5. buy_absorption — جذب عرضه قابل مشاهده              (20)  min(−Δask5, Δvol)/ask5_prev
+  6. buy_support    — حفظ حمایت و فاصله از کف قیمت      (15)  recovery × proximity
 
-نکته: اگر خریداران فقط در یک لحظه وارد شوند، نباید آن را
-      جمع‌آوری معتبر تلقی کنیم. باید تداوم رفتار آن‌ها را در چند
-      بازه متوالی بررسی کنیم.
+نکته مهم: اگر خریداران حجم زیادی از عرضه را جذب کنند ولی قیمت هنوز رشد نکند،
+این وضعیت می‌تواند نشانه جمع‌آوری سهم باشد. بنابراین رشد قیمت را شرط ضروری
+تشخیص جمع‌آوری قرار نمی‌دهیم.
+
+شاخص‌های ۱-۳ آینه‌ای موتور فروش هستند (buy_breadth = −sell_breadth) تا از
+دوباره‌نویسی جلوگیری شود.
+
+Phase 1: نرمال‌سازی با آستانه ثابت (full_at).
+Phase 2: نرمال‌سازی تطبیقی صدکی (adaptive_scoring.py).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import math
+from dataclasses import dataclass
 from typing import List, Dict, Optional
 from .data_collector import MarketSnapshot
 
@@ -26,8 +33,24 @@ def _clamp(v: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, v))
 
 
+def _safe_div(a: float, b: float) -> float:
+    if b == 0 or (isinstance(b, float) and math.isnan(b)):
+        return float("nan")
+    return a / b
+
+
+def _ask5(snap: MarketSnapshot) -> float:
+    rows = snap.sell_rows or []
+    return float(sum(r.volume for r in rows[:5]))
+
+
+def _bid5(snap: MarketSnapshot) -> float:
+    rows = snap.buy_rows or []
+    return float(sum(r.volume for r in rows[:5]))
+
+
 @dataclass
-class AccumulationFactorResult:
+class BuyPressureFactorResult:
     name: str
     label: str
     max_points: float
@@ -36,28 +59,33 @@ class AccumulationFactorResult:
     normalized: float
     score: float
     description: str
+    status: str = "ok"
 
     def to_dict(self) -> Dict:
         return {
             "name": self.name,
             "label": self.label,
             "max_points": self.max_points,
-            "raw_value": round(self.raw_value, 4),
+            "raw_value": None if (isinstance(self.raw_value, float) and math.isnan(self.raw_value)) else round(self.raw_value, 4),
             "raw_unit": self.raw_unit,
             "normalized": round(self.normalized, 4),
             "score": round(self.score, 2),
             "description": self.description,
+            "status": self.status,
         }
 
 
 @dataclass
-class AccumulationResult:
+class BuyPressureResult:
     total_score: float
     level: str
-    factors: List[AccumulationFactorResult]
-    is_strong: bool                  # آیا جمع‌آوری قابل اعتماد است
+    factors: List[BuyPressureFactorResult]
+    independent_signals_count: int
+    is_strong: bool
     snapshot_time: str
-    absorption_evidence: bool        # شواهد جذب عرضه
+    valid_indicators: int = 6
+    engine_status: str = "official"
+    absorption_evidence: bool = False
     data_quality_warning: Optional[str] = None
 
     def to_dict(self) -> Dict:
@@ -65,222 +93,209 @@ class AccumulationResult:
             "total_score": round(self.total_score, 2),
             "level": self.level,
             "factors": [f.to_dict() for f in self.factors],
+            "independent_signals_count": self.independent_signals_count,
             "is_strong": self.is_strong,
             "snapshot_time": self.snapshot_time,
+            "valid_indicators": self.valid_indicators,
+            "engine_status": self.engine_status,
             "absorption_evidence": self.absorption_evidence,
             "data_quality_warning": self.data_quality_warning,
         }
 
 
-class SmartAccumulationDetector:
-    """موتور امتیازدهی جمع‌آوری سهم."""
+class BuyPressureDetector:
+    """موتور امتیازدهی فشار خرید — نسخه ۲.۰."""
+
+    LABELS = {
+        "buy_breadth":    "گستردگی مشارکت خریداران حقیقی",
+        "buy_flow":       "ورود پول حقیقی",
+        "buy_ticket":     "برتری اندازه معاملات خرید",
+        "buy_price":      "واکنش مثبت قیمت (۳۰ثانیه)",
+        "buy_absorption": "جذب عرضه قابل مشاهده",
+        "buy_support":    "حفظ حمایت و فاصله از کف قیمت",
+    }
 
     def __init__(self, config: Dict):
-        acc_cfg = config["accumulation"]
-        self.weights = acc_cfg["weights"]
-        self.levels = acc_cfg["levels"]
-        self.thresholds = acc_cfg["thresholds"]
-        self.identification_threshold = acc_cfg["identification_threshold"]
-        self.history_required = config.get("history_required_samples", 5)
+        bp_cfg = config["buy_pressure"]
+        self.weights = bp_cfg["weights"]
+        self.levels = bp_cfg["levels"]
+        self.norm = bp_cfg["norm"]
+        self.identification_threshold = bp_cfg["identification_threshold"]
+        self.min_history = config.get("min_history", 30)
 
     # -------------------------------------------------------------------
-    # شاخص ۱: قدرت خرید حقیقی (۲۰ امتیاز)
+    # شاخص ۱: گستردگی مشارکت خریداران حقیقی (۱۵ امتیاز)
+    #   (Nb−Ns)/(Nb+Ns)  —  آینه‌ای sell_breadth
     # -------------------------------------------------------------------
-    def _factor_real_buyer_power(self, snap: MarketSnapshot) -> AccumulationFactorResult:
-        buyer_power = snap.buyer_power  # per_capita_buy / per_capita_sell
-        # اگر > 1: خریدار قوی. نرمال‌سازی با 1.5 → امتیاز کامل
-        norm = _clamp((buyer_power - 1.0) / 0.5)
-        score = norm * self.weights["real_buyer_power"]
-        desc = (
-            f"قدرت خریدار حقیقی = {buyer_power:.2f}. "
-            f"اگر > ۱.۵، خریداران حجمی قوی‌ترند."
-        )
-        return AccumulationFactorResult(
-            name="real_buyer_power",
-            label="قدرت خرید حقیقی",
-            max_points=self.weights["real_buyer_power"],
-            raw_value=buyer_power,
-            raw_unit="نسبت",
-            normalized=norm,
-            score=score,
-            description=desc,
-        )
+    def _factor_buy_breadth(self, snap: MarketSnapshot,
+                            prev_snap: Optional[MarketSnapshot]) -> BuyPressureFactorResult:
+        if prev_snap is None:
+            return self._no_prev("buy_breadth", "تعداد معاملات حقیقی")
+        nb = snap.real_buy_count - prev_snap.real_buy_count
+        ns = snap.real_sell_count - prev_snap.real_sell_count
+        denom = nb + ns
+        raw = _safe_div(nb - ns, denom)
+        full_at = self.norm["buy_breadth"]["full_at"]
+        norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
+        score = norm * self.weights["buy_breadth"]
+        desc = f"Δ خریداران={nb}، Δ فروشندگان={ns} → گستردگی={raw:+.3f} (افزایش خریدار = مثبت)"
+        return BuyPressureFactorResult(
+            name="buy_breadth", label=self.LABELS["buy_breadth"],
+            max_points=self.weights["buy_breadth"], raw_value=raw,
+            raw_unit="نسبت [-1,1]", normalized=norm, score=score,
+            description=desc)
 
     # -------------------------------------------------------------------
     # شاخص ۲: ورود پول حقیقی (۲۰ امتیاز)
+    #   (Vb−Vs)/(Vb+Vs)  —  آینه‌ای sell_flow
     # -------------------------------------------------------------------
-    def _factor_real_money_inflow(self, snap: MarketSnapshot) -> AccumulationFactorResult:
-        inflow_ratio = snap.real_money_flow_ratio  # مثبت = ورود
-        # نرمال‌سازی با 5٪ ورود → امتیاز کامل
-        norm = _clamp(inflow_ratio / 0.05)
-        score = norm * self.weights["real_money_inflow"]
-        desc = (
-            f"ورود پول حقیقی = {inflow_ratio*100:+.2f}٪ ارزش معاملات. "
-            f"ورود > ۵٪ → امتیاز کامل."
-        )
-        return AccumulationFactorResult(
-            name="real_money_inflow",
-            label="ورود پول حقیقی",
-            max_points=self.weights["real_money_inflow"],
-            raw_value=inflow_ratio,
-            raw_unit="٪ ارزش معاملات",
-            normalized=norm,
-            score=score,
-            description=desc,
-        )
+    def _factor_buy_flow(self, snap: MarketSnapshot,
+                         prev_snap: Optional[MarketSnapshot]) -> BuyPressureFactorResult:
+        if prev_snap is None:
+            return self._no_prev("buy_flow", "ارزش معاملات حقیقی")
+        vb = snap.real_buy_value - prev_snap.real_buy_value
+        vs = snap.real_sell_value - prev_snap.real_sell_value
+        denom = vb + vs
+        raw = _safe_div(vb - vs, denom)
+        full_at = self.norm["buy_flow"]["full_at"]
+        norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
+        score = norm * self.weights["buy_flow"]
+        desc = f"Δ ارزش خرید={vb:,.0f}، Δ ارزش فروش={vs:,.0f} → ورود={raw:+.3f}"
+        return BuyPressureFactorResult(
+            name="buy_flow", label=self.LABELS["buy_flow"],
+            max_points=self.weights["buy_flow"], raw_value=raw,
+            raw_unit="نسبت [-1,1]", normalized=norm, score=score,
+            description=desc)
 
     # -------------------------------------------------------------------
-    # شاخص ۳: برتری تعداد خریداران حقیقی (۱۰ امتیاز)
+    # شاخص ۳: برتری اندازه معاملات خرید (۱۵ امتیاز)
+    #   ln(V̄b/V̄s)  —  آینه‌ای sell_ticket
     # -------------------------------------------------------------------
-    def _factor_real_buyer_count_superiority(self, snap: MarketSnapshot) -> AccumulationFactorResult:
-        if snap.real_sell_count > 0:
-            ratio = snap.real_buy_count / snap.real_sell_count
+    def _factor_buy_ticket(self, snap: MarketSnapshot,
+                           prev_snap: Optional[MarketSnapshot]) -> BuyPressureFactorResult:
+        if prev_snap is None:
+            return self._no_prev("buy_ticket", "سرانه معاملات حقیقی")
+        nb = snap.real_buy_count - prev_snap.real_buy_count
+        ns = snap.real_sell_count - prev_snap.real_sell_count
+        vb = snap.real_buy_value - prev_snap.real_buy_value
+        vs = snap.real_sell_value - prev_snap.real_sell_value
+        avg_b = _safe_div(vb, nb)
+        avg_s = _safe_div(vs, ns)
+        ratio = _safe_div(avg_b, avg_s)
+        raw = math.log(ratio) if (not math.isnan(ratio) and ratio > 0) else float("nan")
+        full_at = self.norm["buy_ticket"]["full_at"]
+        norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
+        score = norm * self.weights["buy_ticket"]
+        desc = f"سرانه خرید={avg_b:,.0f}، سرانه فروش={avg_s:,.0f} → ln={raw:+.3f}"
+        return BuyPressureFactorResult(
+            name="buy_ticket", label=self.LABELS["buy_ticket"],
+            max_points=self.weights["buy_ticket"], raw_value=raw,
+            raw_unit="ln(نسبت)", normalized=norm, score=score,
+            description=desc)
+
+    # -------------------------------------------------------------------
+    # شاخص ۴: واکنش مثبت قیمت — ۳۰ ثانیه (۱۵ امتیاز)
+    #   ln(Pt/Pt−30s)  —  رشد قیمت = مثبت
+    # -------------------------------------------------------------------
+    def _factor_buy_price(self, snap: MarketSnapshot,
+                          prev_snap: Optional[MarketSnapshot]) -> BuyPressureFactorResult:
+        if prev_snap is None or prev_snap.last_price <= 0:
+            return self._no_prev("buy_price", "قیمت ۳۰ث قبل")
+        ratio = snap.last_price / prev_snap.last_price
+        raw = math.log(ratio) if ratio > 0 else float("nan")
+        full_at = self.norm["buy_price"]["full_at"]
+        norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
+        score = norm * self.weights["buy_price"]
+        desc = f"Pt={snap.last_price:,.0f}، Pt-30s={prev_snap.last_price:,.0f} → تغییر={raw:+.4f}"
+        return BuyPressureFactorResult(
+            name="buy_price", label=self.LABELS["buy_price"],
+            max_points=self.weights["buy_price"], raw_value=raw,
+            raw_unit="ln(نسبت)", normalized=norm, score=score,
+            description=desc)
+
+    # -------------------------------------------------------------------
+    # شاخص ۵: جذب عرضه قابل مشاهده (۲۰ امتیاز)
+    #   min(−Δask5, Δvol_traded) / ask5_prev
+    #   فقط مقدار کاهش عرضه را می‌شمارد که با حجم معامله واقعی تأیید شده.
+    #   این شاخص «نشانه تقریبی جذب» است، نه تأیید قطعی (لغو سفارش جدا نمی‌شود).
+    # -------------------------------------------------------------------
+    def _factor_buy_absorption(self, snap: MarketSnapshot,
+                               prev_snap: Optional[MarketSnapshot]) -> BuyPressureFactorResult:
+        if prev_snap is None:
+            return self._no_prev("buy_absorption", "عمق بازار ۳۰ث قبل")
+        ask_prev = _ask5(prev_snap)
+        ask_now = _ask5(snap)
+        ask_depletion = max(0.0, ask_prev - ask_now)   # کاهش عرضه = مثبت
+        traded = max(0.0, snap.total_volume - prev_snap.total_volume)  # حجم معامله شده
+        confirmed = min(ask_depletion, traded)   # فقط بخش تأییدشده با معامله واقعی
+        raw = _safe_div(confirmed, ask_prev) if ask_prev > 0 else float("nan")
+        full_at = self.norm["buy_absorption"]["full_at"]
+        norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
+        score = norm * self.weights["buy_absorption"]
+        desc = (f"کاهش عرضه={ask_depletion:,.0f}، حجم معامله={traded:,.0f}، "
+                f"تأییدشده={confirmed:,.0f} → جذب={raw:.3f}")
+        return BuyPressureFactorResult(
+            name="buy_absorption", label=self.LABELS["buy_absorption"],
+            max_points=self.weights["buy_absorption"], raw_value=raw,
+            raw_unit="نسبت", normalized=norm, score=score,
+            description=desc)
+
+    # -------------------------------------------------------------------
+    # شاخص ۶: حفظ حمایت و فاصله از کف قیمت (۱۵ امتیاز)
+    #   recovery × proximity  —  بازگشت از کف در پنجره ۳۶ نمونه (۱۸ دقیقه)
+    #   recovery = (P − low) / low  ;  proximity = 1 − (low − L)/(U − L)
+    # -------------------------------------------------------------------
+    def _factor_buy_support(self, snap: MarketSnapshot,
+                            history: List[MarketSnapshot]) -> BuyPressureFactorResult:
+        L = snap.min_allowed_price
+        U = snap.max_allowed_price
+        day_range = U - L
+        # پنجره ۳۶ نمونه اخیر + نمونه فعلی
+        window = history[-35:] + [snap] if len(history) >= 1 else [snap]
+        prices = [h.last_price for h in window if h.last_price > 0]
+        if not prices or day_range <= 0:
+            raw = float("nan")
+            status = "insufficient_history" if len(history) < 6 else "missing"
         else:
-            ratio = 1.0
-        # اگر > 1.5 → تعداد خریداران بیشتر → امتیاز کامل
-        norm = _clamp((ratio - 1.0) / 0.5)
-        score = norm * self.weights["real_buyer_count_superiority"]
-        desc = (
-            f"تعداد خریداران حقیقی {ratio:.2f} برابر فروشندگان است. "
-            f"اگر > ۱.۵، تعداد خریداران برتری دارد."
-        )
-        return AccumulationFactorResult(
-            name="real_buyer_count_superiority",
-            label="برتری تعداد خریداران حقیقی",
-            max_points=self.weights["real_buyer_count_superiority"],
-            raw_value=ratio,
-            raw_unit="نسبت",
-            normalized=norm,
-            score=score,
-            description=desc,
-        )
-
-    # -------------------------------------------------------------------
-    # شاخص ۴: جذب عرضه و ماندگاری تقاضا (۲۰ امتیاز)
-    # -------------------------------------------------------------------
-    def _factor_supply_absorption_persistence(
-        self, snap: MarketSnapshot,
-        prev_snap: Optional[MarketSnapshot]
-    ) -> AccumulationFactorResult:
-        # الف) جذب عرضه:
-        # Absorption = حجم معاملات انجام‌شده / حجم عرضه موجود در بهترین قیمت
-        # اگر عرضه زیاد بوده ولی معامله زیادی انجام شده، جذب رخ داده
-        if snap.best_sell_volume > 0:
-            # حجم معاملات این بازه (تقریبی: کل حجم امروز - دیروز)
-            # برای نمونه لحظه‌ای: نسبتی از تجمعی
-            executed = snap.total_volume
-            absorption = _clamp(executed / max(snap.best_sell_volume * 10, 1))
+            low = min(prices)
+            recovery = _safe_div(snap.last_price - low, low)
+            proximity = 1.0 - _safe_div(low - L, day_range)
+            if math.isnan(recovery) or math.isnan(proximity):
+                raw = float("nan")
+                status = "missing"
+            else:
+                raw = max(0.0, recovery) * max(0.0, proximity)
+                status = "ok" if len(history) >= 6 else "warming_up"
+        full_at = self.norm["buy_support"]["full_at"]
+        norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
+        score = norm * self.weights["buy_support"]
+        if math.isnan(raw):
+            raw_disp = 0.0
         else:
-            absorption = 0.0
-
-        # ب) ماندگاری تقاضا:
-        # اگر حجم بهترین خرید نسبت به نمونه قبلی افزایش یا ثابت مانده
-        if prev_snap and prev_snap.best_buy_volume > 0:
-            persistence = _clamp(snap.best_buy_volume / prev_snap.best_buy_volume - 0.8)
-        else:
-            persistence = 0.5  # نامشخص
-
-        # ترکیب: 60٪ جذب + 40٪ ماندگاری
-        norm = _clamp(0.6 * absorption + 0.4 * persistence)
-        score = norm * self.weights["supply_absorption_persistence"]
-        desc = (
-            f"جذب عرضه: {absorption:.2f}، ماندگاری تقاضا: {persistence:.2f}. "
-            f"اگر عرضه زیاد فروخته شده ولی قیمت نیفتاده، جذب قوی است."
-        )
-        return AccumulationFactorResult(
-            name="supply_absorption_persistence",
-            label="جذب عرضه و ماندگاری تقاضا",
-            max_points=self.weights["supply_absorption_persistence"],
-            raw_value=norm,
-            raw_unit="شاخص ترکیبی ۰-۱",
-            normalized=norm,
-            score=score,
-            description=desc,
-        )
+            raw_disp = raw
+        desc = (f"کف روزانه={L:,.0f}، حداقل پنجره={min(prices) if prices else 0:,.0f}، "
+                f"آخرین={snap.last_price:,.0f} → حمایت={raw_disp:.3f}")
+        return BuyPressureFactorResult(
+            name="buy_support", label=self.LABELS["buy_support"],
+            max_points=self.weights["buy_support"], raw_value=raw if not math.isnan(raw) else 0.0,
+            raw_unit="شاخص ترکیبی", normalized=norm, score=score,
+            description=desc, status=status)
 
     # -------------------------------------------------------------------
-    # شاخص ۵: مقاومت قیمت در برابر فشار فروش (۲۰ امتیاز)
-    # -------------------------------------------------------------------
-    def _factor_price_resistance(self, snap: MarketSnapshot) -> AccumulationFactorResult:
-        # اگر حجم معامله زیاد ولی قیمت نزدیک پایانی یا بالاتر
-        # price_hold = 1 - max(0, (close - last) / (close * 0.02))
-        # آخرین >= پایانی → 1, آخرین = پایانی - 2٪ → 0
-        if snap.close_price > 0:
-            gap = (snap.last_price - snap.close_price) / snap.close_price
-            price_hold = _clamp((gap + 0.02) / 0.02)  # gap=-2%→0, gap=0→1, gap=+2%→1
-        else:
-            gap = 0.0
-            price_hold = 0.0
-
-        # وزن‌دهی با حجم معاملات (اگر حجم کم است، مقاومت قابل اعتماد نیست)
-        # نرمال‌سازی حجم به‌طور کلی به 0-1 با آستانه ۱۰ میلیون سهم
-        vol_norm = _clamp(snap.total_volume / 10_000_000)
-        # مقاومت = قیمت مقاوم × نشانه حجم
-        norm = _clamp(price_hold * (0.5 + 0.5 * vol_norm))
-        score = norm * self.weights["price_resistance"]
-        desc = (
-            f"موقعیت قیمت نسبت به پایانی: {gap*100:+.2f}٪. "
-            f"اگر با وجود فشار فروش، قیمت مقاومت کند، نشانه خریدار قوی است."
-        )
-        return AccumulationFactorResult(
-            name="price_resistance",
-            label="مقاومت قیمت در برابر فشار فروش",
-            max_points=self.weights["price_resistance"],
-            raw_value=price_hold,
-            raw_unit="شاخص ۰-۱",
-            normalized=norm,
-            score=score,
-            description=desc,
-        )
-
-    # -------------------------------------------------------------------
-    # شاخص ۶: تداوم رفتار خرید در چند بازه زمانی (۱۰ امتیاز)
-    # -------------------------------------------------------------------
-    def _factor_buying_continuity(
-        self, snap: MarketSnapshot,
-        history: List[MarketSnapshot]
-    ) -> AccumulationFactorResult:
-        # بررسی ۵ نمونه قبلی: چند نمونه ورود پول مثبت داشته‌ایم؟
-        if len(history) < self.history_required:
-            recent = history[-len(history):]
-        else:
-            recent = history[-self.history_required:]
-
-        if not recent:
-            continuity = 0.0
-        else:
-            positive_count = sum(1 for h in recent if h.real_money_flow_ratio > 0)
-            strong_count = sum(1 for h in recent if h.buyer_power > 1.2)
-            # تداوم = میانگین دو شاخص
-            continuity = _clamp(
-                0.5 * (positive_count / len(recent)) +
-                0.5 * (strong_count / len(recent))
-            )
-        score = continuity * self.weights["buying_continuity"]
-        desc = (
-            f"از {len(recent)} نمونه قبلی، {sum(1 for h in recent if h.real_money_flow_ratio > 0)} نمونه ورود پول مثبت داشت. "
-            f"تداوم = {continuity*100:.0f}٪."
-        )
-        return AccumulationFactorResult(
-            name="buying_continuity",
-            label="تداوم رفتار خرید در چند بازه زمانی",
-            max_points=self.weights["buying_continuity"],
-            raw_value=continuity,
-            raw_unit="شاخص ۰-۱",
-            normalized=continuity,
-            score=score,
-            description=desc,
-        )
+    def _no_prev(self, name: str, field: str) -> BuyPressureFactorResult:
+        return BuyPressureFactorResult(
+            name=name, label=self.LABELS.get(name, name),
+            max_points=self.weights.get(name, 0), raw_value=float("nan"),
+            raw_unit="—", normalized=0.0, score=0.0,
+            description=f"{field} در دسترس نیست (نمونه قبلی وجود ندارد).",
+            status="no_prev")
 
     # -------------------------------------------------------------------
     # محاسبه نهایی
     # -------------------------------------------------------------------
-    def evaluate(
-        self, snap: MarketSnapshot,
-        prev_snap: Optional[MarketSnapshot] = None,
-        history: Optional[List[MarketSnapshot]] = None
-    ) -> AccumulationResult:
-        """محاسبه امتیاز جمع‌آوری برای یک نمونه."""
+    def evaluate(self, snap: MarketSnapshot,
+                 prev_snap: Optional[MarketSnapshot] = None,
+                 history: Optional[List[MarketSnapshot]] = None) -> BuyPressureResult:
         if history is None:
             history = []
 
@@ -289,42 +304,47 @@ class SmartAccumulationDetector:
             data_warning = f"داده‌های ناقص: {', '.join(snap.missing_fields)}"
 
         factors = [
-            self._factor_real_buyer_power(snap),
-            self._factor_real_money_inflow(snap),
-            self._factor_real_buyer_count_superiority(snap),
-            self._factor_supply_absorption_persistence(snap, prev_snap),
-            self._factor_price_resistance(snap),
-            self._factor_buying_continuity(snap, history),
+            self._factor_buy_breadth(snap, prev_snap),
+            self._factor_buy_flow(snap, prev_snap),
+            self._factor_buy_ticket(snap, prev_snap),
+            self._factor_buy_price(snap, prev_snap),
+            self._factor_buy_absorption(snap, prev_snap),
+            self._factor_buy_support(snap, history),
         ]
 
+        valid = sum(1 for f in factors if f.status == "ok")
         total = sum(f.score for f in factors)
+        independent_signals = sum(1 for f in factors if f.normalized >= 0.5)
         level = self._determine_level(total)
         is_strong = total >= self.identification_threshold
+        # شواهد جذب: buy_absorption و buy_support هر دو >= ۵۰٪
+        absorption_evidence = factors[4].normalized >= 0.5 and factors[5].normalized >= 0.5
+        engine_status = "official" if valid == len(factors) else "warming_up"
 
-        # شواهد جذب عرضه: شاخص ۴ و ۵ با امتیاز >= 50٪
-        absorption_evidence = (
-            factors[3].normalized >= 0.5 and
-            factors[4].normalized >= 0.5
-        )
-
-        return AccumulationResult(
-            total_score=total,
-            level=level,
-            factors=factors,
-            is_strong=is_strong,
-            snapshot_time=snap.tehran_time,
+        return BuyPressureResult(
+            total_score=total, level=level, factors=factors,
+            independent_signals_count=independent_signals,
+            is_strong=is_strong, snapshot_time=snap.tehran_time,
+            valid_indicators=valid, engine_status=engine_status,
             absorption_evidence=absorption_evidence,
-            data_quality_warning=data_warning,
-        )
+            data_quality_warning=data_warning)
 
     def _determine_level(self, score: float) -> str:
         if score <= 24:
             return self.levels["0-24"]["label"]
-        elif score <= 39:
-            return self.levels["25-39"]["label"]
-        elif score <= 59:
-            return self.levels["40-59"]["label"]
+        elif score <= 34:
+            return self.levels["25-34"]["label"]
+        elif score <= 49:
+            return self.levels["35-49"]["label"]
+        elif score <= 64:
+            return self.levels["50-64"]["label"]
         elif score <= 79:
-            return self.levels["60-79"]["label"]
+            return self.levels["65-79"]["label"]
         else:
             return self.levels["80-100"]["label"]
+
+
+# سازگاری با نسخه قبلی — نام قدقیق
+SmartAccumulationDetector = BuyPressureDetector
+AccumulationFactorResult = BuyPressureFactorResult
+AccumulationResult = BuyPressureResult

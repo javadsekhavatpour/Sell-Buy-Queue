@@ -1,22 +1,27 @@
 """
 sell_pressure.py
-موتور تشخیص فشار فروش و پیش‌بینی احتمال تشکیل صف فروش (۰-۱۰۰).
+موتور فشار فروش — نسخه ۲.۰ (فرمول‌های features.py + نرمال‌سازی آستانه ثابت).
 
 شش شاخص مستقل (مجموع امتیاز = ۱۰۰):
-  1. ضعف قدرت خریدار حقیقی              - 20
-  2. خروج پول حقیقی                     - 20
-  3. برتری سرانه فروش به خرید           - 15
-  4. فاصله منفی آخرین قیمت از پایانی      - 15
-  5. افزایش سرعت عرضه در بهترین قیمت      - 15
-  6. تخلیه تقاضا و نزدیک شدن به کف روز    - 15
+  1. sell_breadth  — ضعف گستردگی خریداران حقیقی    (15)  (Ns−Nb)/(Ns+Nb)
+  2. sell_flow     — خروج پول حقیقی                 (20)  (Vs−Vb)/(Vs+Vb)
+  3. sell_ticket   — برتری اندازه معاملات فروش       (15)  ln(V̄s/V̄b)
+  4. sell_price    — واکنش منفی قیمت (۳۰ث)          (15)  −ln(Pt/Pt−30s)
+  5. sell_supply   — افزایش عرضه قابل مشاهده         (20)  Δask5% − Δbid5%
+  6. sell_lower    — نزدیکی به کف قیمت               (15)  1−(P−L)/(U−L)
 
-نکته فنی: شاخص‌ها به‌صورت مستقل محاسبه می‌شوند؛ صرفاً منفی بودن قیمت
-نباید باعث امتیاز کامل فشار فروش شود.
+نکته فنی: داده‌های حقیقی از TSETMC تجمعی روزانه‌اند؛ لذا اختلاف نمونه‌های متوالی
+(prev_snap → snap) به‌عنوان دلتای بازه ۳۰ثانیه‌ای استفاده می‌شود تا از
+دوباره‌شماری جلوگیری شود.
+
+Phase 1: نرمال‌سازی با آستانه ثابت (full_at).
+Phase 2: نرمال‌سازی تطبیقی صدکی (adaptive_scoring.py جایگزین می‌شود).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import math
+from dataclasses import dataclass
 from typing import List, Dict, Optional
 from .data_collector import MarketSnapshot
 
@@ -26,28 +31,49 @@ def _clamp(v: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, v))
 
 
+def _safe_div(a: float, b: float) -> float:
+    """تقسیم امن — اگر مخرج صفر باشد NaN برمی‌گرداند."""
+    if b == 0 or (isinstance(b, float) and math.isnan(b)):
+        return float("nan")
+    return a / b
+
+
+def _ask5(snap: MarketSnapshot) -> float:
+    """مجموع حجم ۵ ردیف عرضه (فروش)."""
+    rows = snap.sell_rows or []
+    return float(sum(r.volume for r in rows[:5]))
+
+
+def _bid5(snap: MarketSnapshot) -> float:
+    """مجموع حجم ۵ ردیف تقاضا (خرید)."""
+    rows = snap.buy_rows or []
+    return float(sum(r.volume for r in rows[:5]))
+
+
 @dataclass
 class SellPressureFactorResult:
     """نتیجه یک شاخص."""
     name: str
-    label: str               # برچسب فارسی
-    max_points: float        # حداکثر امتیاز ممکن
-    raw_value: float         # مقدار خام شاخص
-    raw_unit: str            # واحد مقدار خام
-    normalized: float        # مقدار نرمال شده ۰-۱
-    score: float             # امتیاز نهایی
-    description: str         # توضیح محاسبه
+    label: str
+    max_points: float
+    raw_value: float
+    raw_unit: str
+    normalized: float
+    score: float
+    description: str
+    status: str = "ok"   # ok | missing | insufficient_history | no_prev
 
     def to_dict(self) -> Dict:
         return {
             "name": self.name,
             "label": self.label,
             "max_points": self.max_points,
-            "raw_value": round(self.raw_value, 4),
+            "raw_value": None if (isinstance(self.raw_value, float) and math.isnan(self.raw_value)) else round(self.raw_value, 4),
             "raw_unit": self.raw_unit,
             "normalized": round(self.normalized, 4),
             "score": round(self.score, 2),
             "description": self.description,
+            "status": self.status,
         }
 
 
@@ -55,12 +81,14 @@ class SellPressureFactorResult:
 class SellPressureResult:
     """خروجی کامل موتور فشار فروش."""
     total_score: float
-    level: str                       # برچسب سطح
-    action: str                      # اقدام پیشنهادی
+    level: str
+    action: str
     factors: List[SellPressureFactorResult]
-    independent_signals_count: int   # تعداد شاخص‌های با امتیاز >= ۵۰٪
-    is_critical: bool               # آیا در منطقه خطر است
+    independent_signals_count: int
+    is_critical: bool
     snapshot_time: str
+    valid_indicators: int = 6
+    engine_status: str = "official"   # official | warming_up
     data_quality_warning: Optional[str] = None
 
     def to_dict(self) -> Dict:
@@ -72,201 +100,181 @@ class SellPressureResult:
             "independent_signals_count": self.independent_signals_count,
             "is_critical": self.is_critical,
             "snapshot_time": self.snapshot_time,
+            "valid_indicators": self.valid_indicators,
+            "engine_status": self.engine_status,
             "data_quality_warning": self.data_quality_warning,
         }
 
 
 class SellPressureDetector:
-    """موتور امتیازدهی فشار فروش."""
+    """موتور امتیازدهی فشار فروش — نسخه ۲.۰."""
+
+    LABELS = {
+        "sell_breadth": "ضعف گستردگی خریداران حقیقی",
+        "sell_flow":    "خروج پول حقیقی",
+        "sell_ticket":  "برتری اندازه معاملات فروش",
+        "sell_price":   "واکنش منفی قیمت (۳۰ثانیه)",
+        "sell_supply":  "افزایش عرضه قابل مشاهده",
+        "sell_lower":   "نزدیکی به کف قیمت",
+    }
 
     def __init__(self, config: Dict):
         sp_cfg = config["sell_pressure"]
         self.weights = sp_cfg["weights"]
         self.levels = sp_cfg["levels"]
-        self.thresholds = sp_cfg["thresholds"]
-        self.operational_threshold = sp_cfg["operational_threshold"]
-        # ضریب نرمال‌سازی: مقداری که امتیاز کامل می‌دهد
-        self.norm = {
-            "buyer_power_weakness":     {"full_at": 0.5},   # قدرت < 0.5 → ۲۰ امتیاز
-            "real_money_outflow":       {"full_at": 0.05},  # خروج ۵٪ ارزش معاملات → ۲۰ امتیاز
-            "sell_per_capita_superiority": {"full_at": 0.5}, # سرانه فروش ۱.۵ برابر خرید → ۱۵ امتیاز
-            "negative_gap_last_vs_close": {"full_at": 0.02},# فاصله -۲٪ → ۱۵ امتیاز
-            "supply_growth_rate":      {"full_at": 0.5},   # افزایش ۵۰٪ عرضه → ۱۵ امتیاز
-            "demand_depletion_near_low": {"full_at": 1.0},  # تخلیه کامل + رسیدن به کف → ۱۵ امتیاز
-        }
+        self.norm = sp_cfg["norm"]
+        self.min_history = config.get("min_history", 30)
 
     # -------------------------------------------------------------------
-    # شاخص ۱: ضعف قدرت خریدار حقیقی (۲۰ امتیاز)
+    # شاخص ۱: ضعف گستردگی خریداران حقیقی (۱۵ امتیاز)
+    #   (Ns−Nb)/(Ns+Nb)  —  N = تعداد معاملات حقیقی در بازه ۳۰ث
     # -------------------------------------------------------------------
-    def _factor_buyer_power_weakness(self, snap: MarketSnapshot) -> SellPressureFactorResult:
-        buyer_power = snap.buyer_power  # = per_capita_buy / per_capita_sell
-        # اگر قدرت < 1: خریدار ضعیف‌تر. کلید: 1 - ratio، نرمال‌سازی با 0.5
-        # قدرت = 1 → 0 امتیاز، قدرت = 0.5 → کامل
-        norm = _clamp((1.0 - buyer_power) / 0.5)
-        score = norm * self.weights["buyer_power_weakness"]
-        desc = (
-            f"قدرت خریدار حقیقی = {buyer_power:.2f}. "
-            f"اگر < ۱ باشد، خریدار ضعیف‌تر از فروشنده است."
-        )
+    def _factor_sell_breadth(self, snap: MarketSnapshot,
+                             prev_snap: Optional[MarketSnapshot]) -> SellPressureFactorResult:
+        if prev_snap is None:
+            return self._no_prev("sell_breadth", "تعداد معاملات حقیقی")
+        nb = snap.real_buy_count - prev_snap.real_buy_count
+        ns = snap.real_sell_count - prev_snap.real_sell_count
+        denom = nb + ns
+        raw = _safe_div(ns - nb, denom)
+        full_at = self.norm["sell_breadth"]["full_at"]
+        norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
+        score = norm * self.weights["sell_breadth"]
+        desc = f"Δ خریداران={nb}، Δ فروشندگان={ns} → گستردگی={raw:+.3f} (کاهش خریدار = مثبت)"
         return SellPressureFactorResult(
-            name="buyer_power_weakness",
-            label="ضعف قدرت خریدار حقیقی",
-            max_points=self.weights["buyer_power_weakness"],
-            raw_value=buyer_power,
-            raw_unit="نسبت",
-            normalized=norm,
-            score=score,
-            description=desc,
-        )
+            name="sell_breadth", label=self.LABELS["sell_breadth"],
+            max_points=self.weights["sell_breadth"], raw_value=raw,
+            raw_unit="نسبت [-1,1]", normalized=norm, score=score,
+            description=desc)
 
     # -------------------------------------------------------------------
     # شاخص ۲: خروج پول حقیقی (۲۰ امتیاز)
+    #   (Vs−Vb)/(Vs+Vb)  —  V = ارزش معاملات حقیقی در بازه ۳۰ث
     # -------------------------------------------------------------------
-    def _factor_real_money_outflow(self, snap: MarketSnapshot) -> SellPressureFactorResult:
-        # real_money_flow_ratio = ورود/خروج نسبی به ارزش معاملات
-        # اگر منفی (خروج)، نرمال‌سازی با 5٪
-        ratio = snap.real_money_flow_ratio
-        outflow_ratio = -ratio  # مثبت = مقدار خروج
-        norm = _clamp(outflow_ratio / 0.05)
-        score = norm * self.weights["real_money_outflow"]
-        desc = (
-            f"نسبت خروج پول حقیقی به ارزش معاملات = {outflow_ratio*100:.2f}٪. "
-            f"خروج بیش از ۵٪ → امتیاز کامل."
-        )
+    def _factor_sell_flow(self, snap: MarketSnapshot,
+                          prev_snap: Optional[MarketSnapshot]) -> SellPressureFactorResult:
+        if prev_snap is None:
+            return self._no_prev("sell_flow", "ارزش معاملات حقیقی")
+        vb = snap.real_buy_value - prev_snap.real_buy_value
+        vs = snap.real_sell_value - prev_snap.real_sell_value
+        denom = vb + vs
+        raw = _safe_div(vs - vb, denom)
+        full_at = self.norm["sell_flow"]["full_at"]
+        norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
+        score = norm * self.weights["sell_flow"]
+        desc = f"Δ ارزش خرید={vb:,.0f}، Δ ارزش فروش={vs:,.0f} → خروج={raw:+.3f}"
         return SellPressureFactorResult(
-            name="real_money_outflow",
-            label="خروج پول حقیقی",
-            max_points=self.weights["real_money_outflow"],
-            raw_value=outflow_ratio,
-            raw_unit="٪ ارزش معاملات",
-            normalized=norm,
-            score=score,
-            description=desc,
-        )
+            name="sell_flow", label=self.LABELS["sell_flow"],
+            max_points=self.weights["sell_flow"], raw_value=raw,
+            raw_unit="نسبت [-1,1]", normalized=norm, score=score,
+            description=desc)
 
     # -------------------------------------------------------------------
-    # شاخص ۳: برتری سرانه فروش به خرید (۱۵ امتیاز)
+    # شاخص ۳: برتری اندازه معاملات فروش (۱۵ امتیاز)
+    #   ln(V̄s/V̄b)  —  V̄ = ارزش به‌ازای هر معامله‌گر حقیقی
     # -------------------------------------------------------------------
-    def _factor_sell_per_capita_superiority(self, snap: MarketSnapshot) -> SellPressureFactorResult:
-        # ratio = per_capita_sell / per_capita_buy
-        if snap.per_capita_buy_real > 0:
-            ratio = snap.per_capita_sell_real / snap.per_capita_buy_real
-        else:
-            ratio = 10.0  # خرید حقیقی صفر = فروشندگان مسلط
-        # اگر ratio > 1: فروشندگان هرکدام حجم بیشتری می‌فروشند
-        # نرمال‌سازی: (ratio - 1) / 0.5 → full_at 1.5
-        norm = _clamp((ratio - 1.0) / 0.5)
-        score = norm * self.weights["sell_per_capita_superiority"]
-        desc = (
-            f"سرانه فروش حقیقی {ratio:.2f} برابر سرانه خرید است. "
-            f"اگر > ۱.۵، فروشندگان حجمی قوی‌ترند."
-        )
+    def _factor_sell_ticket(self, snap: MarketSnapshot,
+                            prev_snap: Optional[MarketSnapshot]) -> SellPressureFactorResult:
+        if prev_snap is None:
+            return self._no_prev("sell_ticket", "سرانه معاملات حقیقی")
+        nb = snap.real_buy_count - prev_snap.real_buy_count
+        ns = snap.real_sell_count - prev_snap.real_sell_count
+        vb = snap.real_buy_value - prev_snap.real_buy_value
+        vs = snap.real_sell_value - prev_snap.real_sell_value
+        avg_b = _safe_div(vb, nb)
+        avg_s = _safe_div(vs, ns)
+        ratio = _safe_div(avg_s, avg_b)
+        raw = math.log(ratio) if (not math.isnan(ratio) and ratio > 0) else float("nan")
+        full_at = self.norm["sell_ticket"]["full_at"]
+        norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
+        score = norm * self.weights["sell_ticket"]
+        desc = f"سرانه خرید={avg_b:,.0f}، سرانه فروش={avg_s:,.0f} → ln={raw:+.3f}"
         return SellPressureFactorResult(
-            name="sell_per_capita_superiority",
-            label="برتری سرانه فروش به خرید",
-            max_points=self.weights["sell_per_capita_superiority"],
-            raw_value=ratio,
-            raw_unit="نسبت",
-            normalized=norm,
-            score=score,
-            description=desc,
-        )
+            name="sell_ticket", label=self.LABELS["sell_ticket"],
+            max_points=self.weights["sell_ticket"], raw_value=raw,
+            raw_unit="ln(نسبت)", normalized=norm, score=score,
+            description=desc)
 
     # -------------------------------------------------------------------
-    # شاخص ۴: فاصله منفی آخرین قیمت از پایانی (۱۵ امتیاز)
+    # شاخص ۴: واکنش منفی قیمت — ۳۰ ثانیه (۱۵ امتیاز)
+    #   −ln(Pt/Pt−30s)  —  افت قیمت = مثبت
     # -------------------------------------------------------------------
-    def _factor_negative_gap_last_vs_close(self, snap: MarketSnapshot) -> SellPressureFactorResult:
-        if snap.close_price > 0:
-            gap = (snap.last_price - snap.close_price) / snap.close_price
-        else:
-            gap = 0.0
-        # gap < 0 یعنی آخرین پایین‌تر از پایانی (فشار فروش)
-        # نرمال‌سازی: -gap / 0.02 → full_at -2%
-        norm = _clamp(-gap / 0.02)
-        score = norm * self.weights["negative_gap_last_vs_close"]
-        desc = (
-            f"آخرین قیمت {gap*100:+.2f}٪ نسبت به پایانی است. "
-            f"فاصله منفی بیش از -۲٪ → امتیاز کامل."
-        )
+    def _factor_sell_price(self, snap: MarketSnapshot,
+                           prev_snap: Optional[MarketSnapshot]) -> SellPressureFactorResult:
+        if prev_snap is None or prev_snap.last_price <= 0:
+            return self._no_prev("sell_price", "قیمت ۳۰ث قبل")
+        ratio = snap.last_price / prev_snap.last_price
+        raw = -math.log(ratio) if ratio > 0 else float("nan")
+        full_at = self.norm["sell_price"]["full_at"]
+        norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
+        score = norm * self.weights["sell_price"]
+        desc = f"Pt={snap.last_price:,.0f}، Pt-30s={prev_snap.last_price:,.0f} → تغییر={raw:+.4f}"
         return SellPressureFactorResult(
-            name="negative_gap_last_vs_close",
-            label="فاصله منفی آخرین قیمت از پایانی",
-            max_points=self.weights["negative_gap_last_vs_close"],
-            raw_value=gap,
-            raw_unit="٪",
-            normalized=norm,
-            score=score,
-            description=desc,
-        )
+            name="sell_price", label=self.LABELS["sell_price"],
+            max_points=self.weights["sell_price"], raw_value=raw,
+            raw_unit="−ln(نسبت)", normalized=norm, score=score,
+            description=desc)
 
     # -------------------------------------------------------------------
-    # شاخص ۵: افزایش سرعت عرضه در بهترین قیمت (۱۵ امتیاز)
+    # شاخص ۵: افزایش عرضه قابل مشاهده (۲۰ امتیاز)
+    #   Δask5% − Δbid5%  —  رشد خالص عرضه نسبت به تقاضا
     # -------------------------------------------------------------------
-    def _factor_supply_growth_rate(self, snap: MarketSnapshot,
-                                   prev_snap: Optional[MarketSnapshot]) -> SellPressureFactorResult:
-        if prev_snap is None or prev_snap.best_sell_volume > 0:
-            if prev_snap is None:
-                growth = 0.0
-            else:
-                growth = (snap.best_sell_volume - prev_snap.best_sell_volume) / max(prev_snap.best_sell_volume, 1)
-        else:
-            growth = 0.0
-        # نرمال‌سازی: growth / 0.5 → full_at 50% increase
-        norm = _clamp(growth / 0.5)
-        score = norm * self.weights["supply_growth_rate"]
-        desc = (
-            f"حجم عرضه در بهترین قیمت فروش {growth*100:+.1f}٪ نسبت به نمونه قبلی. "
-            f"افزایش ۵۰٪+ → امتیاز کامل."
-        )
+    def _factor_sell_supply(self, snap: MarketSnapshot,
+                            prev_snap: Optional[MarketSnapshot]) -> SellPressureFactorResult:
+        if prev_snap is None:
+            return self._no_prev("sell_supply", "عمق بازار ۳۰ث قبل")
+        ask_prev = _ask5(prev_snap)
+        bid_prev = _bid5(prev_snap)
+        ask_now = _ask5(snap)
+        bid_now = _bid5(snap)
+        d_ask = _safe_div(ask_now - ask_prev, ask_prev) if ask_prev > 0 else float("nan")
+        d_bid = _safe_div(bid_now - bid_prev, bid_prev) if bid_prev > 0 else float("nan")
+        raw = (d_ask - d_bid) if not (math.isnan(d_ask) or math.isnan(d_bid)) else float("nan")
+        full_at = self.norm["sell_supply"]["full_at"]
+        norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
+        score = norm * self.weights["sell_supply"]
+        desc = f"Δask5={d_ask*100:+.1f}٪، Δbid5={d_bid*100:+.1f}٪ → خالص={raw:+.3f}"
         return SellPressureFactorResult(
-            name="supply_growth_rate",
-            label="افزایش سرعت عرضه در بهترین قیمت",
-            max_points=self.weights["supply_growth_rate"],
-            raw_value=growth,
-            raw_unit="٪",
-            normalized=norm,
-            score=score,
-            description=desc,
-        )
+            name="sell_supply", label=self.LABELS["sell_supply"],
+            max_points=self.weights["sell_supply"], raw_value=raw,
+            raw_unit="تفاضل درصد", normalized=norm, score=score,
+            description=desc)
 
     # -------------------------------------------------------------------
-    # شاخص ۶: تخلیه تقاضا و نزدیک شدن به کف روز (۱۵ امتیاز)
+    # شاخص ۶: نزدیکی به کف قیمت (۱۵ امتیاز)
+    #   1−(P−L)/(U−L)  —  L=کف، U=سقف روزانه
     # -------------------------------------------------------------------
-    def _factor_demand_depletion_near_low(self, snap: MarketSnapshot,
-                                           prev_snap: Optional[MarketSnapshot]) -> SellPressureFactorResult:
-        # الف) تخلیه تقاضا: کاهش حجم بهترین خرید نسبت به نمونه قبلی
-        if prev_snap and prev_snap.best_buy_volume > 0:
-            depletion = (prev_snap.best_buy_volume - snap.best_buy_volume) / prev_snap.best_buy_volume
+    def _factor_sell_lower(self, snap: MarketSnapshot) -> SellPressureFactorResult:
+        L = snap.min_allowed_price
+        U = snap.max_allowed_price
+        if U <= L or U <= 0:
+            raw = float("nan")
         else:
-            depletion = 0.0
-        depletion_norm = _clamp(depletion / 0.5)  # کاهش 50٪ → 1
-
-        # ب) نزدیک شدن به کف روز
-        if snap.daily_high > snap.daily_low:
-            price_position = (snap.last_price - snap.daily_low) / (snap.daily_high - snap.daily_low)
-            # نزدیک به کف یعنی position نزدیک 0 → near_low = 1 - position
-            near_low = _clamp(1.0 - price_position)
-        else:
-            near_low = 0.0
-
-        # ترکیب: 60٪ تخلیه + 40٪ نزدیک به کف
-        norm = _clamp(0.6 * depletion_norm + 0.4 * near_low)
-        score = norm * self.weights["demand_depletion_near_low"]
-        desc = (
-            f"تخلیه تقاضا: {depletion*100:.1f}٪، "
-            f"موقعیت قیمت نسبت به کف: {(1 - near_low)*100:.0f}٪. "
-            f"ترکیب دو شاخص: {norm*100:.0f}٪."
-        )
+            raw = 1.0 - (snap.last_price - L) / (U - L)
+        full_at = self.norm["sell_lower"]["full_at"]
+        norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
+        score = norm * self.weights["sell_lower"]
+        status = "ok"
+        if math.isnan(raw):
+            status = "missing"
+            raw = 0.0
+        desc = f"کف={L:,.0f}، سقف={U:,.0f}، آخرین={snap.last_price:,.0f} → موقعیت={raw:.3f} (۱=کف)"
         return SellPressureFactorResult(
-            name="demand_depletion_near_low",
-            label="تخلیه تقاضا و نزدیک شدن به کف روز",
-            max_points=self.weights["demand_depletion_near_low"],
-            raw_value=norm,
-            raw_unit="شاخص ترکیبی ۰-۱",
-            normalized=norm,
-            score=score,
-            description=desc,
-        )
+            name="sell_lower", label=self.LABELS["sell_lower"],
+            max_points=self.weights["sell_lower"], raw_value=raw,
+            raw_unit="موقعیت [0,1]", normalized=norm, score=score,
+            description=desc, status=status)
+
+    # -------------------------------------------------------------------
+    # کمکی: شاخص‌هایی که به نمونه قبلی نیاز دارند
+    # -------------------------------------------------------------------
+    def _no_prev(self, name: str, field: str) -> SellPressureFactorResult:
+        return SellPressureFactorResult(
+            name=name, label=self.LABELS.get(name, name),
+            max_points=self.weights.get(name, 0), raw_value=float("nan"),
+            raw_unit="—", normalized=0.0, score=0.0,
+            description=f"{field} در دسترس نیست (نمونه قبلی وجود ندارد).",
+            status="no_prev")
 
     # -------------------------------------------------------------------
     # محاسبه نهایی
@@ -274,43 +282,35 @@ class SellPressureDetector:
     def evaluate(self, snap: MarketSnapshot,
                  prev_snap: Optional[MarketSnapshot] = None) -> SellPressureResult:
         """محاسبه امتیاز فشار فروش برای یک نمونه."""
-        # اگر داده ناقص باشد، هشدار ثبت ولی محاسبه تا حد ممکن انجام می‌شود
         data_warning = None
         if not snap.data_complete:
-            data_warning = (
-                f"داده‌های ناقص: {', '.join(snap.missing_fields)}"
-            )
+            data_warning = f"داده‌های ناقص: {', '.join(snap.missing_fields)}"
 
         factors = [
-            self._factor_buyer_power_weakness(snap),
-            self._factor_real_money_outflow(snap),
-            self._factor_sell_per_capita_superiority(snap),
-            self._factor_negative_gap_last_vs_close(snap),
-            self._factor_supply_growth_rate(snap, prev_snap),
-            self._factor_demand_depletion_near_low(snap, prev_snap),
+            self._factor_sell_breadth(snap, prev_snap),
+            self._factor_sell_flow(snap, prev_snap),
+            self._factor_sell_ticket(snap, prev_snap),
+            self._factor_sell_price(snap, prev_snap),
+            self._factor_sell_supply(snap, prev_snap),
+            self._factor_sell_lower(snap),
         ]
 
+        valid = sum(1 for f in factors if f.status == "ok")
         total = sum(f.score for f in factors)
-        # شمارش شاخص‌های با امتیاز >= 50٪ (برای تایید هشدار قرمز)
         independent_signals = sum(1 for f in factors if f.normalized >= 0.5)
 
-        # تعیین سطح
         level, action = self._determine_level(total)
         is_critical = total >= 65
+        engine_status = "official" if valid == len(factors) else "warming_up"
 
         return SellPressureResult(
-            total_score=total,
-            level=level,
-            action=action,
-            factors=factors,
-            independent_signals_count=independent_signals,
-            is_critical=is_critical,
-            snapshot_time=snap.tehran_time,
-            data_quality_warning=data_warning,
-        )
+            total_score=total, level=level, action=action,
+            factors=factors, independent_signals_count=independent_signals,
+            is_critical=is_critical, snapshot_time=snap.tehran_time,
+            valid_indicators=valid, engine_status=engine_status,
+            data_quality_warning=data_warning)
 
     def _determine_level(self, score: float) -> tuple:
-        """تعیین سطح و اقدام پیشنهادی بر اساس امتیاز."""
         if score <= 24:
             return self.levels["0-24"]["label"], self.levels["0-24"]["action"]
         elif score <= 34:

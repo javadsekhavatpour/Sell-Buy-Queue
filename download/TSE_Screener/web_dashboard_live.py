@@ -28,7 +28,7 @@ web_dashboard_live.py (نسخه جدید داشبورد رصد و تایید ب�
   --scenario  normal | sell_pressure | accumulation | mixed   (فقط demo)
   --symbol    نام نماد               (پیش‌فرض: نماد پیکربندی)
   --ins-code  کد TSETMC              (اگر فقط --symbol بدهید خودکار جستجو می‌شود)
-  --interval  فاصله نمونه‌برداری ثانیه  (پیش‌فرض: زنده ۱۵، شبیه‌سازی ۳)
+  --interval  فاصله نمونه‌برداری ثانیه  (پیش‌فرض: زنده ۳۰، شبیه‌سازی ۳)
   --samples   تعداد نمونه شبیه‌ساز    (پیش‌فرض ۲۲۶ = یک روز کامل)
   --port      پورت سرور              (پیش‌فرض 8051)
   --host      میزبان                 (پیش‌فرض 127.0.0.1)
@@ -81,6 +81,8 @@ from early_warning.isin_checker import (
 )
 from early_warning.storage import MarketDataStorage
 from early_warning.sell_pressure import SellPressureDetector
+from early_warning.smart_accumulation import BuyPressureDetector
+from early_warning.alert_engine import AlertEngine, tier, classify
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +275,7 @@ class LiveMonitor:
         sym = cfg.get("test_symbol", {})
         self.symbol = symbol or sym.get("name", "ریتون")
         self.ins_code = str(ins_code or sym.get("ins_code", ""))
-        self.interval = interval or (15 if mode == "live" else 3)
+        self.interval = interval or (30 if mode == "live" else 3)
         self.scenario = scenario
         self.samples = samples
         self.history: deque[MarketSnapshot] = deque(maxlen=max_history)
@@ -286,12 +288,16 @@ class LiveMonitor:
         self.collector = None
         self._demo_snaps: list[MarketSnapshot] = []
         self._trades_by_time: dict[str, list[Trade]] = {}
-        # موتور تحلیلی فشار فروش (برای نمایش در گروه E)
+        # موتورهای تحلیلی (برای نمایش در گروه E)
         try:
             self.sell_pressure = SellPressureDetector(cfg)
+            self.buy_pressure = BuyPressureDetector(cfg)
+            self.alert_engine = AlertEngine(cfg)
         except Exception as e:
-            print(f"  ⚠ SellPressureDetector راه‌اندازی نشد: {e}")
+            print(f"  ⚠ موتورهای تحلیلی راه‌اندازی نشدند: {e}")
             self.sell_pressure = None
+            self.buy_pressure = None
+            self.alert_engine = None
 
     # --- اجرای حلقه پس‌زمینه ---
 
@@ -382,16 +388,31 @@ class LiveMonitor:
     # --- خروجی موتورهای تحلیلی (برای گروه E) ---
 
     def _engine_output(self, hist: list[MarketSnapshot]) -> dict:
-        """اجرای موتورهای تحلیلی روی آخرین نمونه و ساخت خروجی برای داشبورد."""
+        """اجرای هر دو موتور تحلیلی + ترکیب هشدار روی آخرین نمونه."""
         out: dict = {"available": False}
-        if not self.sell_pressure or not hist:
+        if not hist:
             return out
         s = hist[-1]
         prev = hist[-2] if len(hist) >= 2 else None
+        history = hist[:-1]
         try:
-            result = self.sell_pressure.evaluate(s, prev)
-            out = result.to_dict()
-            out["available"] = True
+            sell_res = self.sell_pressure.evaluate(s, prev) if self.sell_pressure else None
+            buy_res = self.buy_pressure.evaluate(s, prev, history) if self.buy_pressure else None
+            combined = None
+            if sell_res and buy_res and self.alert_engine:
+                combined = self.alert_engine.evaluate(sell_res, buy_res)
+            out = {
+                "available": True,
+                "sell": sell_res.to_dict() if sell_res else None,
+                "buy": buy_res.to_dict() if buy_res else None,
+                "combined": combined.to_dict() if combined else None,
+                "sell_tier": tier(sell_res.total_score) if sell_res else "نامشخص",
+                "buy_tier": tier(buy_res.total_score) if buy_res else "نامشخص",
+                "classification": classify(
+                    sell_res.total_score if sell_res else None,
+                    buy_res.total_score if buy_res else None,
+                ),
+            }
         except Exception as e:
             out = {"available": False, "error": str(e)}
         return out
@@ -862,61 +883,93 @@ function renderC(d) {
     <div class="hint">مقادیر فاصله‌ای از تفاضل دو نمونه آخر به‌دست می‌آیند (در نخستین نمونه صفر هستند).</div>`;
 }
 
-/* ---------- گروه E: خروجی موتورهای تحلیلی ---------- */
+/* ---------- گروه E: خروجی موتورهای تحلیلی (فروش + خرید + classify) ---------- */
 function renderE(d) {
   const el = document.getElementById("p-e");
   const eng = d.engines || {};
   if (!eng.available) {
-    el.innerHTML = `<div class="wait">${eng.error ? "خطای موتور: " + eng.error : "در حال اجرای موتور تحلیلی..."}</div>`;
+    el.innerHTML = `<div class="wait">${eng.error ? "خطای موتور: " + eng.error : "در حال اجرای موتورهای تحلیلی..."}</div>`;
     return;
   }
-  const sp = eng;
-  const factors = sp.factors || [];
-  const ind1 = factors.find(f => f.name === "buyer_power_weakness") || {};
+  const sell = eng.sell || {};
+  const buy = eng.buy || {};
+  const comb = eng.combined || {};
 
-  // امتیاز کل فشار فروش
-  const totalScore = sp.total_score || 0;
-  const scorePct = Math.min(100, totalScore);
-  const scoreColor = totalScore >= 65 ? "#c62828" : totalScore >= 35 ? "#f9a825" : "#2e7d32";
+  // رنگ بر اساس امتیاز
+  const scoreColor = v => (v >= 65 ? "#c62828" : v >= 35 ? "#f9a825" : "#2e7d32");
+  const sellS = sell.total_score || 0;
+  const buyS = buy.total_score || 0;
+  const sellPct = Math.min(100, sellS);
+  const buyPct = Math.min(100, buyS);
 
-  // ردیف‌های شاخص‌ها
+  // بنر طبقه‌بندی
+  const cls = eng.classification || "—";
+  const clsColor = cls.includes("تقابل") ? "#6a1b9a"
+    : cls.includes("فشار فروش") ? "#c62828"
+    : cls.includes("فشار خرید") ? "#2e7d32"
+    : cls.includes("هشدار") ? "#f9a825"
+    : cls.includes("مراقبت") ? "#fb8c00"
+    : "#5a6b7f";
+
+  // ردیف‌های شاخص‌ها (هر دو موتور در یک جدول)
+  const sFactors = sell.factors || [];
+  const bFactors = buy.factors || [];
+  const nRows = Math.max(sFactors.length, bFactors.length);
   let factorRows = "";
-  for (const f of factors) {
-    const isInd1 = f.name === "buyer_power_weakness";
-    const fScore = f.score || 0;
-    const fMax = f.max_points || 0;
-    const fPct = fMax > 0 ? Math.round(fScore / fMax * 100) : 0;
-    const fColor = fPct >= 50 ? "#c62828" : fPct >= 25 ? "#f9a825" : "#2e7d32";
-    factorRows += `<tr${isInd1 ? ' style="background:#fffde7;font-weight:bold"' : ''}>
-      <td>${isInd1 ? "★ " : ""}${f.label}</td>
-      <td class="num" style="color:${fColor}">${N(fScore, 1)} / ${N(fMax, 0)}</td>
-      <td class="num">${N(f.normalized * 100, 0)}٪</td>
-      <td class="num" style="font-size:10px">${N(f.raw_value, 3)} ${f.raw_unit}</td>
+  for (let i = 0; i < nRows; i++) {
+    const sf = sFactors[i] || {};
+    const bf = bFactors[i] || {};
+    const cell = f => {
+      if (!f.name) return '<td colspan="4" style="color:#ccc">—</td>';
+      const sc = f.score || 0, mx = f.max_points || 0;
+      const pct = mx > 0 ? Math.round(sc / mx * 100) : 0;
+      const col = pct >= 50 ? "#c62828" : pct >= 25 ? "#f9a825" : "#2e7d32";
+      const rv = (f.raw_value === null || f.raw_value === undefined) ? "—" : N(f.raw_value, 3);
+      return `<td class="num" style="color:${col}">${N(sc, 1)}/${N(mx, 0)}</td>
+        <td class="num">${N((f.normalized || 0) * 100, 0)}٪</td>
+        <td class="num" style="font-size:9px;color:#888">${rv}</td>
+        <td style="font-size:9px;color:#888" title="${f.description||''}">${f.status === 'ok' ? '✓' : (f.status||'')}</td>`;
+    };
+    factorRows += `<tr>
+      <td style="font-size:10px">${sf.label || '—'}</td>${cell(sf)}
+      <td style="font-size:10px;background:#f5f5f5">${bf.label || '—'}</td>${cell(bf)}
     </tr>`;
   }
 
   el.innerHTML = `
-    <div style="padding:8px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-        <b style="font-size:13px">امتیاز کل فشار فروش</b>
-        <span style="font-size:20px;font-weight:bold;color:${scoreColor}">${N(totalScore, 1)}<span style="font-size:12px;color:#888"> / ۱۰۰</span></span>
+    <div style="padding:6px 8px;background:${clsColor};color:#fff;text-align:center;font-weight:bold;font-size:12px;border-radius:4px;margin-bottom:6px">
+      ${cls}
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:6px">
+      <div style="flex:1;padding:6px;border:1px solid #eee;border-radius:6px;text-align:center">
+        <div style="font-size:11px;color:#888">موتور فروش</div>
+        <div style="font-size:22px;font-weight:bold;color:${scoreColor(sellS)}">${N(sellS, 1)}</div>
+        <div style="height:8px;background:#f0f0f0;border-radius:4px;overflow:hidden;margin:4px 0">
+          <div style="height:100%;width:${sellPct}%;background:${scoreColor(sellS)}"></div>
+        </div>
+        <div style="font-size:10px">${eng.sell_tier || '—'} ${sell.engine_status === 'warming_up' ? '⚠ گرم‌شدن' : ''}</div>
       </div>
-      <div style="height:14px;background:#f0f0f0;border-radius:7px;overflow:hidden;margin-bottom:4px">
-        <div style="height:100%;width:${scorePct}%;background:${scoreColor};transition:width .5s"></div>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:11px;color:#5a6b7f;margin-bottom:8px">
-        <span>سطح: <b>${sp.level || "—"}</b></span>
-        <span>سیگنال‌های مستقل ≥ ۵۰٪: <b>${sp.independent_signals_count || 0}</b></span>
-        <span>${sp.is_critical ? '<b style="color:#c62828">منطقه خطر</b>' : '<b style="color:#2e7d32">ایمن</b>'}</span>
+      <div style="flex:1;padding:6px;border:1px solid #eee;border-radius:6px;text-align:center">
+        <div style="font-size:11px;color:#888">موتور خرید</div>
+        <div style="font-size:22px;font-weight:bold;color:${scoreColor(buyS)}">${N(buyS, 1)}</div>
+        <div style="height:8px;background:#f0f0f0;border-radius:4px;overflow:hidden;margin:4px 0">
+          <div style="height:100%;width:${buyPct}%;background:${scoreColor(buyS)}"></div>
+        </div>
+        <div style="font-size:10px">${eng.buy_tier || '—'} ${buy.engine_status === 'warming_up' ? '⚠ گرم‌شدن' : ''}</div>
       </div>
     </div>
-    <table class="ttable" style="font-size:11px">
-      <thead><tr><th>شاخص</th><th>امتیاز</th><th>نرمال</th><th>مقدار خام</th></tr></thead>
+    <table class="ttable" style="font-size:10px">
+      <thead><tr>
+        <th colspan="4" style="background:#fdecea;color:#c62828">شاخص‌های فروش</th>
+        <th colspan="4" style="background:#e8f5e9;color:#2e7d32">شاخص‌های خرید</th>
+      </tr><tr>
+        <th>شاخص</th><th>امتیاز</th><th>نرمال</th><th>خام/وضع</th>
+        <th>شاخص</th><th>امتیاز</th><th>نرمال</th><th>خام/وضع</th>
+      </tr></thead>
       <tbody>${factorRows}</tbody>
     </table>
-    ${ind1.description ? `<div class="hint" style="background:#fffde7;padding:6px;margin:4px;border-right:3px solid #f9a825"><b>★ شاخص ۱ (۲۰ امتیاز):</b> ${ind1.description}</div>` : ""}
-    ${sp.data_quality_warning ? `<div class="hint" style="color:#c62828">⚠ ${sp.data_quality_warning}</div>` : ""}
-    <div class="hint">★ = شاخص ۱: ضعف قدرت خریدار حقیقی (۲۰ امتیاز) — خریدار ضعیف ← امتیاز بالا</div>`;
+    ${(sell.data_quality_warning || buy.data_quality_warning) ? `<div class="hint" style="color:#c62828">⚠ ${sell.data_quality_warning || buy.data_quality_warning}</div>` : ""}
+    <div class="hint">۱۲ شاخص مستقل — فروش (قرمز) و خرید (سبز). نرمال‌سازی آستانه ثابت (Phase 1).</div>`;
 }
 
 /* ---------- گروه B ---------- */
