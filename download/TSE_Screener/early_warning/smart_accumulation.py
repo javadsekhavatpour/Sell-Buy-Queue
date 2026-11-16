@@ -134,6 +134,10 @@ class BuyPressureDetector:
         nb = snap.real_buy_count - prev_snap.real_buy_count
         ns = snap.real_sell_count - prev_snap.real_sell_count
         denom = nb + ns
+        if denom == 0:
+            return self._no_trades(
+                "buy_breadth", "معامله حقیقی",
+                cum_info=f"تجمعی: خریدار={snap.real_buy_count}، فروشنده={snap.real_sell_count}")
         raw = _safe_div(nb - ns, denom)
         full_at = self.norm["buy_breadth"]["full_at"]
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
@@ -156,6 +160,10 @@ class BuyPressureDetector:
         vb = snap.real_buy_value - prev_snap.real_buy_value
         vs = snap.real_sell_value - prev_snap.real_sell_value
         denom = vb + vs
+        if denom == 0:
+            return self._no_trades(
+                "buy_flow", "معامله حقیقی",
+                cum_info=f"تجمعی: حجم خرید={snap.real_buy_volume:,}، فروش={snap.real_sell_volume:,}")
         raw = _safe_div(vb - vs, denom)
         full_at = self.norm["buy_flow"]["full_at"]
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
@@ -179,6 +187,10 @@ class BuyPressureDetector:
         ns = snap.real_sell_count - prev_snap.real_sell_count
         vb = snap.real_buy_value - prev_snap.real_buy_value
         vs = snap.real_sell_value - prev_snap.real_sell_value
+        if nb == 0 and ns == 0:
+            return self._no_trades(
+                "buy_ticket", "معامله حقیقی",
+                cum_info=f"تجمعی: خریدار={snap.real_buy_count}، فروشنده={snap.real_sell_count}")
         avg_b = _safe_div(vb, nb)
         avg_s = _safe_div(vs, ns)
         ratio = _safe_div(avg_b, avg_s)
@@ -289,6 +301,20 @@ class BuyPressureDetector:
             raw_unit="—", normalized=0.0, score=0.0,
             description=f"{field} در دسترس نیست (نمونه قبلی وجود ندارد).",
             status="no_prev")
+
+    # -------------------------------------------------------------------
+    # کمکی: شاخص‌هایی که در بازه ۳۰ثانیه‌ای معامله جدیدی نداشتند
+    #   داده تجمعی موجود است ولی delta = 0 → خنثی (نه مفقود)
+    # -------------------------------------------------------------------
+    def _no_trades(self, name: str, field: str,
+                   cum_info: str = "") -> BuyPressureFactorResult:
+        extra = f" ({cum_info})" if cum_info else ""
+        return BuyPressureFactorResult(
+            name=name, label=self.LABELS.get(name, name),
+            max_points=self.weights.get(name, 0), raw_value=0.0,
+            raw_unit="—", normalized=0.0, score=0.0,
+            description=f"بدون {field} جدید در بازه ۳۰ثانیه‌ای{extra} — خنثی.",
+            status="no_trades")
 
     # -------------------------------------------------------------------
     # محاسبه نهایی
