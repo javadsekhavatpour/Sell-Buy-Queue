@@ -168,6 +168,27 @@ CREATE TABLE IF NOT EXISTS daily_params (
 );
 """
 
+# ---------------------------------------------------------------------------
+# جدول score_history — ذخیره raw_value هر شاخص برای نرمال‌سازی تطبیقی (Phase 2)
+#   صدک ۹۰ مقادیر خام تاریخی → آستانه پویا به‌جای full_at ثابت
+# ---------------------------------------------------------------------------
+SCHEMA_SCORE_HISTORY = """
+CREATE TABLE IF NOT EXISTS score_history (
+    sh_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp    TEXT NOT NULL,
+    date_jalali  TEXT,
+    symbol       TEXT NOT NULL,
+    engine       TEXT NOT NULL,
+    factor       TEXT NOT NULL,
+    raw_value    REAL,
+    normalized   REAL,
+    score        REAL,
+    status       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sh_sym_fact_time
+    ON score_history(symbol, factor, timestamp DESC);
+"""
+
 # ستون‌های جدول snapshots به ترتیب (به جز autoincrement)
 # توجه: yesterday_price، min_allowed_price، max_allowed_price همچنان در
 # snapshots ذخیره می‌شوند (با مقدار ثابت از fixed_price_range / daily_params)
@@ -214,6 +235,12 @@ TRADE_COLUMNS = [
     "trade_price", "trade_volume", "trade_id", "aggressor_side",
 ]
 
+# ستون‌های جدول score_history (نرمال‌سازی تطبیقی Phase 2)
+SCORE_HISTORY_COLUMNS = [
+    "timestamp", "date_jalali", "symbol", "engine", "factor",
+    "raw_value", "normalized", "score", "status",
+]
+
 
 # ---------------------------------------------------------------------------
 # کلاس اصلی ذخیره‌سازی
@@ -236,6 +263,7 @@ class MarketDataStorage:
         cur.executescript(SCHEMA_TRADES)
         cur.executescript(SCHEMA_METADATA)
         cur.executescript(SCHEMA_DAILY_PARAMS)
+        cur.executescript(SCHEMA_SCORE_HISTORY)
         self.conn.commit()
 
     # ----- snapshots -----
@@ -466,6 +494,64 @@ class MarketDataStorage:
             for r in rows:
                 writer.writerow(r)
         return output_path
+
+    # ----- score_history (نرمال‌سازی تطبیقی Phase 2) -----
+    def insert_score_history(self, row: Dict) -> int:
+        """
+        درج یک مشاهده شاخص در score_history.
+
+        row شامل: timestamp, date_jalali, symbol, engine, factor,
+                  raw_value, normalized, score, status
+        """
+        cols = SCORE_HISTORY_COLUMNS
+        placeholders = ", ".join(["?"] * len(cols))
+        col_names = ", ".join(cols)
+        values = [row.get(c) for c in cols]
+        sql = f"INSERT INTO score_history ({col_names}) VALUES ({placeholders})"
+        cur = self.conn.cursor()
+        cur.execute(sql, values)
+        self.conn.commit()
+        return cur.lastrowid
+
+    def insert_score_history_bulk(self, rows: List[Dict]) -> int:
+        """درج گروهی مشاهدات شاخص — سریع‌تر از درج تکی."""
+        if not rows:
+            return 0
+        cols = SCORE_HISTORY_COLUMNS
+        placeholders = ", ".join(["?"] * len(cols))
+        col_names = ", ".join(cols)
+        sql = f"INSERT INTO score_history ({col_names}) VALUES ({placeholders})"
+        cur = self.conn.cursor()
+        cur.executemany(sql, [[r.get(c) for c in cols] for r in rows])
+        self.conn.commit()
+        return cur.rowcount
+
+    def get_score_history_raw(self, symbol: str, factor: str,
+                              limit: int = 500) -> List[float]:
+        """
+        بازگشت مقادیر خام اخیر یک شاخص برای نرمال‌سازی تطبیقی.
+
+        فقط مقادیر غیر NULL و غیر NaN برمی‌گرداند (مرتب بر اساس زمان نزولی).
+        """
+        sql = ("SELECT raw_value FROM score_history "
+               "WHERE symbol = ? AND factor = ? AND raw_value IS NOT NULL "
+               "ORDER BY timestamp DESC LIMIT ?")
+        cur = self.conn.cursor()
+        cur.execute(sql, (symbol, factor, int(limit)))
+        out = []
+        for r in cur.fetchall():
+            v = r[0]
+            if v is not None and v == v:  # NaN check
+                out.append(float(v))
+        return out
+
+    def get_score_history_count(self, symbol: str, factor: str) -> int:
+        """تعداد مشاهدات یک شاخص — برای بررسی min_samples."""
+        sql = ("SELECT COUNT(*) FROM score_history "
+               "WHERE symbol = ? AND factor = ? AND raw_value IS NOT NULL")
+        cur = self.conn.cursor()
+        cur.execute(sql, (symbol, factor))
+        return int(cur.fetchone()[0])
 
     def close(self):
         self.conn.close()

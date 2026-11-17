@@ -22,6 +22,7 @@ from .alert_engine import AlertEngine, AlertEvent, tier, classify
 from .speed_indicators import SpeedIndicatorEngine, SpeedIndicatorsResult
 from .excel_report import ExcelReportGenerator
 from .storage import MarketDataStorage
+from .adaptive_scoring import AdaptiveNormalizer
 from .price_range import (
     load_range_rules, load_symbol_categories,
     get_symbol_category, get_category_percent,
@@ -55,6 +56,7 @@ __all__ = [
     "SpeedIndicatorsResult",
     "ExcelReportGenerator",
     "MarketDataStorage",
+    "AdaptiveNormalizer",
     "load_range_rules",
     "load_symbol_categories",
     "get_symbol_category",

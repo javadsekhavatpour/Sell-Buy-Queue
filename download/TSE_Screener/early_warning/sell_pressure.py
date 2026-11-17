@@ -118,12 +118,25 @@ class SellPressureDetector:
         "sell_lower":   "نزدیکی به کف قیمت",
     }
 
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, normalizer=None):
         sp_cfg = config["sell_pressure"]
         self.weights = sp_cfg["weights"]
         self.levels = sp_cfg["levels"]
         self.norm = sp_cfg["norm"]
         self.min_history = config.get("min_history", 30)
+        # Phase 2: نرمال‌سازی تطبیقی (اختیاری — None = رفتار مرحله ۱ با full_at ثابت)
+        self.normalizer = normalizer
+
+    def _get_threshold(self, symbol: str, factor_name: str) -> float:
+        """
+        آستانه نرمال‌سازی برای (نماد، شاخص).
+        اگر normalizer موجود بود → آستانه تطبیقی (صدک تاریخچه)؛
+        در غیر این صورت → full_at ثابت از کانفیگ.
+        """
+        fallback = self.norm[factor_name]["full_at"]
+        if self.normalizer is None:
+            return fallback
+        return self.normalizer.get_threshold(symbol, factor_name, fallback)
 
     # -------------------------------------------------------------------
     # شاخص ۱: ضعف گستردگی خریداران حقیقی (۱۵ امتیاز)
@@ -141,7 +154,7 @@ class SellPressureDetector:
                 "sell_breadth", "معامله حقیقی",
                 cum_info=f"تجمعی: خریدار={snap.real_buy_count}، فروشنده={snap.real_sell_count}")
         raw = _safe_div(ns - nb, denom)
-        full_at = self.norm["sell_breadth"]["full_at"]
+        full_at = self._get_threshold(snap.symbol, "sell_breadth")
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
         score = norm * self.weights["sell_breadth"]
         desc = f"Δ خریداران={nb}، Δ فروشندگان={ns} → گستردگی={raw:+.3f} (کاهش خریدار = مثبت)"
@@ -167,7 +180,7 @@ class SellPressureDetector:
                 "sell_flow", "معامله حقیقی",
                 cum_info=f"تجمعی: حجم خرید={snap.real_buy_volume:,}، فروش={snap.real_sell_volume:,}")
         raw = _safe_div(vs - vb, denom)
-        full_at = self.norm["sell_flow"]["full_at"]
+        full_at = self._get_threshold(snap.symbol, "sell_flow")
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
         score = norm * self.weights["sell_flow"]
         desc = f"Δ ارزش خرید={vb:,.0f}، Δ ارزش فروش={vs:,.0f} → خروج={raw:+.3f}"
@@ -197,7 +210,7 @@ class SellPressureDetector:
         avg_s = _safe_div(vs, ns)
         ratio = _safe_div(avg_s, avg_b)
         raw = math.log(ratio) if (not math.isnan(ratio) and ratio > 0) else float("nan")
-        full_at = self.norm["sell_ticket"]["full_at"]
+        full_at = self._get_threshold(snap.symbol, "sell_ticket")
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
         score = norm * self.weights["sell_ticket"]
         desc = f"سرانه خرید={avg_b:,.0f}، سرانه فروش={avg_s:,.0f} → ln={raw:+.3f}"
@@ -217,7 +230,7 @@ class SellPressureDetector:
             return self._no_prev("sell_price", "قیمت ۳۰ث قبل")
         ratio = snap.last_price / prev_snap.last_price
         raw = -math.log(ratio) if ratio > 0 else float("nan")
-        full_at = self.norm["sell_price"]["full_at"]
+        full_at = self._get_threshold(snap.symbol, "sell_price")
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
         score = norm * self.weights["sell_price"]
         desc = f"Pt={snap.last_price:,.0f}، Pt-30s={prev_snap.last_price:,.0f} → تغییر={raw:+.4f}"
@@ -242,7 +255,7 @@ class SellPressureDetector:
         d_ask = _safe_div(ask_now - ask_prev, ask_prev) if ask_prev > 0 else float("nan")
         d_bid = _safe_div(bid_now - bid_prev, bid_prev) if bid_prev > 0 else float("nan")
         raw = (d_ask - d_bid) if not (math.isnan(d_ask) or math.isnan(d_bid)) else float("nan")
-        full_at = self.norm["sell_supply"]["full_at"]
+        full_at = self._get_threshold(snap.symbol, "sell_supply")
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
         score = norm * self.weights["sell_supply"]
         desc = f"Δask5={d_ask*100:+.1f}٪، Δbid5={d_bid*100:+.1f}٪ → خالص={raw:+.3f}"
@@ -263,7 +276,7 @@ class SellPressureDetector:
             raw = float("nan")
         else:
             raw = 1.0 - (snap.last_price - L) / (U - L)
-        full_at = self.norm["sell_lower"]["full_at"]
+        full_at = self._get_threshold(snap.symbol, "sell_lower")
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
         score = norm * self.weights["sell_lower"]
         status = "ok"

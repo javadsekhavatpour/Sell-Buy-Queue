@@ -115,13 +115,26 @@ class BuyPressureDetector:
         "buy_support":    "حفظ حمایت و فاصله از کف قیمت",
     }
 
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, normalizer=None):
         bp_cfg = config["buy_pressure"]
         self.weights = bp_cfg["weights"]
         self.levels = bp_cfg["levels"]
         self.norm = bp_cfg["norm"]
         self.identification_threshold = bp_cfg["identification_threshold"]
         self.min_history = config.get("min_history", 30)
+        # Phase 2: نرمال‌سازی تطبیقی (اختیاری — None = رفتار مرحله ۱ با full_at ثابت)
+        self.normalizer = normalizer
+
+    def _get_threshold(self, symbol: str, factor_name: str) -> float:
+        """
+        آستانه نرمال‌سازی برای (نماد، شاخص).
+        اگر normalizer موجود بود → آستانه تطبیقی (صدک تاریخچه)؛
+        در غیر این صورت → full_at ثابت از کانفیگ.
+        """
+        fallback = self.norm[factor_name]["full_at"]
+        if self.normalizer is None:
+            return fallback
+        return self.normalizer.get_threshold(symbol, factor_name, fallback)
 
     # -------------------------------------------------------------------
     # شاخص ۱: گستردگی مشارکت خریداران حقیقی (۱۵ امتیاز)
@@ -139,7 +152,7 @@ class BuyPressureDetector:
                 "buy_breadth", "معامله حقیقی",
                 cum_info=f"تجمعی: خریدار={snap.real_buy_count}، فروشنده={snap.real_sell_count}")
         raw = _safe_div(nb - ns, denom)
-        full_at = self.norm["buy_breadth"]["full_at"]
+        full_at = self._get_threshold(snap.symbol, "buy_breadth")
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
         score = norm * self.weights["buy_breadth"]
         desc = f"Δ خریداران={nb}، Δ فروشندگان={ns} → گستردگی={raw:+.3f} (افزایش خریدار = مثبت)"
@@ -165,7 +178,7 @@ class BuyPressureDetector:
                 "buy_flow", "معامله حقیقی",
                 cum_info=f"تجمعی: حجم خرید={snap.real_buy_volume:,}، فروش={snap.real_sell_volume:,}")
         raw = _safe_div(vb - vs, denom)
-        full_at = self.norm["buy_flow"]["full_at"]
+        full_at = self._get_threshold(snap.symbol, "buy_flow")
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
         score = norm * self.weights["buy_flow"]
         desc = f"Δ ارزش خرید={vb:,.0f}، Δ ارزش فروش={vs:,.0f} → ورود={raw:+.3f}"
@@ -195,7 +208,7 @@ class BuyPressureDetector:
         avg_s = _safe_div(vs, ns)
         ratio = _safe_div(avg_b, avg_s)
         raw = math.log(ratio) if (not math.isnan(ratio) and ratio > 0) else float("nan")
-        full_at = self.norm["buy_ticket"]["full_at"]
+        full_at = self._get_threshold(snap.symbol, "buy_ticket")
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
         score = norm * self.weights["buy_ticket"]
         desc = f"سرانه خرید={avg_b:,.0f}، سرانه فروش={avg_s:,.0f} → ln={raw:+.3f}"
@@ -215,7 +228,7 @@ class BuyPressureDetector:
             return self._no_prev("buy_price", "قیمت ۳۰ث قبل")
         ratio = snap.last_price / prev_snap.last_price
         raw = math.log(ratio) if ratio > 0 else float("nan")
-        full_at = self.norm["buy_price"]["full_at"]
+        full_at = self._get_threshold(snap.symbol, "buy_price")
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
         score = norm * self.weights["buy_price"]
         desc = f"Pt={snap.last_price:,.0f}، Pt-30s={prev_snap.last_price:,.0f} → تغییر={raw:+.4f}"
@@ -241,7 +254,7 @@ class BuyPressureDetector:
         traded = max(0.0, snap.total_volume - prev_snap.total_volume)  # حجم معامله شده
         confirmed = min(ask_depletion, traded)   # فقط بخش تأییدشده با معامله واقعی
         raw = _safe_div(confirmed, ask_prev) if ask_prev > 0 else float("nan")
-        full_at = self.norm["buy_absorption"]["full_at"]
+        full_at = self._get_threshold(snap.symbol, "buy_absorption")
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
         score = norm * self.weights["buy_absorption"]
         desc = (f"کاهش عرضه={ask_depletion:,.0f}، حجم معامله={traded:,.0f}، "
@@ -278,7 +291,7 @@ class BuyPressureDetector:
             else:
                 raw = max(0.0, recovery) * max(0.0, proximity)
                 status = "ok" if len(history) >= 6 else "warming_up"
-        full_at = self.norm["buy_support"]["full_at"]
+        full_at = self._get_threshold(snap.symbol, "buy_support")
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
         score = norm * self.weights["buy_support"]
         if math.isnan(raw):

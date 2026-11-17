@@ -44,6 +44,7 @@ from early_warning import (
     SpeedIndicatorEngine,
     ExcelReportGenerator,
     MarketDataStorage,
+    AdaptiveNormalizer,
     MarketPhase,
     load_range_rules,
     get_symbol_category,
@@ -356,6 +357,8 @@ def main():
     collector = MarketDataCollector(config)
     db_path = ROOT / args.db
     storage = MarketDataStorage(db_path)
+    # Phase 2: نرمال‌سازی تطبیقی (اگر adaptive.enabled=true در کانفیگ)
+    normalizer = AdaptiveNormalizer(storage, config)
 
     # ----- محاسبه پارامترهای ثابت روز (یک بار، ثابت برای کل جلسه) -----
     # ابتدا collector و storage ساخته می‌شوند چون load_price_range از collector
@@ -366,8 +369,8 @@ def main():
     load_price_range(args, config, collector, storage)
 
     validator = DataValidator()
-    sp_detector = SellPressureDetector(config)
-    buy_detector = BuyPressureDetector(config)
+    sp_detector = SellPressureDetector(config, normalizer=normalizer)
+    buy_detector = BuyPressureDetector(config, normalizer=normalizer)
     alert_engine = AlertEngine(config)
     speed_engine = SpeedIndicatorEngine(config)
 
@@ -429,6 +432,11 @@ def main():
             if due:
                 sp = sp_detector.evaluate(snap, engine_prev)
                 buy = buy_detector.evaluate(snap, engine_prev, engine_history)
+                # Phase 2: ثبت raw_valueها برای نرمال‌سازی تطبیقی آینده
+                normalizer.record_factors(snap.symbol, "sell", sp.factors,
+                                          date_jalali=snap.date_jalali)
+                normalizer.record_factors(snap.symbol, "buy", buy.factors,
+                                          date_jalali=snap.date_jalali)
                 # شاخص‌های سرعتی نردبان (فقط برای نمایش؛ در v2 جزو alert_engine نیست)
                 speed = speed_engine.compute(snap, engine_history)
                 combined = alert_engine.evaluate(sp, buy)

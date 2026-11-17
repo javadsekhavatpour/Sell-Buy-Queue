@@ -80,6 +80,7 @@ from early_warning.isin_checker import (
     compute_range_from_isin,
 )
 from early_warning.storage import MarketDataStorage
+from early_warning.adaptive_scoring import AdaptiveNormalizer
 from early_warning.sell_pressure import SellPressureDetector
 from early_warning.smart_accumulation import BuyPressureDetector
 from early_warning.alert_engine import AlertEngine, tier, classify
@@ -269,9 +270,10 @@ class LiveMonitor:
     def __init__(self, cfg: dict, mode: str = "live", symbol: str | None = None,
                  ins_code: str | None = None, interval: int | None = None,
                  scenario: str = "sell_pressure", samples: int = 226,
-                 max_history: int = 300):
+                 max_history: int = 300, normalizer=None):
         self.cfg = cfg
         self.mode = mode
+        self.normalizer = normalizer
         sym = cfg.get("test_symbol", {})
         self.symbol = symbol or sym.get("name", "ریتون")
         self.ins_code = str(ins_code or sym.get("ins_code", ""))
@@ -290,8 +292,8 @@ class LiveMonitor:
         self._trades_by_time: dict[str, list[Trade]] = {}
         # موتورهای تحلیلی (برای نمایش در گروه E)
         try:
-            self.sell_pressure = SellPressureDetector(cfg)
-            self.buy_pressure = BuyPressureDetector(cfg)
+            self.sell_pressure = SellPressureDetector(cfg, normalizer=normalizer)
+            self.buy_pressure = BuyPressureDetector(cfg, normalizer=normalizer)
             self.alert_engine = AlertEngine(cfg)
         except Exception as e:
             print(f"  ⚠ موتورهای تحلیلی راه‌اندازی نشدند: {e}")
@@ -398,6 +400,14 @@ class LiveMonitor:
         try:
             sell_res = self.sell_pressure.evaluate(s, prev) if self.sell_pressure else None
             buy_res = self.buy_pressure.evaluate(s, prev, history) if self.buy_pressure else None
+            # Phase 2: ثبت raw_valueها برای نرمال‌سازی تطبیقی آینده
+            if self.normalizer is not None:
+                if sell_res:
+                    self.normalizer.record_factors(s.symbol, "sell", sell_res.factors,
+                                                  date_jalali=s.date_jalali)
+                if buy_res:
+                    self.normalizer.record_factors(s.symbol, "buy", buy_res.factors,
+                                                  date_jalali=s.date_jalali)
             combined = None
             if sell_res and buy_res and self.alert_engine:
                 combined = self.alert_engine.evaluate(sell_res, buy_res)
@@ -1196,11 +1206,14 @@ def main():
     sym_final = args.symbol or cfg.get("test_symbol", {}).get("name", "")
     ins_final = args.ins_code or cfg.get("test_symbol", {}).get("ins_code", "")
     live_storage = None
+    live_normalizer = None
     if args.mode == "live" and sym_final:
         db_path = ROOT / args.db
         try:
             live_storage = MarketDataStorage(db_path)
             load_price_range_live(cfg, sym_final, ins_final, storage=live_storage)
+            # Phase 2: نرمال‌سازی تطبیقی (اگر adaptive.enabled=true در کانفیگ)
+            live_normalizer = AdaptiveNormalizer(live_storage, cfg)
         except Exception as e:
             print(f"  ⚠ خطا در ایجاد storage برای daily_params: {e}")
             print(f"  ⚠ daily_params ذخیره نمی‌شود اما داشبورد ادامه می‌دهد.")
@@ -1214,6 +1227,7 @@ def main():
         interval=args.interval,
         scenario=args.scenario,
         samples=args.samples,
+        normalizer=live_normalizer,
     )
     MONITOR.start()
 

@@ -24,12 +24,30 @@
       "sell_lower": 15
     },
     "norm": {
-      "sell_breadth":  {"full_at": 0.30, "description": "(Ns−Nb)/(Ns+Nb) — ۳۰٪ برتری تعداد فروشندگان → امتیاز کامل"},
-      "sell_flow":    {"full_at": 0.10, "description": "(Vs−Vb)/(Vs+Vb) — خروج ۱۰٪ ارزش → امتیاز کامل"},
-      "sell_ticket":  {"full_at": 0.50, "description": "ln(V̄s/V̄b) — سرانه فروش ۱.۶۵ برابر → امتیاز کامل"},
-      "sell_price":   {"full_at": 0.01, "description": "−ln(Pt/Pt−30s) — افت ۱٪ در ۳۰ث → امتیاز کامل"},
-      "sell_supply":  {"full_at": 0.30, "description": "Δask5% − Δbid5% — رشد خالص عرضه ۳۰٪ → امتیاز کامل"},
-      "sell_lower":   {"full_at": 1.00, "description": "1−(P−L)/(U−L) — رسیدن به کف → امتیاز کامل"}
+      "sell_breadth": {
+        "full_at": 0.3,
+        "description": "(Ns−Nb)/(Ns+Nb) — ۳۰٪ برتری تعداد فروشندگان → امتیاز کامل"
+      },
+      "sell_flow": {
+        "full_at": 0.1,
+        "description": "(Vs−Vb)/(Vs+Vb) — خروج ۱۰٪ ارزش → امتیاز کامل"
+      },
+      "sell_ticket": {
+        "full_at": 0.5,
+        "description": "ln(V̄s/V̄b) — سرانه فروش ۱.۶۵ برابر → امتیاز کامل"
+      },
+      "sell_price": {
+        "full_at": 0.01,
+        "description": "−ln(Pt/Pt−30s) — افت ۱٪ در ۳۰ث → امتیاز کامل"
+      },
+      "sell_supply": {
+        "full_at": 0.3,
+        "description": "Δask5% − Δbid5% — رشد خالص عرضه ۳۰٪ → امتیاز کامل"
+      },
+      "sell_lower": {
+        "full_at": 1.0,
+        "description": "1−(P−L)/(U−L) — رسیدن به کف → امتیاز کامل"
+      }
     },
     "thresholds": {
       "normal_max": 24,
@@ -41,12 +59,30 @@
     },
     "operational_threshold": 35,
     "levels": {
-      "0-24":   {"label": "عادی",            "action": "ادامه پایش"},
-      "25-34":  {"label": "مراقبت",          "action": "ثبت تغییرات"},
-      "35-49":  {"label": "هشدار اولیه",     "action": "بررسی احتمال خروج"},
-      "50-64":  {"label": "فشار فروش قوی",   "action": "هشدار جدی خروج"},
-      "65-79":  {"label": "فشار بسیار قوی",  "action": "اولویت بررسی نقدشوندگی"},
-      "80-100": {"label": "وضعیت بحرانی",    "action": "احتمال بسیار بالای قفل شدن"}
+      "0-24": {
+        "label": "عادی",
+        "action": "ادامه پایش"
+      },
+      "25-34": {
+        "label": "مراقبت",
+        "action": "ثبت تغییرات"
+      },
+      "35-49": {
+        "label": "هشدار اولیه",
+        "action": "بررسی احتمال خروج"
+      },
+      "50-64": {
+        "label": "فشار فروش قوی",
+        "action": "هشدار جدی خروج"
+      },
+      "65-79": {
+        "label": "فشار بسیار قوی",
+        "action": "اولویت بررسی نقدشوندگی"
+      },
+      "80-100": {
+        "label": "وضعیت بحرانی",
+        "action": "احتمال بسیار بالای قفل شدن"
+      }
     }
   },
   "buy_pressure": {
@@ -59,12 +95,30 @@
       "buy_support": 15
     },
     "norm": {
-      "buy_breadth":   {"full_at": 0.30, "description": "(Nb−Ns)/(Nb+Ns) — ۳۰٪ برتری تعداد خریداران → امتیاز کامل"},
-      "buy_flow":     {"full_at": 0.10, "description": "(Vb−Vs)/(Vb+Vs) — ورود ۱۰٪ ارزش → امتیاز کامل"},
-      "buy_ticket":   {"full_at": 0.50, "description": "ln(V̄b/V̄s) — سرانه خرید ۱.۶۵ برابر → امتیاز کامل"},
-      "buy_price":    {"full_at": 0.01, "description": "ln(Pt/Pt−30s) — رشد ۱٪ در ۳۰ث → امتیاز کامل"},
-      "buy_absorption": {"full_at": 0.50, "description": "min(−Δask5, Δvol)/ask5_prev — جذب ۵۰٪ عرضه → امتیاز کامل"},
-      "buy_support":  {"full_at": 0.30, "description": "recovery × proximity — بازگشت ۳۰٪ از کف → امتیاز کامل"}
+      "buy_breadth": {
+        "full_at": 0.3,
+        "description": "(Nb−Ns)/(Nb+Ns) — ۳۰٪ برتری تعداد خریداران → امتیاز کامل"
+      },
+      "buy_flow": {
+        "full_at": 0.1,
+        "description": "(Vb−Vs)/(Vb+Vs) — ورود ۱۰٪ ارزش → امتیاز کامل"
+      },
+      "buy_ticket": {
+        "full_at": 0.5,
+        "description": "ln(V̄b/V̄s) — سرانه خرید ۱.۶۵ برابر → امتیاز کامل"
+      },
+      "buy_price": {
+        "full_at": 0.01,
+        "description": "ln(Pt/Pt−30s) — رشد ۱٪ در ۳۰ث → امتیاز کامل"
+      },
+      "buy_absorption": {
+        "full_at": 0.5,
+        "description": "min(−Δask5, Δvol)/ask5_prev — جذب ۵۰٪ عرضه → امتیاز کامل"
+      },
+      "buy_support": {
+        "full_at": 0.3,
+        "description": "recovery × proximity — بازگشت ۳۰٪ از کف → امتیاز کامل"
+      }
     },
     "thresholds": {
       "no_reliable_sign_max": 24,
@@ -76,21 +130,33 @@
     },
     "identification_threshold": 35,
     "levels": {
-      "0-24":   {"label": "عادی"},
-      "25-34":  {"label": "مراقبت"},
-      "35-49":  {"label": "هشدار اولیه خرید"},
-      "50-64":  {"label": "فشار خرید قوی"},
-      "65-79":  {"label": "فشار خرید بسیار قوی"},
-      "80-100": {"label": "وضعیت بحرانی خرید"}
+      "0-24": {
+        "label": "عادی"
+      },
+      "25-34": {
+        "label": "مراقبت"
+      },
+      "35-49": {
+        "label": "هشدار اولیه خرید"
+      },
+      "50-64": {
+        "label": "فشار خرید قوی"
+      },
+      "65-79": {
+        "label": "فشار خرید بسیار قوی"
+      },
+      "80-100": {
+        "label": "وضعیت بحرانی خرید"
+      }
     }
   },
   "alerts": {
     "classify_logic": {
       "both_above_50": "تقابل شدید عرضه و تقاضا؛ نیازمند بررسی جذب یا غلبه فروش",
       "sell_above_50": "فشار فروش / غلبه فروشندگان",
-      "buy_above_50":  "فشار خرید / غلبه خریداران",
+      "buy_above_50": "فشار خرید / غلبه خریداران",
       "sell_above_35": "هشدار اولیه فروش",
-      "buy_above_35":  "هشدار اولیه خرید",
+      "buy_above_35": "هشدار اولیه خرید",
       "either_above_25": "مراقبت",
       "default": "وضعیت عادی"
     },
@@ -127,7 +193,7 @@
     "supply_growth_full_at": 0.5,
     "absorption_full_at": 0.6,
     "blend_weights": {
-      "demand_depletion": 0.40,
+      "demand_depletion": 0.4,
       "supply_growth": 0.35,
       "absorption_inverse": 0.25
     },
@@ -136,10 +202,10 @@
     "upgrade_rule": "فشار فروش در محدوده زرد (35-49) + جمع‌آوری ضعیف (< 40) + امتیاز فشار سرعتی >= confirmation_threshold → ارتقا به قرمز"
   },
   "combination_matrix": {
-    "high_sell_low_buy":  "غلبه فروشندگان — خطر خروج",
+    "high_sell_low_buy": "غلبه فروشندگان — خطر خروج",
     "high_sell_high_buy": "تقابل شدید عرضه و تقاضا — بررسی جذب عرضه",
-    "low_sell_high_buy":  "غلبه خریداران — فرصت احتمالی ورود",
-    "low_sell_low_buy":   "وضعیت عادی — بدون سیگنال خاص"
+    "low_sell_high_buy": "غلبه خریداران — فرصت احتمالی ورود",
+    "low_sell_low_buy": "وضعیت عادی — بدون سیگنال خاص"
   },
   "min_history": 30,
   "history_window_samples": 8400,
@@ -152,5 +218,14 @@
     "retry_count": 2,
     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
   },
-  "history_required_samples": 5
+  "history_required_samples": 5,
+  "adaptive": {
+    "enabled": false,
+    "min_samples": 50,
+    "percentile": 90,
+    "window_samples": 500,
+    "cache_ttl_seconds": 300,
+    "floor_ratio": 0.1,
+    "_description": "Phase 2: نرمال‌سازی تطبیقی. enabled=true → آستانه پویا (صدک ۹۰ تاریخچه) به‌جای full_at ثابت. تا min_samples مشاهده، fallback استفاده می‌شود."
+  }
 }
