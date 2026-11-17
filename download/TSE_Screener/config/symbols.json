@@ -1,0 +1,97 @@
+{
+  "description": "لیست ۴ نماد برای جمع‌آوری داده با تشخیص بازار و ساعت معاملات",
+  "symbols": [
+    {
+      "name": "سرود",
+      "ticker": "سرود",
+      "ins_code": "11964419322927535",
+      "isin": "IRO1SROD0008",
+      "flow": 1,
+      "full_name": "سيمان‌شاهرود",
+      "market_type": "stock",
+      "market_label": "سهام عادی",
+      "instrument_type": "سهم",
+      "trading_hours": {
+        "pre_open": [
+          "08:45",
+          "09:00"
+        ],
+        "continuous": [
+          "09:00",
+          "12:30"
+        ]
+      },
+      "session_minutes": 210,
+      "days": "شنبه تا چهارشنبه"
+    },
+    {
+      "name": "دابور",
+      "ticker": "دابور",
+      "ins_code": "61332057061846617",
+      "isin": "IRO1DABO0006",
+      "flow": 1,
+      "full_name": "داروسازي‌ ابوريحان‌",
+      "market_type": "stock",
+      "market_label": "سهام عادی",
+      "instrument_type": "سهم",
+      "trading_hours": {
+        "pre_open": [
+          "08:45",
+          "09:00"
+        ],
+        "continuous": [
+          "09:00",
+          "12:30"
+        ]
+      },
+      "session_minutes": 210,
+      "days": "شنبه تا چهارشنبه"
+    },
+    {
+      "name": "اهرم",
+      "ticker": "اهرم",
+      "ins_code": "17914401175772326",
+      "isin": "IRT1AHRM0005",
+      "flow": 1,
+      "full_name": "صندوق س سهامي كاريزما- اهرمي",
+      "market_type": "equity_etf",
+      "market_label": "صندوق ETF سهامی",
+      "instrument_type": "صندوق سهامی",
+      "trading_hours": {
+        "pre_open": [
+          "08:45",
+          "09:00"
+        ],
+        "continuous": [
+          "09:00",
+          "12:30"
+        ]
+      },
+      "session_minutes": 210,
+      "days": "شنبه تا چهارشنبه"
+    },
+    {
+      "name": "ریتون",
+      "ticker": "ريتون",
+      "ins_code": "14035144070182412",
+      "isin": "IRTKRITO0000",
+      "flow": 7,
+      "full_name": "صندوق س. كالاي پاسارگاد",
+      "market_type": "gold_commodity_fund",
+      "market_label": "صندوق کالای طلا",
+      "instrument_type": "صندوق کالای طلا",
+      "trading_hours": {
+        "pre_open": [
+          "11:30",
+          "12:00"
+        ],
+        "continuous": [
+          "12:00",
+          "18:00"
+        ]
+      },
+      "session_minutes": 360,
+      "days": "شنبه تا چهارشنبه"
+    }
+  ]
+}

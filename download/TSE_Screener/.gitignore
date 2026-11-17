@@ -48,6 +48,12 @@ data/*.sqlite-journal
 data/*.sqlite-wal
 data/*.sqlite-shm
 
+# بانک‌های چندنمادی (run_multi.py — هر نماد یک DB)
+data/multi/*.sqlite
+data/multi/*.sqlite-journal
+data/multi/*.sqlite-wal
+data/multi/*.sqlite-shm
+
 # فایل‌های CSV خروجی (تولید مجدد)
 data/snapshots_export_*.csv
 data/trades_export_*.csv

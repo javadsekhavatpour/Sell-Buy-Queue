@@ -52,6 +52,7 @@ from early_warning import (
     compute_daily_params,
     to_jalali,
 )
+from early_warning.market_detector import detect_market, in_trading_window
 
 
 def load_config() -> dict:
@@ -357,6 +358,20 @@ def main():
     collector = MarketDataCollector(config)
     db_path = ROOT / args.db
     storage = MarketDataStorage(db_path)
+
+    # ----- تشخیص نوع بازار و ساعت‌های معاملات نماد -----
+    market_info = detect_market(collector, str(args.ins_code))
+    if market_info.get("ok"):
+        mh = market_info["trading_hours"]
+        print(f"  بازار: {market_info['market_label']}")
+        print(f"  نوع سازمت: {market_info['instrument_type']}")
+        print(f"  ساعت معاملات: پیش‌گشایش {mh['pre_open'][0]}-{mh['pre_open'][1]} | "
+              f"پیوسته {mh['continuous'][0]}-{mh['continuous'][1]}")
+        print(f"  روزها: {market_info['days']}")
+        print("=" * 70)
+    else:
+        print(f"  ⚠ تشخیص بازار ناموفق: {market_info.get('error', 'نامشخص')}")
+        print("=" * 70)
     # Phase 2: نرمال‌سازی تطبیقی (اگر adaptive.enabled=true در کانفیگ)
     normalizer = AdaptiveNormalizer(storage, config)
 
@@ -387,6 +402,17 @@ def main():
     for i in range(max_samples):
         now = datetime.now()
         print(f"\n[نمونه {i+1}/{max_samples}] {now.strftime('%H:%M:%S')}")
+
+        # ۰) بررسی ساعت معاملات — خارج از جلسه، fetch نکن (صرفه‌جویی در API)
+        if market_info.get("ok"):
+            now_hhmm = now.strftime("%H:%M")
+            in_session, status = in_trading_window(market_info["trading_hours"], now_hhmm)
+            if not in_session:
+                print(f"  ⏸ خارج از جلسه ({status}) — در انتظار باز شدن بازار")
+                time.sleep(interval)
+                continue
+            else:
+                print(f"  ✓ {status}")
 
         # ۱) دریافت داده + معاملات
         prev_snap = snapshots[-1] if snapshots else None
