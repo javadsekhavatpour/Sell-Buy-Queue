@@ -140,15 +140,92 @@ _NEW_HINT = ('    <div class="hint">۱۲ شاخص مستقل — ستون «آس
              '<span style="color:#1565c0">آبی=تطبیقی</span> (صدک ۹۰ تاریخچه + تعداد نمونه)، '
              '<span style="color:#999">خاکستری=ثابت/گرم</span> (Phase 1 fallback).</div>`;')
 
+# ---------------------------------------------------------------------------
+# Phase 2.1+: overlay سیگنال‌های موتور روی نمودار قیمت موجود
+# ---------------------------------------------------------------------------
+
+# Patch A: درج آرایه scoreHist + تابع pushScore قبل از چرخه به‌روزرسانی
+_OLD_TICK_HEADER = """/* ---------- چرخه به‌روزرسانی ---------- */
+let connOk = false;"""
+
+_NEW_TICK_HEADER = """/* ---------- Phase 2.1+: score history for signal overlay ---------- */
+let scoreHist = [];
+function pushScore(d) {
+  if (!d || !d.ok || !d.snapshot || !d.engines) return;
+  const t = d.snapshot.tehran_time;
+  if (!t) return;
+  const eng = d.engines, sell = eng.sell||{}, buy = eng.buy||{}, comb = eng.combined||{};
+  const entry = {
+    time: t,
+    sell: sell.total_score || 0,
+    buy: buy.total_score || 0,
+    crit: (comb.is_critical === true) || /\u0628\u062d\u0631\u0627\u0646|\u062a\u0642\u0627\u0628\u0644/.test(eng.classification||''),
+    cls: eng.classification || ''
+  };
+  if (scoreHist.length && scoreHist[scoreHist.length-1].time === t) {
+    scoreHist[scoreHist.length-1] = entry;
+  } else {
+    scoreHist.push(entry);
+  }
+  if (scoreHist.length > 300) scoreHist.shift();
+}
+
+/* ---------- \u0686\u0631\u062e\u0647 \u0628\u0647\u200c\u0631\u0648\u0632\u0631\u0633\u0627\u0646\u06cc ---------- */
+let connOk = false;"""
+
+# Patch B: جایگزینی انتهای renderChart — افزودن نشانگرهای سیگنال + راهنما
+_OLD_CHART_TAIL = """  const dotL = `<circle cx="${X(times.length-1)}" cy="${Y(last[last.length-1])}" r="3.5" fill="#1565c0"/>`;
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">
+    ${grid}${bars}${refLine}${lineClose}${lineLast}${dotL}${ylabels}${xlabels}
+  </svg>`;
+}"""
+
+_NEW_CHART_TAIL = """  const dotL = `<circle cx="${X(times.length-1)}" cy="${Y(last[last.length-1])}" r="3.5" fill="#1565c0"/>`;
+  // Phase 2.1+: overlay engine signals on price chart
+  const SIG_TH = 50;
+  let sigMarkers = "", sigCount = 0;
+  for (const s of scoreHist) {
+    const idx = times.indexOf(s.time);
+    if (idx < 0) continue;
+    const x = X(idx).toFixed(1), y = Y(last[idx]);
+    let m = "";
+    if (s.crit) {
+      m = `<polygon points="${x},${(y-10).toFixed(1)} ${(x-7)},${(y+5).toFixed(1)} ${(x+7)},${(y+5).toFixed(1)}" fill="#f9a825" stroke="#e65100" stroke-width="1.2"><title>${s.time} \u2605 critical \u2014 sell:${N(s.sell,1)} buy:${N(s.buy,1)} | ${s.cls}</title></polygon>`;
+      sigCount++;
+    } else if (s.sell >= SIG_TH) {
+      m = `<polygon points="${x},${(y+10).toFixed(1)} ${(x-6)},${(y-3).toFixed(1)} ${(x+6)},${(y-3).toFixed(1)}" fill="#c62828"><title>${s.time} \u25bc sell:${N(s.sell,1)} | ${s.cls}</title></polygon>`;
+      sigCount++;
+    } else if (s.buy >= SIG_TH) {
+      m = `<polygon points="${x},${(y-10).toFixed(1)} ${(x-6)},${(y+3).toFixed(1)} ${(x+6)},${(y+3).toFixed(1)}" fill="#2e7d32"><title>${s.time} \u25b2 buy:${N(s.buy,1)} | ${s.cls}</title></polygon>`;
+      sigCount++;
+    }
+    sigMarkers += m;
+  }
+  const sigLegend = `<text x="${padL+4}" y="${padT+10}" font-size="11" fill="${sigCount>0?'#5a6b7f':'#bbb'}">\u0633\u06cc\u06af\u0646\u0627\u0644\u200c\u0647\u0627 \u0631\u0648\u06cc \u0646\u0645\u0648\u062f\u0627\u0631: ${sigCount} \u0644\u062d\u0638\u0647 \u2014 \u25bc\u0641\u0631\u0648\u0634(\u2265${SIG_TH}) \u25b2\u062e\u0631\u06cc\u062f(\u2265${SIG_TH}) \u2605critical</text>`;
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">
+    ${sigLegend}${grid}${bars}${refLine}${lineClose}${lineLast}${dotL}${sigMarkers}${ylabels}${xlabels}
+  </svg>`;
+}"""
+
+# Patch C: فراخوانی pushScore قبل از renderChart در tick
+_OLD_TICK_RENDER = """    renderChart(d);
+  } catch (e) {"""
+
+_NEW_TICK_RENDER = """    pushScore(d); renderChart(d);
+  } catch (e) {"""
+
 
 def _build_adaptive_html() -> str:
-    """ساخت HTML تطبیقی با جایگزینی سه بخش از HTML_PAGE اصلی."""
+    """ساخت HTML تطبیقی با جایگزینی شش بخش از HTML_PAGE اصلی."""
     html = orig.HTML_PAGE
     misses = []
     for old, new, label in [
         (_OLD_CELL_BLOCK, _NEW_CELL_BLOCK, "cell"),
         (_OLD_HEADER, _NEW_HEADER, "header"),
         (_OLD_HINT, _NEW_HINT, "hint"),
+        (_OLD_TICK_HEADER, _NEW_TICK_HEADER, "scoreHist"),
+        (_OLD_CHART_TAIL, _NEW_CHART_TAIL, "chart-markers"),
+        (_OLD_TICK_RENDER, _NEW_TICK_RENDER, "tick-hook"),
     ]:
         if old in html:
             html = html.replace(old, new, 1)
