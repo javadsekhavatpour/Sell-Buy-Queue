@@ -467,13 +467,17 @@ class LiveMonitor:
         # اولویت: snapshot‌های امروز از بانک
         if self.storage is not None:
             try:
-                today = today_jalali_str()
+                today_dash = today_jalali_str()           # "1405-08-27" (web dashboard)
+                today_slash = today_dash.replace("-", "/") # "1405/08/27" (run_live.py / collector)
                 with self._db_lock:
                     cur = self.storage.conn.cursor()
+                    # هر دو فرمت تاریخ را پوشش می‌دهیم: run_live.py از to_jalali
+                    # (با اسلش) و داشبورد از today_jalali_str (با خط تیره) استفاده
+                    # می‌کند. بدون این، نمونه‌های run_live.py پیدا نمی‌شدند.
                     cur.execute(
-                        "SELECT * FROM snapshots WHERE symbol=? AND date_jalali=? "
+                        "SELECT * FROM snapshots WHERE symbol=? AND date_jalali IN (?, ?) "
                         "ORDER BY timestamp ASC",
-                        (self.symbol, today))
+                        (self.symbol, today_dash, today_slash))
                     rows = [dict(r) for r in cur.fetchall()]
                 if rows:
                     snaps = [MarketSnapshot.from_flat_dict(r) for r in rows]
@@ -1273,10 +1277,19 @@ def main():
     ap.add_argument("--ins-code", default=None, help="کد TSETMC نماد")
     ap.add_argument("--interval", type=int, default=None, help="فاصله نمونه‌برداری (ثانیه)")
     ap.add_argument("--samples", type=int, default=226, help="تعداد نمونه شبیه‌ساز (حالت demo)")
-    ap.add_argument("--db", default="data/early_warning_live.sqlite", help="مسیر فایل SQLite برای daily_params")
+    ap.add_argument("--db", default=None, help="مسیر فایل SQLite (پیش‌فرض: data/multi/{symbol}.sqlite اگر نماد داده شده)")
     ap.add_argument("--port", type=int, default=8051)
     ap.add_argument("--host", default="127.0.0.1")
     args = ap.parse_args()
+
+    # اگر --db داده نشده و --symbol مشخص است، از data/multi/{symbol}.sqlite استفاده کن
+    # (همان DB که run_live.py/run_multi در آن ذخیره می‌کند — برای خواندن نمونه‌های
+    # ابتدای روز حتی قبل از استارت داشبورد)
+    if args.db is None:
+        if args.symbol:
+            args.db = f"data/multi/{args.symbol}.sqlite"
+        else:
+            args.db = "data/early_warning_live.sqlite"
 
     cfg = load_cfg()
     print(f"پیکربندی بارگذاری شد - نماد پیش‌فرض: {cfg['test_symbol']['name']}")
