@@ -29,6 +29,43 @@ INDEX_PORT = 8051
 BASE_PORT = 8052
 
 
+def kill_stale(ports: list[int]) -> int:
+    """کش پروسه‌های stale روی پورت‌های داشبورد.
+
+    اگر run_dashboards قبلی بدون Ctrl+C تمیز بسته نشده باشد، پورت‌ها هنوز
+    اشغال‌اند و داشبورد جدید نمی‌تواند bind کند → پروسه‌ی stale داده‌ی نماد
+    اشتباه سرو می‌کند (باگ سرود→ریتون). این تابع با fuser/lsof آن‌ها را می‌کشد.
+    """
+    killed = 0
+    for port in ports:
+        # روش ۱: fuser (Linux)
+        try:
+            r = subprocess.run(["fuser", "-k", f"{port}/tcp"],
+                               capture_output=True, timeout=5, text=True)
+            if r.returncode == 0:
+                killed += 1
+            continue
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+        # روش ۲: lsof (Linux/Mac)
+        try:
+            r = subprocess.run(["lsof", "-t", "-i", f":{port}"],
+                               capture_output=True, timeout=5, text=True)
+            pids = [p for p in r.stdout.split() if p]
+            for pid in pids:
+                try:
+                    subprocess.run(["kill", "-9", pid], capture_output=True, timeout=3)
+                    killed += 1
+                except (subprocess.TimeoutExpired, FileNotFoundError):
+                    pass
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+    if killed:
+        print(f"  \u26a0 {killed} \u067e\u0631\u0648\u0633\u0647\u0647 stale \u06a9\u0634\u062a\u0647 \u0634\u062f (\u067e\u0648\u0631\u062a\u200c\u0647\u0627 \u0622\u0632\u0627\u062f \u0634\u062f\u0646\u062f).")
+        time.sleep(1)
+    return killed
+
+
 def main():
     ap = argparse.ArgumentParser(description="راه‌اندازی داشبوردهای چندنمادی")
     ap.add_argument("--symbols", default=None,
@@ -53,6 +90,10 @@ def main():
         sys.exit(1)
 
     procs = []
+
+    # کش پروسه‌های stale روی پورت‌ها (جلوگیری از اشغال پورت → باگ سرود→ریتون)
+    all_ports = [INDEX_PORT] + [BASE_PORT + i for i in range(len(symbols))]
+    kill_stale(all_ports)
 
     print()
     print("=" * 70)

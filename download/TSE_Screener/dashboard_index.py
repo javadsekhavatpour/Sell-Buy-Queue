@@ -20,6 +20,8 @@ import os
 import socket
 import sqlite3
 import sys
+import urllib.request
+import urllib.error
 from pathlib import Path
 from datetime import datetime
 
@@ -52,6 +54,38 @@ def _port_check(host: str, port: int, timeout: float = 0.4) -> bool:
             return True
     except (OSError, socket.timeout):
         return False
+
+
+def _fetch_live(host: str, port: int, timeout: float = 1.0) -> dict | None:
+    """دریافت /api/live از داشبورد یک پورت.
+
+    برمی‌گرداند: {served_symbol, sell_score, sell_tier, buy_score, buy_tier,
+                  classification, ok} یا None اگر در دسترس نباشد.
+    این تابع هم برای راستی‌آزمایی نماد (آیا پورت واقعاً همان نماد را سرو می‌کند؟)
+    و هم برای نمایش امتیاز موتورهای تحلیلی استفاده می‌شود.
+    """
+    url = f"http://{host}:{port}/api/live"
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError):
+        return None
+    if not data.get("ok"):
+        return {"ok": False, "served_symbol": None}
+    snap = data.get("snapshot", {}) or {}
+    eng = data.get("engines", {}) or {}
+    sell = eng.get("sell") or {}
+    buy = eng.get("buy") or {}
+    return {
+        "ok": True,
+        "served_symbol": snap.get("symbol"),
+        "sell_score": sell.get("total_score"),
+        "sell_tier": eng.get("sell_tier"),
+        "buy_score": buy.get("total_score"),
+        "buy_tier": eng.get("buy_tier"),
+        "classification": eng.get("classification"),
+    }
 
 
 def _db_status(db_path: Path) -> dict:
@@ -91,6 +125,12 @@ def build_status(symbols: list[dict], host: str) -> list[dict]:
         th = s["trading_hours"]
         in_sess, status_msg = in_trading_window(th, now_hhmm)
         dbs = _db_status(db_path)
+        online = _port_check(host, port)
+        live = _fetch_live(host, port) if online else None
+        # راستی‌آزمایی: آیا پورت واقعاً همین نماد را سرو می‌کند؟
+        # (جلوگیری از باگ سرود→ریتون وقتی پروسه‌ی stale روی پورت مانده)
+        served = live.get("served_symbol") if live else None
+        symbol_match = bool(served) and served == s["name"]
         out.append({
             "name": s["name"],
             "full_name": s.get("full_name", ""),
@@ -103,7 +143,15 @@ def build_status(symbols: list[dict], host: str) -> list[dict]:
             "session_status": status_msg,
             "dashboard_port": port,
             "dashboard_url": f"http://{host}:{port}",
-            "dashboard_online": _port_check(host, port),
+            "dashboard_online": online,
+            "served_symbol": served,
+            "symbol_match": symbol_match,
+            # موتورهای تحلیلی (فقط وقتی داشبورد آنلاین است)
+            "sell_score": live.get("sell_score") if live else None,
+            "sell_tier": live.get("sell_tier") if live else None,
+            "buy_score": live.get("buy_score") if live else None,
+            "buy_tier": live.get("buy_tier") if live else None,
+            "classification": live.get("classification") if live else None,
             "now_tehran": now_hhmm,
             **dbs,
         })
