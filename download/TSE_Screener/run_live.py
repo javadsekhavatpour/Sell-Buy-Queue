@@ -47,6 +47,8 @@ from early_warning import (
     MarketDataStorage,
     AdaptiveNormalizer,
     MarketPhase,
+    MarketSnapshot,
+    Trade,
     load_range_rules,
     get_symbol_category,
     get_category_percent,
@@ -547,22 +549,69 @@ def main():
     )
 
     # ۸) تولید گزارش Excel نهایی
-    # تاریخچه موتورها با نمونه‌های لحظه تحلیل هم‌تراز است (نه همه نمونه‌ها)
+    # داده‌ها از بانک بازخوانی می‌شوند تا اکسل همه‌ی نمونه‌های امروز را شامل شود،
+    # حتی اگر توسط داشبورد adaptive یا session قبلی run_live جمع‌آوری شده باشند.
+    # (in-memory snapshots فقط نمونه‌های همین session را دارد؛ بانک همه را دارد.)
     print("\n" + "=" * 70)
     print("  تولید گزارش Excel نهایی...")
     out_path = ROOT / args.output
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # بازخوانی همه‌ی snapshot‌ها و معاملات از بانک
+    db_rows = storage.get_snapshots_for_symbol(args.symbol)
+    db_snaps = [MarketSnapshot.from_flat_dict(r) for r in db_rows]
+    db_trade_rows = storage.get_trades_for_symbol(args.symbol)
+    db_trades = [
+        Trade(
+            trade_time=t.get("trade_time", ""),
+            trade_price=float(t.get("trade_price") or 0),
+            trade_volume=int(t.get("trade_volume") or 0),
+            trade_id=t.get("trade_id"),
+            aggressor_side=t.get("aggressor_side"),
+        )
+        for t in db_trade_rows
+    ]
+
+    if db_snaps:
+        print(f"  بازخوانی از بانک: {len(db_snaps)} نمونه، {len(db_trades)} معامله")
+        # اجرای مجدد موتورها روی داده‌ی بانک (detectorهای تازه برای reset حالت)
+        replay_sp = SellPressureDetector(config, normalizer=normalizer)
+        replay_buy = BuyPressureDetector(config, normalizer=normalizer)
+        replay_alert = AlertEngine(config)
+        excel_sp, excel_buy, excel_combined = [], [], []
+        prev = None
+        hist = []
+        for snap in db_snaps:
+            sp = replay_sp.evaluate(snap, prev)
+            buy = replay_buy.evaluate(snap, prev, hist)
+            excel_sp.append(sp)
+            excel_buy.append(buy)
+            excel_combined.append(replay_alert.evaluate(sp, buy))
+            prev = snap
+            hist.append(snap)
+        excel_snapshots = db_snaps
+        excel_alert = replay_alert
+        excel_trades = db_trades
+    else:
+        # fallback: داده‌ی in-memory (بانک خالی)
+        print(f"  بانک خالی — استفاده از داده‌ی in-memory ({len(snapshots)} نمونه)")
+        excel_snapshots = engine_snapshots if engine_snapshots else snapshots
+        excel_sp = sp_results
+        excel_buy = buy_results
+        excel_combined = combined_states
+        excel_alert = alert_engine
+        excel_trades = all_trades
+
     gen = ExcelReportGenerator(config)
     gen.generate(
         symbol=args.symbol,
-        snapshots=engine_snapshots if engine_snapshots else snapshots,
-        sp_results=sp_results,
-        acc_results=buy_results,   # buy_results → acc_results (نام پارامتر در ExcelReport)
-        combined_states=combined_states,
-        alert_events=alert_engine.get_all_events(),
+        snapshots=excel_snapshots,
+        sp_results=excel_sp,
+        acc_results=excel_buy,   # buy_results → acc_results (نام پارامتر در ExcelReport)
+        combined_states=excel_combined,
+        alert_events=excel_alert.get_all_events(),
         output_path=out_path,
-        trades=all_trades,
+        trades=excel_trades,
     )
     print(f"  گزارش: {out_path}")
     print(f"  پایگاه داده: {db_path}")
