@@ -365,11 +365,20 @@ def main():
     ap.add_argument("--ins-code", default=None, help="کد TSETMC نماد")
     ap.add_argument("--interval", type=int, default=None, help="فاصله نمونه‌برداری (ثانیه)")
     ap.add_argument("--samples", type=int, default=226, help="تعداد نمونه شبیه‌ساز (حالت demo)")
-    ap.add_argument("--db", default="data/early_warning_live.sqlite",
-                    help="مسیر فایل SQLite برای daily_params + score_history")
+    ap.add_argument("--db", default=None,
+                    help="مسیر فایل SQLite (پیش‌فرض: data/multi/{symbol}.sqlite اگر نماد داده شده)")
     ap.add_argument("--port", type=int, default=8052)
     ap.add_argument("--host", default="127.0.0.1")
     args = ap.parse_args()
+
+    # اگر --db داده نشده و --symbol مشخص است، از data/multi/{symbol}.sqlite استفاده کن
+    # (همان DB که run_live.py/run_multi در آن ذخیره می‌کند — برای خواندن نمونه‌های
+    # ابتدای روز حتی قبل از استارت داشبورد)
+    if args.db is None:
+        if args.symbol:
+            args.db = f"data/multi/{args.symbol}.sqlite"
+        else:
+            args.db = "data/early_warning_live.sqlite"
 
     cfg = load_cfg()
     print(f"پیکربندی بارگذاری شد - نماد پیش‌فرض: {cfg['test_symbol']['name']}")
@@ -409,6 +418,7 @@ def main():
         scenario=args.scenario,
         samples=args.samples,
         normalizer=live_normalizer,
+        storage=live_storage,
     )
     MONITOR.start()
 
