@@ -252,7 +252,10 @@ class MarketDataStorage:
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(db_path))
+        # check_same_thread=False: امکان استفاده از یک connection در چند thread
+        # (داشبورد: _publish در thread پس‌زمینه + _cumulative_scores در thread اصلی)
+        # timeout=30: اگر یک thread در حال نوشتن باشد، دیگری تا ۳۰ ثانیه صبر می‌کند
+        self.conn = sqlite3.connect(str(db_path), check_same_thread=False, timeout=30)
         self.conn.row_factory = sqlite3.Row
         self._init_schema()
 

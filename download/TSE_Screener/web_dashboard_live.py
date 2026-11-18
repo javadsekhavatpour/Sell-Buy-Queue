@@ -270,10 +270,11 @@ class LiveMonitor:
     def __init__(self, cfg: dict, mode: str = "live", symbol: str | None = None,
                  ins_code: str | None = None, interval: int | None = None,
                  scenario: str = "sell_pressure", samples: int = 226,
-                 max_history: int = 300, normalizer=None):
+                 max_history: int = 300, normalizer=None, storage=None):
         self.cfg = cfg
         self.mode = mode
         self.normalizer = normalizer
+        self.storage = storage  # MarketDataStorage — برای ذخیره snapshot و محاسبه تجمعی از DB
         sym = cfg.get("test_symbol", {})
         self.symbol = symbol or sym.get("name", "ریتون")
         self.ins_code = str(ins_code or sym.get("ins_code", ""))
@@ -285,6 +286,7 @@ class LiveMonitor:
         self.last_error: str = ""
         self.last_fetch_time: str = ""
         self._lock = threading.Lock()
+        self._db_lock = threading.Lock()  # سریال‌سازی دسترسی به DB بین threadها
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self.collector = None
@@ -321,7 +323,9 @@ class LiveMonitor:
         self._stop.set()
 
     def _publish(self, snap: MarketSnapshot, trades: list[Trade] | None):
-        if snap and not snap.date_jalali:
+        # همیشه date_jalali امروز را تنظیم می‌کنیم (حتی در demo که تاریخ ثابت دارد)
+        # تا محاسبه‌ی تجمعی «از ابتدای امروز» درست کار کند
+        if snap:
             snap.date_jalali = today_jalali_str()
         with self._lock:
             if snap is not None:
@@ -330,6 +334,18 @@ class LiveMonitor:
                 self.recent_trades.append(tr)
             self.last_error = (snap.fetch_error if snap else "") or ""
             self.last_fetch_time = datetime.now().isoformat(timespec="seconds")
+        # ذخیره snapshot در بانک (مثل run_live.py) برای محاسبه تجمعی از ابتدای روز
+        # جلوگیری از درج تکراری با timestamp یکسان (در ری‌استارت داشبورد)
+        if snap is not None and self.storage is not None:
+            try:
+                with self._db_lock:
+                    cur = self.storage.conn.cursor()
+                    cur.execute("SELECT 1 FROM snapshots WHERE symbol=? AND timestamp=? LIMIT 1",
+                                (snap.symbol, snap.timestamp))
+                    if cur.fetchone() is None:
+                        self.storage.insert_snapshot(snap)
+            except Exception as e:
+                print(f"  ⚠ خطای ذخیره snapshot در DB: {e}")
 
     def _loop_live(self):
         prev: MarketSnapshot | None = None
@@ -392,43 +408,33 @@ class LiveMonitor:
     def _engine_output(self, hist: list[MarketSnapshot]) -> dict:
         """اجرای هر دو موتور تحلیلی + ترکیب هشدار روی آخرین نمونه.
 
-        علاوه بر امتیاز جاری، امتیاز تجمعی (مجموع همه امتیازها از ابتدا تا الان)
-        را با ارزیابی همه نمونه‌های history محاسبه می‌کند.
+        امتیاز تجمعی (مجموع از ابتدا تا الان) از snapshot‌های امروز در بانک محاسبه
+        می‌شود — حتی اگر داشبورد ری‌استارت شده باشد. در حالت demo (بدون storage)
+        از history درون‌حافظه‌ای استفاده می‌شود.
         """
         out: dict = {"available": False}
         if not hist:
             return out
         try:
-            cum_sell = 0.0
-            cum_buy = 0.0
-            sell_res = None
-            buy_res = None
-            last_idx = len(hist) - 1
-            # ارزیابی همه نمونه‌ها: مجموع امتیازها = امتیاز تجمعی
-            # آخرین نمونه: نتیجه‌ی جاری + ثبت در normalizer
-            for idx, s_i in enumerate(hist):
-                prev_i = hist[idx - 1] if idx >= 1 else None
-                history_i = hist[:idx]
-                sr = self.sell_pressure.evaluate(s_i, prev_i) if self.sell_pressure else None
-                br = self.buy_pressure.evaluate(s_i, prev_i, history_i) if self.buy_pressure else None
-                if sr:
-                    cum_sell += sr.total_score
-                if br:
-                    cum_buy += br.total_score
-                if idx == last_idx:
-                    sell_res = sr
-                    buy_res = br
-                    # Phase 2: ثبت raw_valueها برای نرمال‌سازی تطبیقی آینده
-                    if self.normalizer is not None:
-                        if sr:
-                            self.normalizer.record_factors(s_i.symbol, "sell", sr.factors,
-                                                          date_jalali=s_i.date_jalali)
-                        if br:
-                            self.normalizer.record_factors(s_i.symbol, "buy", br.factors,
-                                                          date_jalali=s_i.date_jalali)
+            # --- ارزیابی نمونه‌ی جاری (آخرین نمونه‌ی زنده) ---
+            s = hist[-1]
+            prev = hist[-2] if len(hist) >= 2 else None
+            history = hist[:-1]
+            sell_res = self.sell_pressure.evaluate(s, prev) if self.sell_pressure else None
+            buy_res = self.buy_pressure.evaluate(s, prev, history) if self.buy_pressure else None
+            # Phase 2: ثبت raw_valueها برای نرمال‌سازی تطبیقی آینده
+            if self.normalizer is not None:
+                if sell_res:
+                    self.normalizer.record_factors(s.symbol, "sell", sell_res.factors,
+                                                  date_jalali=s.date_jalali)
+                if buy_res:
+                    self.normalizer.record_factors(s.symbol, "buy", buy_res.factors,
+                                                  date_jalali=s.date_jalali)
             combined = None
             if sell_res and buy_res and self.alert_engine:
                 combined = self.alert_engine.evaluate(sell_res, buy_res)
+            # --- محاسبه‌ی امتیاز تجمعی (از بانک یا history) ---
+            cum_sell, cum_buy, cum_count = self._cumulative_scores()
             out = {
                 "available": True,
                 "sell": sell_res.to_dict() if sell_res else None,
@@ -443,11 +449,63 @@ class LiveMonitor:
                 # امتیاز تجمعی: مجموع همه امتیازها از ابتدا تا الان
                 "cumulative_sell_score": round(cum_sell, 1),
                 "cumulative_buy_score": round(cum_buy, 1),
-                "cumulative_samples": len(hist),
+                "cumulative_samples": cum_count,
             }
         except Exception as e:
             out = {"available": False, "error": str(e)}
         return out
+
+    def _cumulative_scores(self) -> tuple[float, float, int]:
+        """محاسبه‌ی امتیاز تجمعی (مجموع همه امتیازها از ابتدای روز تا الان).
+
+        منبع: snapshot‌های امروز در بانک (اگر storage موجود باشد) — حتی اگر
+        داشبورد ری‌استارت شده باشد، نمونه‌های قبلی امروز در بانک باقی‌مانده‌اند.
+        در حالت demo (بدون storage) یا خطای DB: از history درون‌حافظه‌ای.
+
+        برمی‌گرداند: (cum_sell, cum_buy, count)
+        """
+        # اولویت: snapshot‌های امروز از بانک
+        if self.storage is not None:
+            try:
+                today = today_jalali_str()
+                with self._db_lock:
+                    cur = self.storage.conn.cursor()
+                    cur.execute(
+                        "SELECT * FROM snapshots WHERE symbol=? AND date_jalali=? "
+                        "ORDER BY timestamp ASC",
+                        (self.symbol, today))
+                    rows = [dict(r) for r in cur.fetchall()]
+                if rows:
+                    snaps = [MarketSnapshot.from_flat_dict(r) for r in rows]
+                    cum_s = 0.0
+                    cum_b = 0.0
+                    for idx, s_i in enumerate(snaps):
+                        prev_i = snaps[idx - 1] if idx >= 1 else None
+                        hist_i = snaps[:idx]
+                        sr = self.sell_pressure.evaluate(s_i, prev_i) if self.sell_pressure else None
+                        br = self.buy_pressure.evaluate(s_i, prev_i, hist_i) if self.buy_pressure else None
+                        if sr:
+                            cum_s += sr.total_score
+                        if br:
+                            cum_b += br.total_score
+                    return cum_s, cum_b, len(snaps)
+            except Exception as e:
+                print(f"  ⚠ خطای خواندن تجمعی از DB: {e}")
+        # fallback: history درون‌حافظه‌ای (حالت demo یا خطای DB)
+        cum_s = 0.0
+        cum_b = 0.0
+        with self._lock:
+            hist = list(self.history)
+        for idx, s_i in enumerate(hist):
+            prev_i = hist[idx - 1] if idx >= 1 else None
+            hist_i = hist[:idx]
+            sr = self.sell_pressure.evaluate(s_i, prev_i) if self.sell_pressure else None
+            br = self.buy_pressure.evaluate(s_i, prev_i, hist_i) if self.buy_pressure else None
+            if sr:
+                cum_s += sr.total_score
+            if br:
+                cum_b += br.total_score
+        return cum_s, cum_b, len(hist)
 
     # --- بار JSON برای صفحه ---
 
@@ -1264,6 +1322,7 @@ def main():
         scenario=args.scenario,
         samples=args.samples,
         normalizer=live_normalizer,
+        storage=live_storage,
     )
     MONITOR.start()
 

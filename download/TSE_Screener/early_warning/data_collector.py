@@ -18,7 +18,7 @@ import random
 import time
 import math
 import re
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields
 from datetime import datetime, timedelta, date, timezone
 from enum import Enum
 from pathlib import Path
@@ -166,6 +166,50 @@ class MarketSnapshot:
             d[f"ask_count_{i}"] = None
         d["missing_fields"] = ", ".join(self.missing_fields) if self.missing_fields else ""
         return d
+
+    @classmethod
+    def from_flat_dict(cls, d: Dict) -> "MarketSnapshot":
+        """بازسازی MarketSnapshot از دیکشنری flat (مثلاً یک ردیف از جدول snapshots).
+
+        برعکس to_flat_dict: ستون‌های bid_price_1..5 / ask_price_1..5 را به
+        buy_rows / sell_rows تبدیل می‌کند، missing_fields را از string به list،
+        و data_complete را از 0/1 به bool.
+        """
+        buy_rows: List[BestLimitRow] = []
+        sell_rows: List[BestLimitRow] = []
+        for i in range(1, 6):
+            bp = d.get(f"bid_price_{i}")
+            bv = d.get(f"bid_volume_{i}")
+            bc = d.get(f"bid_count_{i}")
+            if bp is not None or bv is not None:
+                buy_rows.append(BestLimitRow(
+                    price=float(bp or 0), volume=int(bv or 0), order_count=int(bc or 0)))
+            ap = d.get(f"ask_price_{i}")
+            av = d.get(f"ask_volume_{i}")
+            ac = d.get(f"ask_count_{i}")
+            if ap is not None or av is not None:
+                sell_rows.append(BestLimitRow(
+                    price=float(ap or 0), volume=int(av or 0), order_count=int(ac or 0)))
+        # missing_fields: string → list
+        mf = d.get("missing_fields", "")
+        if isinstance(mf, str) and mf.strip():
+            missing_fields = [x.strip() for x in mf.split(",") if x.strip()]
+        else:
+            missing_fields = []
+        # data_complete: 0/1 → bool
+        dc = d.get("data_complete")
+        data_complete = bool(dc) if dc is not None else True
+        # فقط فیلدهای معتبر dataclass را از d بگیریم (ستون‌های اضافی DB مثل snapshot_id نادیده)
+        valid = {f.name for f in fields(cls)}
+        kwargs: Dict = {}
+        for k, v in d.items():
+            if k in valid:
+                kwargs[k] = v
+        kwargs["buy_rows"] = buy_rows
+        kwargs["sell_rows"] = sell_rows
+        kwargs["missing_fields"] = missing_fields
+        kwargs["data_complete"] = data_complete
+        return cls(**kwargs)
 
     def validate_bid_ask_range(self) -> tuple:
         """
