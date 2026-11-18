@@ -95,6 +95,7 @@ def main():
             "--symbol", name,
             "--ins-code", str(s["ins_code"]),
             "--db", db_rel,
+            "--output", f"reports/early_warning_report_live_{name}.xlsx",
         ]
         if args.interval:
             cmd += ["--interval", str(args.interval)]

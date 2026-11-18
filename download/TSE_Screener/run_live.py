@@ -29,6 +29,7 @@ import sys
 import json
 import time
 import argparse
+import signal
 from datetime import datetime, date
 from pathlib import Path
 
@@ -399,7 +400,21 @@ def main():
     combined_states = []
     all_trades = []
 
+    # توقف نرم: Ctrl+C (SIGINT) یا SIGTERM از run_multi → flag تنظیم می‌شود
+    # تا حلقه در ابتدای تکرار بعدی break کند و گزارش Excel (گام ۷-۸) تولید شود.
+    # بدون این، Ctrl+C یا kill کردن پروسه‌ی run_live از run_multi باعث می‌شد
+    # گزارش Excel هرگز تولید نشود.
+    _stop = False
+    def _on_stop(signum, frame):
+        nonlocal _stop
+        _stop = True
+    signal.signal(signal.SIGINT, _on_stop)
+    signal.signal(signal.SIGTERM, _on_stop)
+
     for i in range(max_samples):
+        if _stop:
+            print("\n  ⏹ توقف دریافت شد — در حال تولید خروجی‌ها...")
+            break
         now = tehran_now()  # زمان تهران (UTC+3:30) — نه زمان سیستم
         print(f"\n[نمونه {i+1}/{max_samples}] {now.strftime('%H:%M:%S')}")
 
