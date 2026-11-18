@@ -378,11 +378,11 @@ function buildCard(s) {
       ${s.cumulative_sell_score !== null && s.cumulative_sell_score !== undefined ? `
       <div class="cumulative">
         <div class="cum-row">
-          <span class="cum-label">مجموع فروش (از ابتدا)</span>
+          <span class="cum-label">مجموع امتیاز فروش (از ابتدای روز)</span>
           <span class="cum-val">${fmtScore(s.cumulative_sell_score)}</span>
         </div>
         <div class="cum-row">
-          <span class="cum-label">مجموع خرید (از ابتدا)</span>
+          <span class="cum-label">مجموع امتیاز خرید (از ابتدای روز)</span>
           <span class="cum-val">${fmtScore(s.cumulative_buy_score)}</span>
         </div>
         <div class="cum-samples">${s.cumulative_samples || 0} نمونه</div>

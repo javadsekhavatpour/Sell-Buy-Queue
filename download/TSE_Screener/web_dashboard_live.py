@@ -3,7 +3,7 @@ web_dashboard_live.py (نسخه جدید داشبورد رصد و تایید ب�
 داشبورد وب زنده برای نمایش شش گروه داده تابلو در یک صفحه، شبیه تابلوی TSETMC.
 
 چیدمان صفحه (راست به چپ، مطابق تابلوی معاملاتی):
-  سطر اول:  راست = گروه A (اطلاعات پایه و قیمت) | مرکز = گروه C (حجم/ارزش تجمعی) | چپ = گروه E (خروجی موتورهای تحلیلی)
+  سطر اول:  راست = گروه A (اطلاعات پایه و قیمت) | چپ = گروه E (خروجی موتورهای تحلیلی — عرض ۲ ستون)
   سطر دوم:  راست = گروه B (عمق بازار - پنج ردیف)  | مرکز = گروه D (حقیقی/حقوقی)   | چپ = گروه F (وضعیت بازار)
   سطر سوم:  نمودار روند قیمت در نمونه‌های اخیر
 
@@ -832,11 +832,7 @@ td.num{direction:ltr;text-align:right;font-variant-numeric:tabular-nums}
       <h2><span class="gnum">A</span> اطلاعات پایه و قیمت</h2>
       <div class="body" id="p-a"><div class="wait">در انتظار داده...</div></div>
     </section>
-    <section class="panel">
-      <h2><span class="gnum">C</span> حجم، ارزش و تعداد معاملات تجمعی</h2>
-      <div class="body" id="p-c"><div class="wait">در انتظار داده...</div></div>
-    </section>
-    <section class="panel">
+    <section class="panel" style="grid-column: span 2">
       <h2><span class="gnum">E</span> خروجی موتورهای تحلیلی</h2>
       <div class="body" id="p-e"><div class="wait">در انتظار داده...</div></div>
     </section>
@@ -955,10 +951,12 @@ function renderA(d) {
 
 /* ---------- گروه C ---------- */
 function renderC(d) {
+  const el = document.getElementById("p-c");
+  if (!el) return;  // پنل C حذف شده — تابع بدون‌عمل
   const s = d.snapshot, der = d.derived;
   const vb = der.volume_vs_base_pct;
   const w = Math.min(100, vb||0);
-  document.getElementById("p-c").innerHTML = `
+  el.innerHTML = `
     <table class="kv">
       ${kv("حجم کل معاملات", N(s.total_volume))}
       ${kv("ارزش کل معاملات (ریال)", BIG(s.total_value))}
@@ -1050,11 +1048,11 @@ function renderE(d) {
     </div>
     <div style="display:flex;gap:6px;margin-bottom:6px;padding:6px;background:#f8f9fa;border-radius:6px;border:1px dashed #bbb">
       <div style="flex:1;text-align:center">
-        <div style="font-size:10px;color:#666">مجموع فشار فروش (از ابتدا)</div>
+        <div style="font-size:10px;color:#666">مجموع امتیاز فروش (از ابتدای روز)</div>
         <div style="font-size:18px;font-weight:bold;color:${scoreColor(eng.cumulative_sell_score||0)}">${N(eng.cumulative_sell_score,1)}</div>
       </div>
       <div style="flex:1;text-align:center">
-        <div style="font-size:10px;color:#666">مجموع فشار خرید (از ابتدا)</div>
+        <div style="font-size:10px;color:#666">مجموع امتیاز خرید (از ابتدای روز)</div>
         <div style="font-size:18px;font-weight:bold;color:${scoreColor(eng.cumulative_buy_score||0)}">${N(eng.cumulative_buy_score,1)}</div>
       </div>
       <div style="flex:0 0 auto;text-align:center;align-self:center">
@@ -1241,7 +1239,6 @@ async function tick() {
     }
     renderHeader(d);
     renderA(d);
-    renderC(d);
     renderE(d);
     renderB(d);
     renderD(d);
