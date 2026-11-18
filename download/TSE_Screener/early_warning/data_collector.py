@@ -19,10 +19,12 @@ import time
 import math
 import re
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from enum import Enum
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any
+
+from early_warning.market_detector import tehran_now
 
 import requests
 
@@ -588,7 +590,7 @@ class MarketDataCollector:
         # اگر هیچ داده‌ای دریافت نشد
         if not inst or (inst.get("last_price", 0) == 0 and inst.get("close_price", 0) == 0):
             # ساخت یک نمونه خالی ولی با اطلاعات زمانی
-            now = datetime.now()
+            now = tehran_now()  # زمان تهران (UTC+3:30)
             cfg_sym_err = self.cfg.get("test_symbol", {}) if isinstance(self.cfg, dict) else {}
             fixed_pr_err = cfg_sym_err.get("fixed_price_range")
             if fixed_pr_err and float(fixed_pr_err.get("yesterday_price", 0)) > 0:
@@ -615,7 +617,7 @@ class MarketDataCollector:
             return snap, []
 
         # ساخت نمونه
-        now = datetime.now()
+        now = tehran_now()  # زمان تهران (UTC+3:30)
         cfg_sym = self.cfg.get("test_symbol", {}) if isinstance(self.cfg, dict) else {}
         fixed_pr = cfg_sym.get("fixed_price_range")
         # yesterday_price: اگر fixed_price_range موجود است، ثابت از آن؛
@@ -704,7 +706,7 @@ class MarketDataCollector:
 
     def _detect_market_phase(self) -> str:
         """تشخیص فاز بازار بر اساس زمان تهران."""
-        now = datetime.now()
+        now = tehran_now()  # زمان تهران (UTC+3:30)
         h, m = now.hour, now.minute
         hm = h * 60 + m
         # فاز پیش‌گشایش: 08:45 تا 09:00

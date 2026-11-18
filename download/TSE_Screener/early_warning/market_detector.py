@@ -23,7 +23,23 @@ market_detector.py — تشخیص نوع بازار و ساعت‌های معا�
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional, Tuple
+
+
+# ---------------------------------------------------------------------------
+# زمان تهران (UTC+3:30) — مستقل از timezone سیستم
+# ---------------------------------------------------------------------------
+TEHRAN_TZ = timezone(timedelta(hours=3, minutes=30))
+
+
+def tehran_now() -> datetime:
+    """زمان فعلی تهران به\u200cصورت timezone-aware (UTC+3:30).
+
+    سیستم sandbox روی UTC است؛ datetime.now() زمان UTC برمی\u200cگرداند، نه تهران.
+    برای چک ساعت معاملات و فیلد tehran_time باید از این تابع استفاده شود.
+    """
+    return datetime.now(TEHRAN_TZ)
 
 
 # ---------------------------------------------------------------------------

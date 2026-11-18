@@ -52,7 +52,7 @@ from early_warning import (
     compute_daily_params,
     to_jalali,
 )
-from early_warning.market_detector import detect_market, in_trading_window
+from early_warning.market_detector import detect_market, in_trading_window, tehran_now
 
 
 def load_config() -> dict:
@@ -400,7 +400,7 @@ def main():
     all_trades = []
 
     for i in range(max_samples):
-        now = datetime.now()
+        now = tehran_now()  # زمان تهران (UTC+3:30) — نه زمان سیستم
         print(f"\n[نمونه {i+1}/{max_samples}] {now.strftime('%H:%M:%S')}")
 
         # ۰) بررسی ساعت معاملات — خارج از جلسه، fetch نکن (صرفه‌جویی در API)
