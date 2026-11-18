@@ -390,24 +390,42 @@ class LiveMonitor:
     # --- خروجی موتورهای تحلیلی (برای گروه E) ---
 
     def _engine_output(self, hist: list[MarketSnapshot]) -> dict:
-        """اجرای هر دو موتور تحلیلی + ترکیب هشدار روی آخرین نمونه."""
+        """اجرای هر دو موتور تحلیلی + ترکیب هشدار روی آخرین نمونه.
+
+        علاوه بر امتیاز جاری، امتیاز تجمعی (مجموع همه امتیازها از ابتدا تا الان)
+        را با ارزیابی همه نمونه‌های history محاسبه می‌کند.
+        """
         out: dict = {"available": False}
         if not hist:
             return out
-        s = hist[-1]
-        prev = hist[-2] if len(hist) >= 2 else None
-        history = hist[:-1]
         try:
-            sell_res = self.sell_pressure.evaluate(s, prev) if self.sell_pressure else None
-            buy_res = self.buy_pressure.evaluate(s, prev, history) if self.buy_pressure else None
-            # Phase 2: ثبت raw_valueها برای نرمال‌سازی تطبیقی آینده
-            if self.normalizer is not None:
-                if sell_res:
-                    self.normalizer.record_factors(s.symbol, "sell", sell_res.factors,
-                                                  date_jalali=s.date_jalali)
-                if buy_res:
-                    self.normalizer.record_factors(s.symbol, "buy", buy_res.factors,
-                                                  date_jalali=s.date_jalali)
+            cum_sell = 0.0
+            cum_buy = 0.0
+            sell_res = None
+            buy_res = None
+            last_idx = len(hist) - 1
+            # ارزیابی همه نمونه‌ها: مجموع امتیازها = امتیاز تجمعی
+            # آخرین نمونه: نتیجه‌ی جاری + ثبت در normalizer
+            for idx, s_i in enumerate(hist):
+                prev_i = hist[idx - 1] if idx >= 1 else None
+                history_i = hist[:idx]
+                sr = self.sell_pressure.evaluate(s_i, prev_i) if self.sell_pressure else None
+                br = self.buy_pressure.evaluate(s_i, prev_i, history_i) if self.buy_pressure else None
+                if sr:
+                    cum_sell += sr.total_score
+                if br:
+                    cum_buy += br.total_score
+                if idx == last_idx:
+                    sell_res = sr
+                    buy_res = br
+                    # Phase 2: ثبت raw_valueها برای نرمال‌سازی تطبیقی آینده
+                    if self.normalizer is not None:
+                        if sr:
+                            self.normalizer.record_factors(s_i.symbol, "sell", sr.factors,
+                                                          date_jalali=s_i.date_jalali)
+                        if br:
+                            self.normalizer.record_factors(s_i.symbol, "buy", br.factors,
+                                                          date_jalali=s_i.date_jalali)
             combined = None
             if sell_res and buy_res and self.alert_engine:
                 combined = self.alert_engine.evaluate(sell_res, buy_res)
@@ -422,6 +440,10 @@ class LiveMonitor:
                     sell_res.total_score if sell_res else None,
                     buy_res.total_score if buy_res else None,
                 ),
+                # امتیاز تجمعی: مجموع همه امتیازها از ابتدا تا الان
+                "cumulative_sell_score": round(cum_sell, 1),
+                "cumulative_buy_score": round(cum_buy, 1),
+                "cumulative_samples": len(hist),
             }
         except Exception as e:
             out = {"available": False, "error": str(e)}
@@ -966,6 +988,20 @@ function renderE(d) {
           <div style="height:100%;width:${buyPct}%;background:${scoreColor(buyS)}"></div>
         </div>
         <div style="font-size:10px">${eng.buy_tier || '—'} ${buy.engine_status === 'warming_up' ? '⚠ گرم‌شدن' : ''}</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:6px;padding:6px;background:#f8f9fa;border-radius:6px;border:1px dashed #bbb">
+      <div style="flex:1;text-align:center">
+        <div style="font-size:10px;color:#666">مجموع فشار فروش (از ابتدا)</div>
+        <div style="font-size:18px;font-weight:bold;color:${scoreColor(eng.cumulative_sell_score||0)}">${N(eng.cumulative_sell_score,1)}</div>
+      </div>
+      <div style="flex:1;text-align:center">
+        <div style="font-size:10px;color:#666">مجموع فشار خرید (از ابتدا)</div>
+        <div style="font-size:18px;font-weight:bold;color:${scoreColor(eng.cumulative_buy_score||0)}">${N(eng.cumulative_buy_score,1)}</div>
+      </div>
+      <div style="flex:0 0 auto;text-align:center;align-self:center">
+        <div style="font-size:10px;color:#666">تعداد نمونه</div>
+        <div style="font-size:16px;font-weight:bold;color:#333">${eng.cumulative_samples||0}</div>
       </div>
     </div>
     <table class="ttable" style="font-size:10px">

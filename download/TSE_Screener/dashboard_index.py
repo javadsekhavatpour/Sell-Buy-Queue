@@ -85,6 +85,9 @@ def _fetch_live(host: str, port: int, timeout: float = 1.0) -> dict | None:
         "buy_score": buy.get("total_score"),
         "buy_tier": eng.get("buy_tier"),
         "classification": eng.get("classification"),
+        "cumulative_sell_score": eng.get("cumulative_sell_score"),
+        "cumulative_buy_score": eng.get("cumulative_buy_score"),
+        "cumulative_samples": eng.get("cumulative_samples"),
     }
 
 
@@ -152,6 +155,10 @@ def build_status(symbols: list[dict], host: str) -> list[dict]:
             "buy_score": live.get("buy_score") if live else None,
             "buy_tier": live.get("buy_tier") if live else None,
             "classification": live.get("classification") if live else None,
+            # امتیاز تجمعی (مجموع از ابتدا تا الان)
+            "cumulative_sell_score": live.get("cumulative_sell_score") if live else None,
+            "cumulative_buy_score": live.get("cumulative_buy_score") if live else None,
+            "cumulative_samples": live.get("cumulative_samples") if live else None,
             "now_tehran": now_hhmm,
             **dbs,
         })

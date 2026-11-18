@@ -255,6 +255,33 @@
     text-align: center;
     font-weight: 600;
   }
+  .cumulative {
+    margin-top: 0.4rem;
+    padding-top: 0.4rem;
+    border-top: 1px dashed var(--border);
+  }
+  .cum-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.15rem 0;
+  }
+  .cum-label {
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+  .cum-val {
+    font-size: 0.95rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--cyan);
+  }
+  .cum-samples {
+    font-size: 0.68rem;
+    color: var(--muted);
+    text-align: center;
+    margin-top: 0.2rem;
+  }
   footer {
     text-align: center;
     margin-top: 2rem;
@@ -348,6 +375,18 @@ function buildCard(s) {
         <span class="tier-badge ${tierClass(s.buy_tier)}">${s.buy_tier || "—"}</span>
       </div>
       ${s.classification ? `<div class="classification">وضعیت ترکیب: ${s.classification}</div>` : ""}
+      ${s.cumulative_sell_score !== null && s.cumulative_sell_score !== undefined ? `
+      <div class="cumulative">
+        <div class="cum-row">
+          <span class="cum-label">مجموع فروش (از ابتدا)</span>
+          <span class="cum-val">${fmtScore(s.cumulative_sell_score)}</span>
+        </div>
+        <div class="cum-row">
+          <span class="cum-label">مجموع خرید (از ابتدا)</span>
+          <span class="cum-val">${fmtScore(s.cumulative_buy_score)}</span>
+        </div>
+        <div class="cum-samples">${s.cumulative_samples || 0} نمونه</div>
+      </div>` : ""}
     </div>
     <div class="stats">
       <div class="stat">
