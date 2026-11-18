@@ -138,6 +138,28 @@ class SellPressureDetector:
             return fallback
         return self.normalizer.get_threshold(symbol, factor_name, fallback)
 
+    def _ceiling_damp(self, snap: MarketSnapshot) -> float:
+        """ضریب کاهش فاکتورهای معامله‌محور وقتی قیمت نزدیک سقف روزانه است.
+
+        در سقف، تمام معاملات اجراشده sell-triggered هستند (فروشنده به صف خرید
+        می‌زند = سودگیری). این معاملات بازتاب فشار فروش نزولی نیست، بلکه
+        نتیجه‌ی تقاضای قوی خرید است. پس فاکتورهای sell_flow / sell_breadth /
+        sell_ticket باید در نزدیکی سقف کاهش یابند.
+
+        موقعیت قیمت: 0=کف، 1=سقف
+        ضریب: 1.0 در price_pos≤0.7 (بدون کاهش)، خطی تا 0.3 در price_pos=1.0 (سقف)
+        → در سقف، امتیاز فاکتورهای معامله‌محور به ۳۰٪ کاهش می‌یابد.
+        """
+        L = snap.min_allowed_price
+        U = snap.max_allowed_price
+        if U <= L or U <= 0 or snap.last_price <= 0:
+            return 1.0  # داده ناقص → بدون کاهش
+        price_pos = (snap.last_price - L) / (U - L)
+        price_pos = max(0.0, min(1.0, price_pos))
+        if price_pos <= 0.7:
+            return 1.0
+        return 1.0 - 0.7 * (price_pos - 0.7) / 0.3
+
     # -------------------------------------------------------------------
     # شاخص ۱: ضعف گستردگی خریداران حقیقی (۱۵ امتیاز)
     #   (Ns−Nb)/(Ns+Nb)  —  N = تعداد معاملات حقیقی در بازه ۳۰ث
@@ -156,8 +178,11 @@ class SellPressureDetector:
         raw = _safe_div(ns - nb, denom)
         full_at = self._get_threshold(snap.symbol, "sell_breadth")
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
-        score = norm * self.weights["sell_breadth"]
+        damp = self._ceiling_damp(snap)
+        score = norm * self.weights["sell_breadth"] * damp
         desc = f"Δ خریداران={nb}، Δ فروشندگان={ns} → گستردگی={raw:+.3f} (کاهش خریدار = مثبت)"
+        if damp < 1.0:
+            desc += f" | ضریب سقف={damp:.2f} (قیمت نزدیک سقف: معاملات sell-triggered سودگیری است)"
         return SellPressureFactorResult(
             name="sell_breadth", label=self.LABELS["sell_breadth"],
             max_points=self.weights["sell_breadth"], raw_value=raw,
@@ -182,8 +207,11 @@ class SellPressureDetector:
         raw = _safe_div(vs - vb, denom)
         full_at = self._get_threshold(snap.symbol, "sell_flow")
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
-        score = norm * self.weights["sell_flow"]
+        damp = self._ceiling_damp(snap)
+        score = norm * self.weights["sell_flow"] * damp
         desc = f"Δ ارزش خرید={vb:,.0f}، Δ ارزش فروش={vs:,.0f} → خروج={raw:+.3f}"
+        if damp < 1.0:
+            desc += f" | ضریب سقف={damp:.2f} (قیمت نزدیک سقف: معاملات sell-triggered سودگیری است)"
         return SellPressureFactorResult(
             name="sell_flow", label=self.LABELS["sell_flow"],
             max_points=self.weights["sell_flow"], raw_value=raw,
@@ -212,8 +240,11 @@ class SellPressureDetector:
         raw = math.log(ratio) if (not math.isnan(ratio) and ratio > 0) else float("nan")
         full_at = self._get_threshold(snap.symbol, "sell_ticket")
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
-        score = norm * self.weights["sell_ticket"]
+        damp = self._ceiling_damp(snap)
+        score = norm * self.weights["sell_ticket"] * damp
         desc = f"سرانه خرید={avg_b:,.0f}، سرانه فروش={avg_s:,.0f} → ln={raw:+.3f}"
+        if damp < 1.0:
+            desc += f" | ضریب سقف={damp:.2f} (قیمت نزدیک سقف: معاملات sell-triggered سودگیری است)"
         return SellPressureFactorResult(
             name="sell_ticket", label=self.LABELS["sell_ticket"],
             max_points=self.weights["sell_ticket"], raw_value=raw,
