@@ -87,6 +87,7 @@ from early_warning.adaptive_scoring import AdaptiveNormalizer
 from early_warning.sell_pressure import SellPressureDetector
 from early_warning.smart_accumulation import BuyPressureDetector
 from early_warning.alert_engine import AlertEngine, tier, classify
+from early_warning.speed_indicators import SpeedIndicatorEngine
 
 
 # ---------------------------------------------------------------------------
@@ -300,11 +301,13 @@ class LiveMonitor:
             self.sell_pressure = SellPressureDetector(cfg, normalizer=normalizer)
             self.buy_pressure = BuyPressureDetector(cfg, normalizer=normalizer)
             self.alert_engine = AlertEngine(cfg)
+            self.speed_engine = SpeedIndicatorEngine(cfg)
         except Exception as e:
             print(f"  ⚠ موتورهای تحلیلی راه‌اندازی نشدند: {e}")
             self.sell_pressure = None
             self.buy_pressure = None
             self.alert_engine = None
+            self.speed_engine = None
 
     # --- اجرای حلقه پس‌زمینه ---
 
@@ -425,6 +428,9 @@ class LiveMonitor:
             history = hist[:-1]
             sell_res = self.sell_pressure.evaluate(s, prev) if self.sell_pressure else None
             buy_res = self.buy_pressure.evaluate(s, prev, history) if self.buy_pressure else None
+            # موتور شاخص‌های سرعتی (نرخ تخلیه تقاضا / رشد عرضه / نسبت جذب)
+            speed_res = (self.speed_engine.compute(s, history)
+                         if self.speed_engine else None)
             # Phase 2: ثبت raw_valueها برای نرمال‌سازی تطبیقی آینده
             if self.normalizer is not None:
                 if sell_res:
@@ -442,6 +448,7 @@ class LiveMonitor:
                 "available": True,
                 "sell": sell_res.to_dict() if sell_res else None,
                 "buy": buy_res.to_dict() if buy_res else None,
+                "speed": speed_res.to_dict() if speed_res else None,
                 "combined": combined.to_dict() if combined else None,
                 "sell_tier": tier(sell_res.total_score) if sell_res else "نامشخص",
                 "buy_tier": tier(buy_res.total_score) if buy_res else "نامشخص",
@@ -777,6 +784,13 @@ td.num{direction:ltr;text-align:right;font-variant-numeric:tabular-nums}
 .up{color:var(--up)} .down{color:var(--down)} .blue{color:var(--blue)}
 .chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
 .chip{background:#eceff3;color:var(--muted);border-radius:4px;padding:1px 7px;font-size:11px;direction:ltr}
+/* نوار امتیاز سرعتی */
+.sbar{direction:ltr;position:relative;height:22px;background:#eceff3;border-radius:5px;overflow:hidden;min-width:120px}
+.sbar-fill{position:absolute;top:0;left:0;bottom:0;border-radius:5px;transition:width 0.4s}
+.sbar-fill.down{background:var(--down-bg,#ffd0d0)}
+.sbar-fill.mid{background:#ffe9c4}
+.sbar-fill.up{background:var(--up-bg,#d0f5d0)}
+.sbar-txt{position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#333;font-variant-numeric:tabular-nums}
 /* نوار بازه مجاز */
 .range{direction:ltr;position:relative;height:30px;margin:14px 2px 34px;background:linear-gradient(to right,var(--down-bg),#fff,var(--up-bg));border:1px solid var(--line);border-radius:6px}
 .mk{position:absolute;top:-5px;transform:translateX(-50%);text-align:center;min-width:70px}
@@ -861,7 +875,13 @@ td.num{direction:ltr;text-align:right;font-variant-numeric:tabular-nums}
     </section>
   </div>
 
-  <!-- سطر سوم: نمودار روند قیمت -->
+  <!-- سطر سوم: شاخص‌های سرعتی نردبان سفارش‌ها -->
+  <section class="panel">
+    <h2><span class="gnum">G</span> شاخص‌های سرعتی نردبان سفارش‌ها</h2>
+    <div class="body" id="p-g"><div class="wait">در انتظار داده...</div></div>
+  </section>
+
+  <!-- سطر چهارم: نمودار روند قیمت -->
   <section class="panel">
     <h2><span class="gnum">~</span> نمودار روند قیمت در نمونه‌های اخیر</h2>
     <div class="body">
@@ -1180,6 +1200,42 @@ function renderF(d) {
     <div class="hint">گروه F برای جلوگیری از تفسیر اشتباه سایر گروه‌ها نمایش داده می‌شود.</div>`;
 }
 
+/* ---------- پنل G: شاخص‌های سرعتی ---------- */
+function renderSpeed(d) {
+  const el = document.getElementById("p-g");
+  if (!el) return;
+  const sp = (d.engines && d.engines.speed) || null;
+  if (!sp || !sp.is_available) {
+    el.innerHTML = '<div class="wait">' + (sp ? (sp.notes||[]).join(" — ") || "در انتظار پنجره نمونه کامل..." : "در انتظار داده...") + '</div>';
+    return;
+  }
+  // نوار امتیاز (۰–۱۰۰)
+  function bar(score) {
+    if (score == null) return "—";
+    const v = Math.max(0, Math.min(100, score));
+    const cls = v >= 67 ? "down" : v >= 34 ? "mid" : "up";
+    return `<div class="sbar"><div class="sbar-fill ${cls}" style="width:${v}%"></div><span class="sbar-txt">${N(v,1)}</span></div>`;
+  }
+  const notesHtml = (sp.notes && sp.notes.length)
+    ? '<div class="hint">' + sp.notes.join(" — ") + '</div>' : "";
+  el.innerHTML = `
+    <table class="kv">
+      ${kv("امتیاز فشار سرعتی (فروش)", bar(sp.speed_pressure_score))}
+      ${kv("امتیاز جذب سرعتی (خرید)", bar(sp.speed_absorption_score))}
+      ${kv("نرخ تخلیه تقاضا", sp.demand_depletion_rate != null ? N(sp.demand_depletion_rate,4) : "—")}
+      ${kv("نرخ رشد عرضه", sp.supply_growth_rate != null ? N(sp.supply_growth_rate,4) : "—")}
+      ${kv("نسبت جذب", sp.absorption_ratio != null ? N(sp.absorption_ratio,4) : "—")}
+      ${kv("نرمال تخلیه تقاضا", sp.demand_depletion_norm != null ? N(sp.demand_depletion_norm*100,1)+"٪" : "—")}
+      ${kv("نرمال رشد عرضه", sp.supply_growth_norm != null ? N(sp.supply_growth_norm*100,1)+"٪" : "—")}
+      ${kv("نرمال جذب", sp.absorption_norm != null ? N(sp.absorption_norm*100,1)+"٪" : "—")}
+      ${kv("حجم نردبان خرید (ابتدا→اکنون)", N(sp.buy_ladder_start) + " → " + N(sp.buy_ladder_now))}
+      ${kv("حجم نردبان فروش (ابتدا→اکنون)", N(sp.sell_ladder_start) + " → " + N(sp.sell_ladder_now))}
+      ${kv("حجم معاملات پنجره", N(sp.executed_volume_window))}
+      ${kv("تعداد نمونه پنجره", N(sp.window_samples))}
+    </table>
+    ${notesHtml}`;
+}
+
 /* ---------- نمودار سطر سوم ---------- */
 function renderChart(d) {
   const h = d.history || {};
@@ -1250,6 +1306,7 @@ async function tick() {
     renderB(d);
     renderD(d);
     renderF(d);
+    renderSpeed(d);
     renderChart(d);
   } catch (e) {
     connOk = false;

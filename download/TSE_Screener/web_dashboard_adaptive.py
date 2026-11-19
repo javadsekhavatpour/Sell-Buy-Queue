@@ -49,6 +49,7 @@ from early_warning import (
     SellPressureDetector,
     BuyPressureDetector,
     AlertEngine,
+    SpeedIndicatorEngine,
 )
 from early_warning.alert_engine import tier, classify
 
@@ -441,7 +442,7 @@ class SimulationAdaptiveMonitor(AdaptiveLiveMonitor):
         self._sim_playing = True
         self._sim_index = 0
         self._sim_snaps: list[MarketSnapshot] = []
-        self._sim_results: list = []       # (sell_res, buy_res, combined)
+        self._sim_results: list = []       # (sell_res, buy_res, combined, speed_res)
         self._sim_trades_by_time: dict[str, list[Trade]] = {}
         self._load_and_precompute()
 
@@ -475,13 +476,15 @@ class SimulationAdaptiveMonitor(AdaptiveLiveMonitor):
         sp_det = SellPressureDetector(self.cfg, normalizer=self.normalizer)
         buy_det = BuyPressureDetector(self.cfg, normalizer=self.normalizer)
         alert_eng = AlertEngine(self.cfg)
+        speed_det = SpeedIndicatorEngine(self.cfg)
         prev = None
         hist: list[MarketSnapshot] = []
         for snap in snaps:
             sp = sp_det.evaluate(snap, prev)
             buy = buy_det.evaluate(snap, prev, hist)
             combined = alert_eng.evaluate(sp, buy) if (sp and buy) else None
-            self._sim_results.append((sp, buy, combined))
+            speed_res = speed_det.compute(snap, hist)
+            self._sim_results.append((sp, buy, combined, speed_res))
             # ثبت raw_values برای نرمال‌سازی تطبیقی
             if self.normalizer:
                 if sp:
@@ -552,7 +555,7 @@ class SimulationAdaptiveMonitor(AdaptiveLiveMonitor):
         if not self._sim_results or self._sim_index >= len(self._sim_results):
             return {"available": False}
         idx = self._sim_index
-        sp, buy, combined = self._sim_results[idx]
+        sp, buy, combined, speed_res = self._sim_results[idx]
         # امتیاز تجمعی = مجموع امتیازها تا این موقعیت
         cum_sell = sum(r[0].total_score for r in self._sim_results[:idx + 1] if r[0])
         cum_buy = sum(r[1].total_score for r in self._sim_results[:idx + 1] if r[1])
@@ -560,6 +563,7 @@ class SimulationAdaptiveMonitor(AdaptiveLiveMonitor):
             "available": True,
             "sell": sp.to_dict() if sp else None,
             "buy": buy.to_dict() if buy else None,
+            "speed": speed_res.to_dict() if speed_res else None,
             "combined": combined.to_dict() if combined else None,
             "sell_tier": tier(sp.total_score) if sp else "نامشخص",
             "buy_tier": tier(buy.total_score) if buy else "نامشخص",
