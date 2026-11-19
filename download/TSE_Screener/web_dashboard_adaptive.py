@@ -1,22 +1,23 @@
 """
-web_dashboard_adaptive.py — Phase 2.1
-نسخه‌ی جدید داشبورد زنده با نمایش ستون «آستانه تطبیقی».
+web_dashboard_adaptive.py — داشبورد واحد TSE Early Warning
 
-این فایل web_dashboard_live.py را دست نمی‌زند. به‌جای آن:
-  ۱. مؤلفه‌های اصلی (LiveMonitor, HTML_PAGE, load_cfg, ...) را import می‌کند.
-  ۲. یک زیرکلاس AdaptiveLiveMonitor می‌سازد که payload را با اطلاعات آستانه
-     تطبیقی هر شاخص (threshold, samples, mode) غنی می‌کند.
-  ۳. HTML را با جایگزینی هدفمند رشته‌ای، ستون «آستانه» به جدول فاکتورها اضافه
-     می‌کند (بدون بازنویسی کل صفحه).
-  ۴. یک Flask app تازه با مسیرهای / و /api/live به‌همراه مسیرهای اصلی می‌سازد.
+یک سرور، سه حالت با مسیرهای /live، /db، /sim:
 
-اجرای:
-  python web_dashboard_adaptive.py --mode live --symbol سرود
-  python web_dashboard_adaptive.py --mode demo --scenario sell_pressure
+  /        → صفحه‌ی نمایه (انتخاب حالت + نماد)
+  /live    → داده از TSETMC زنده → نمایش + ذخیره در بانک (بررسی بصری جمع‌آوری)
+  /db      → خواندن لحظه‌ای آخرین داده از بانک (بررسی بصری داده‌های ذخیره‌شده)
+  /sim     → پخش داده‌های بانک با کنترل play/pause/speed/step (رفع اشکال بازار بسته)
+  /sim/select → فرم انتخاب نماد/تاریخ/سرعت برای شبیه‌سازی
 
-تفاوت با نسخه اصلی: فقط گروه E (جدول شاخص‌ها) یک ستون اضافی دارد:
-  شاخص | امتیاز | نرمال | **آستانه** | خام/وضع
-آستانه: آبی = تطبیقی (صدک ۹۰ تاریخچه + تعداد نمونه)، خاکستری = ثابت (fallback).
+جمع‌آوری داده (پس‌زمینه، جدا از داشبورد):
+  python run_multi.py --symbols دابور
+
+اجرا:
+  python web_dashboard_adaptive.py --port 8052
+  سپس: http://localhost:8052/  → /live  /db  /sim
+
+این فایل مؤلفه‌های پایه را از web_dashboard_live.py (در ریشه) وارد می‌کند و
+یک زیرکلاس AdaptiveLiveMonitor با ستون «آستانه تطبیقی» می‌سازد.
 """
 
 from __future__ import annotations
@@ -24,13 +25,14 @@ from __future__ import annotations
 import argparse
 import json
 import threading
+import time
 from collections import deque
 from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, jsonify, request
 
-# مؤلفه‌های نسخه اصلی — بدون تغییر
+# مؤلفه‌های نسخه اصلی — web_dashboard_live.py در ریشه (داخلی، مستقیم اجرا نمی‌شود)
 import web_dashboard_live as orig
 from web_dashboard_live import (
     LiveMonitor,
@@ -651,6 +653,210 @@ class DBLiveMonitor(AdaptiveLiveMonitor):
             self._stop.wait(self.interval)
 
 
+# ===========================================================================
+# داشبورد واحد: switch_mode + صفحه‌ی نمایه
+#
+# سه حالت با مسیرهای /live، /db، /sim — یک سرور، یک فایل.
+#   /live → TSETMC زنده → نمایش + بانک
+#   /db   → خواندن لحظه‌ای آخرین داده از بانک
+#   /sim  → پخش داده‌های بانک با کنترل
+# ===========================================================================
+
+_switch_lock = threading.Lock()
+_current_mode: str | None = None      # "live" | "db" | "sim" | None
+_current_symbol: str | None = None
+_current_storage: MarketDataStorage | None = None
+
+
+def _default_symbol() -> str:
+    cfg = load_cfg()
+    return cfg.get("test_symbol", {}).get("name", "ریتون")
+
+
+def _latest_date_in_db(storage: MarketDataStorage, symbol: str) -> str:
+    try:
+        row = storage.conn.execute(
+            "SELECT date_jalali FROM snapshots WHERE symbol=? "
+            "ORDER BY timestamp DESC LIMIT 1", (symbol,)).fetchone()
+        return row[0] if row else ""
+    except Exception:
+        return ""
+
+
+def switch_mode(mode: str, symbol: str | None = None, date: str | None = None,
+                speed: float = 10.0, interval: int = 30) -> dict:
+    """توقف مانیتور قبلی و شروع مانیتور جدید برای حالت درخواستی.
+
+    خروجی: {"ok": True/False, "mode", "symbol", "message"?}
+    """
+    global MONITOR, _current_mode, _current_symbol, _current_storage
+    cfg = load_cfg()
+    symbol = symbol or _default_symbol()
+    with _switch_lock:
+        # اگر همین حالت + نماد فعالی است، نیاز به تعویض نیست (مگر sim با تاریخ متفاوت)
+        if (_current_mode == mode and _current_symbol == symbol and MONITOR is not None
+                and not (mode == "sim" and date)):
+            return {"ok": True, "mode": mode, "symbol": symbol, "switched": False}
+
+        # توقف مانیتور قبلی
+        if MONITOR is not None:
+            try:
+                MONITOR.stop()
+            except Exception:
+                pass
+            MONITOR = None
+            time.sleep(0.4)  # به thread وقت بده تمیز جمع شود
+
+        # بستن storage قبلی
+        if _current_storage is not None:
+            try:
+                _current_storage.close()
+            except Exception:
+                pass
+            _current_storage = None
+
+        try:
+            db_path = ROOT / "data" / "multi" / f"{symbol}.sqlite"
+
+            if mode == "live":
+                ins_code = cfg.get("test_symbol", {}).get("ins_code", "")
+                if symbol and not ins_code:
+                    print(f"جستجوی کد نماد '{symbol}' در TSETMC...")
+                    tmp = MarketDataCollector(cfg)
+                    res = tmp.search_symbol(symbol)
+                    if res:
+                        ins_code = res[0]["code"]
+                        print(f"کد پیدا شد: {ins_code}")
+                storage = MarketDataStorage(db_path)
+                load_price_range_live(cfg, symbol, ins_code, storage=storage)
+                normalizer = AdaptiveNormalizer(storage, cfg)
+                MONITOR = AdaptiveLiveMonitor(
+                    cfg, mode="live", symbol=symbol, ins_code=ins_code,
+                    interval=interval, normalizer=normalizer, storage=storage)
+                _current_storage = storage
+
+            elif mode == "db":
+                if not db_path.exists():
+                    return {"ok": False,
+                            "message": f"بانک {db_path.name} وجود ندارد. "
+                                       f"ابتدا با run_multi.py داده جمع کنید."}
+                storage = MarketDataStorage(db_path)
+                normalizer = AdaptiveNormalizer(storage, cfg)
+                MONITOR = DBLiveMonitor(
+                    cfg, symbol=symbol, interval=5,
+                    normalizer=normalizer, storage=storage)
+                _current_storage = storage
+
+            elif mode == "sim":
+                if not db_path.exists():
+                    return {"ok": False,
+                            "message": f"بانک {db_path.name} وجود ندارد. "
+                                       f"ابتدا با run_multi.py داده جمع کنید."}
+                storage = MarketDataStorage(db_path)
+                normalizer = AdaptiveNormalizer(storage, cfg)
+                if not date:
+                    date = _latest_date_in_db(storage, symbol)
+                if not date:
+                    return {"ok": False,
+                            "message": f"داده‌ای برای نماد '{symbol}' در بانک نیست."}
+                MONITOR = SimulationAdaptiveMonitor(
+                    cfg, symbol=symbol, date_jalali=date, db_path=db_path,
+                    time_speed=speed, normalizer=normalizer, storage=storage)
+                _current_storage = storage
+
+            else:
+                return {"ok": False, "message": f"حالت نامعتبر: {mode}"}
+
+            MONITOR.start()
+            _current_mode = mode
+            _current_symbol = symbol
+            return {"ok": True, "mode": mode, "symbol": symbol, "switched": True,
+                    "date": date if mode == "sim" else None}
+        except Exception as e:
+            _current_mode = None
+            return {"ok": False, "message": f"خطا در شروع حالت {mode}: {e}"}
+
+
+def _index_page_html() -> str:
+    """صفحه‌ی نمایه: سه دکمه برای /live، /db، /sim + انتخاب نماد."""
+    symbols = _load_symbols_list()
+    opts = "\n".join(
+        f'<option value="{s["name"]}">{s["name"]} — {s.get("market_label", "")}</option>'
+        for s in symbols) or '<option value="">— ابتدا در config/symbols.json نماد اضافه کنید —</option>'
+    cur = _default_symbol()
+    mode_label = {"live": "زنده (Live)", "db": "بانک (DB)", "sim": "شبیه‌سازی (Sim)"}
+    cur_label = mode_label.get(_current_mode, "هیچ (انتخاب کنید)")
+    return f"""<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>داشبورد TSE Early Warning</title>
+<style>
+  * {{ box-sizing: border-box; }}
+  body {{ font-family: 'Vazirmatn', Tahoma, sans-serif; background: #f5f5f5;
+          margin: 0; padding: 20px; }}
+  .wrap {{ max-width: 720px; margin: 30px auto; }}
+  h1 {{ font-size: 24px; color: #1a237e; margin: 0 0 6px; }}
+  .sub {{ color: #666; font-size: 14px; margin-bottom: 24px; }}
+  .card {{ background: #fff; border-radius: 14px; padding: 24px;
+           box-shadow: 0 2px 12px rgba(0,0,0,0.08); margin-bottom: 20px; }}
+  label {{ display: block; font-size: 14px; font-weight: 600; margin-bottom: 6px; color: #333; }}
+  select {{ width: 100%; padding: 11px 14px; border: 1px solid #ccc; border-radius: 8px;
+            font-size: 16px; margin-bottom: 18px; }}
+  .modes {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }}
+  .mode {{ display: block; text-decoration: none; padding: 22px 16px; border-radius: 12px;
+           text-align: center; font-size: 18px; font-weight: 700; color: #fff;
+           transition: transform 0.15s, box-shadow 0.15s; }}
+  .mode:hover {{ transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.15); }}
+  .mode .ico {{ font-size: 28px; display: block; margin-bottom: 6px; }}
+  .mode .dsc {{ font-size: 12px; font-weight: 400; opacity: 0.9; margin-top: 4px; }}
+  .live {{ background: #2e7d32; }}
+  .db   {{ background: #1565c0; }}
+  .sim  {{ background: #6a1b9a; }}
+  .cur  {{ font-size: 13px; color: #888; margin-top: 14px; text-align: center; }}
+  .cur b {{ color: #1a237e; }}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📊 داشبورد TSE Early Warning</h1>
+  <div class="sub">یک سرور، سه حالت — حالت را از مسیر انتخاب کنید.</div>
+  <div class="card">
+    <label>نماد</label>
+    <select id="symbol" onchange="updateLinks()">
+      <option value="{cur}" selected>— پیش‌فرض: {cur} —</option>
+      {opts}
+    </select>
+    <div class="modes">
+      <a class="mode live" id="btn-live" href="/live">
+        <span class="ico">📡</span> Live
+        <span class="dsc">TSETMC زنده → نمایش + بانک</span>
+      </a>
+      <a class="mode db" id="btn-db" href="/db">
+        <span class="ico">💾</span> DB
+        <span class="dsc">آخرین داده از بانک</span>
+      </a>
+      <a class="mode sim" id="btn-sim" href="/sim">
+        <span class="ico">▶</span> Sim
+        <span class="dsc">پخش بانک با کنترل</span>
+      </a>
+    </div>
+    <div class="cur">حالت فعلی: <b>{cur_label}</b>{f' — نماد {_current_symbol}' if _current_symbol else ''}</div>
+  </div>
+</div>
+<script>
+function updateLinks() {{
+  const s = document.getElementById('symbol').value;
+  document.getElementById('btn-live').href = '/live?symbol=' + encodeURIComponent(s);
+  document.getElementById('btn-db').href   = '/db?symbol='   + encodeURIComponent(s);
+  document.getElementById('btn-sim').href  = '/sim?symbol='  + encodeURIComponent(s);
+}}
+</script>
+</body>
+</html>"""
+
+
 # ---------------------------------------------------------------------------
 # Flask app تازه با مسیرهای تطبیقی + مسیرهای اصلی
 # ---------------------------------------------------------------------------
@@ -661,13 +867,38 @@ MONITOR: AdaptiveLiveMonitor | None = None
 
 @app.route("/")
 def index():
+    """صفحه‌ی نمایه: سه دکمه برای /live، /db، /sim."""
+    return _index_page_html()
+
+
+@app.route("/live")
+def route_live():
+    """حالت زنده: TSETMC → نمایش + بانک."""
+    symbol = request.args.get("symbol") or _default_symbol()
+    interval = int(request.args.get("interval", 30))
+    res = switch_mode("live", symbol, interval=interval)
+    if not res.get("ok"):
+        return (_index_page_html() + f"<p style='color:#c62828;text-align:center'>"
+                f"خطا: {res.get('message')}</p>"), 500
+    return HTML_PAGE_ADAPTIVE
+
+
+@app.route("/db")
+def route_db():
+    """حالت بانک: خواندن لحظه‌ای آخرین داده از بانک."""
+    symbol = request.args.get("symbol") or _default_symbol()
+    res = switch_mode("db", symbol)
+    if not res.get("ok"):
+        return (_index_page_html() + f"<p style='color:#c62828;text-align:center'>"
+                f"خطا: {res.get('message')}</p>"), 500
     return HTML_PAGE_ADAPTIVE
 
 
 @app.route("/api/live")
 def api_live():
     if MONITOR is None:
-        return jsonify({"ok": False, "message": "مانیتور راه‌اندازی نشده است"}), 500
+        return jsonify({"ok": False, "message": "مانیتور راه‌اندازی نشده است — "
+                         "به /live، /db یا /sim بروید."}), 500
     return jsonify(MONITOR.payload())
 
 
@@ -699,8 +930,7 @@ def _load_symbols_list() -> list[dict]:
         return []
 
 
-@app.route("/sim")
-def sim_setup():
+def _sim_select_html(default_symbol: str | None = None) -> str:
     """فرم انتخاب نماد، تاریخ و سرعت برای شروع شبیه‌سازی."""
     symbols = _load_symbols_list()
     opts = "\n".join(
@@ -795,7 +1025,7 @@ async function startSim() {{
     }});
     const d = await r.json();
     if (d.ok) {{
-      window.location.href = '/';
+      window.location.href = '/sim?symbol=' + encodeURIComponent(symbol) + '&date=' + encodeURIComponent(date);
     }} else {{
       msg.textContent = d.message || 'خطا در شروع';
       msg.style.color = '#c62828';
@@ -808,6 +1038,34 @@ async function startSim() {{
 </script>
 </body>
 </html>"""
+
+
+@app.route("/sim")
+def sim_route():
+    """حالت شبیه‌سازی: پخش داده‌های بانک با کنترل.
+
+    - با ?symbol=X&date=Y → مستقیم شبیه‌سازی را شروع کن و داشبورد نشان بده.
+    - بدون پارامتر و sim فعال → داشبورد فعلی.
+    - بدون پارامتر و sim فعال نیست → فرم انتخاب.
+    """
+    symbol = request.args.get("symbol") or _default_symbol()
+    date = request.args.get("date")
+    speed = float(request.args.get("speed", 10))
+    # اگر sim همین نماد فعالی است و تاریخ جدید ندادیم → داشبورد
+    if (_current_mode == "sim" and _current_symbol == symbol
+            and not date and MONITOR is not None):
+        return HTML_PAGE_ADAPTIVE
+    res = switch_mode("sim", symbol, date=date, speed=speed)
+    if res.get("ok"):
+        return HTML_PAGE_ADAPTIVE
+    # داده نبود → فرم انتخاب نشان بده
+    return _sim_select_html(default_symbol=symbol)
+
+
+@app.route("/sim/select")
+def sim_select_route():
+    """فرم انتخاب نماد/تاریخ/سرعت برای شبیه‌سازی."""
+    return _sim_select_html()
 
 
 @app.route("/api/sim/dates")
@@ -830,38 +1088,17 @@ def sim_dates():
 
 @app.route("/api/sim/start", methods=["POST"])
 def sim_start():
-    """شروع شبیه‌سازی: ساخت SimulationAdaptiveMonitor با پارامترهای کاربر."""
-    global MONITOR
+    """شروع شبیه‌سازی از طریق فرم /sim/select — از switch_mode استفاده می‌کند."""
     data = request.get_json(force=True)
     symbol = data.get("symbol", "")
     date_jalali = data.get("date", "")
     speed = float(data.get("speed", 10))
     if not symbol or not date_jalali:
         return jsonify({"ok": False, "message": "نماد و تاریخ الزامی است"}), 400
-
-    db_path = ROOT / "data" / "multi" / f"{symbol}.sqlite"
-    if not db_path.exists():
-        return jsonify({"ok": False, "message": f"بانک {db_path.name} وجود ندارد"}), 404
-
-    # توقف مانیتور قبلی
-    if MONITOR is not None:
-        try:
-            MONITOR.stop()
-        except Exception:
-            pass
-
-    try:
-        cfg = load_cfg()
-        storage = MarketDataStorage(db_path)
-        normalizer = AdaptiveNormalizer(storage, cfg)
-        MONITOR = SimulationAdaptiveMonitor(
-            cfg, symbol=symbol, date_jalali=date_jalali, db_path=db_path,
-            time_speed=speed, normalizer=normalizer, storage=storage,
-        )
-        MONITOR.start()
+    res = switch_mode("sim", symbol, date=date_jalali, speed=speed)
+    if res.get("ok"):
         return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"ok": False, "message": str(e)}), 500
+    return jsonify({"ok": False, "message": res.get("message", "خطا")}), 500
 
 
 @app.route("/api/sim/play", methods=["POST"])
@@ -919,134 +1156,48 @@ def sim_status_route():
 # ---------------------------------------------------------------------------
 
 def main():
-    global MONITOR
+    """داشبورد واحد — یک سرور، سه حالت با مسیرهای /live، /db، /sim.
+
+    دیگر نیازی به --mode نیست. حالت را از مسیر انتخاب کنید:
+      http://localhost:PORT/        → صفحه‌ی نمایه (انتخاب حالت)
+      http://localhost:PORT/live    → TSETMC زنده → نمایش + بانک
+      http://localhost:PORT/db      → خواندن لحظه‌ای از بانک
+      http://localhost:PORT/sim     → پخش بانک با کنترل
+      http://localhost:PORT/sim/select → فرم انتخاب نماد/تاریخ/سرعت
+    """
     ap = argparse.ArgumentParser(
-        description="داشبورد زنده تطبیقی (Phase 2.1) — نمایش ستون آستانه تطبیقی"
-    )
-    ap.add_argument("--mode", choices=["live", "demo", "simulation"], default="live",
-                    help="حالت: live=TSETMC واقعی، demo=شبیه‌ساز آفلاین، simulation=پخش از بانک")
-    ap.add_argument("--scenario", choices=["normal", "sell_pressure", "accumulation", "mixed"],
-                    default="sell_pressure", help="سناریوی شبیه‌ساز در حالت demo")
-    ap.add_argument("--symbol", default=None, help="نام نماد (پیش‌فرض: پیکربندی)")
-    ap.add_argument("--ins-code", default=None, help="کد TSETMC نماد")
-    ap.add_argument("--interval", type=int, default=None, help="فاصله نمونه‌برداری (ثانیه)")
-    ap.add_argument("--samples", type=int, default=226, help="تعداد نمونه شبیه‌ساز (حالت demo)")
-    ap.add_argument("--date", default=None,
-                    help="تاریخ شمسی برای شبیه‌سازی (مثلاً 1404/08/28) — با --mode simulation")
-    ap.add_argument("--time-speed", type=float, default=10.0,
-                    help="سرعت گذر زمان در شبیه‌سازی (مثلاً 10 = ۱۰ برابر) — با --mode simulation")
-    ap.add_argument("--db", default=None,
-                    help="مسیر فایل SQLite (پیش‌فرض: data/multi/{symbol}.sqlite اگر نماد داده شده)")
+        description="داشبورد واحد TSE Early Warning — /live، /db، /sim")
     ap.add_argument("--port", type=int, default=8052)
     ap.add_argument("--host", default="127.0.0.1")
     args = ap.parse_args()
 
-    # اگر --db داده نشده و --symbol مشخص است، از data/multi/{symbol}.sqlite استفاده کن
-    # (همان DB که run_live.py/run_multi در آن ذخیره می‌کند — برای خواندن نمونه‌های
-    # ابتدای روز حتی قبل از استارت داشبورد)
-    if args.db is None:
-        if args.symbol:
-            args.db = f"data/multi/{args.symbol}.sqlite"
-        else:
-            args.db = "data/early_warning_live.sqlite"
-
     cfg = load_cfg()
-    print(f"پیکربندی بارگذاری شد - نماد پیش‌فرض: {cfg['test_symbol']['name']}")
-    print(f"adaptive.enabled = {cfg.get('adaptive', {}).get('enabled', False)}")
-
-    if args.mode == "live" and args.symbol and not args.ins_code:
-        print(f"جستجوی کد نماد '{args.symbol}' در TSETMC...")
-        tmp = MarketDataCollector(cfg)
-        res = tmp.search_symbol(args.symbol)
-        if res:
-            args.ins_code = res[0]["code"]
-            print(f"کد پیدا شد: {args.ins_code}")
-        else:
-            print(f"نماد '{args.symbol}' پیدا نشد - از کد پیکربندی استفاده می‌شود.")
-
-    live_storage = None
-    live_normalizer = None
-
-    if args.mode == "simulation":
-        # حالت شبیه‌سازی: اگر --symbol و --date داده شده، خودکار شروع کن؛
-        # در غیر این صورت، کاربر از صفحه‌ی /sim استفاده می‌کند.
-        if args.symbol and args.date:
-            db_path = ROOT / args.db
-            if db_path.exists():
-                try:
-                    live_storage = MarketDataStorage(db_path)
-                    live_normalizer = AdaptiveNormalizer(live_storage, cfg)
-                    MONITOR = SimulationAdaptiveMonitor(
-                        cfg, symbol=args.symbol, date_jalali=args.date,
-                        db_path=db_path, time_speed=args.time_speed,
-                        normalizer=live_normalizer, storage=live_storage,
-                    )
-                    MONITOR.start()
-                except Exception as e:
-                    print(f"  ⚠ خطا در شروع شبیه‌سازی: {e}")
-                    print(f"  → از صفحه‌ی /sim برای شروع دستی استفاده کنید.")
-            else:
-                print(f"  ⚠ بانک {db_path} وجود ندارد.")
-                print(f"  → از صفحه‌ی /sim برای انتخاب نماد/تاریخ استفاده کنید.")
-        else:
-            print("  → بدون --symbol و --date: از صفحه‌ی /sim برای شروع شبیه‌سازی استفاده کنید.")
-    else:
-        sym_final = args.symbol or cfg.get("test_symbol", {}).get("name", "")
-        ins_final = args.ins_code or cfg.get("test_symbol", {}).get("ins_code", "")
-        if args.mode == "live" and sym_final:
-            db_path = ROOT / args.db
-            try:
-                live_storage = MarketDataStorage(db_path)
-                load_price_range_live(cfg, sym_final, ins_final, storage=live_storage)
-                live_normalizer = AdaptiveNormalizer(live_storage, cfg)
-            except Exception as e:
-                print(f"  ⚠ خطا در ایجاد storage: {e}")
-                print(f"  ⚠ daily_params/score_history ذخیره نمی‌شود اما داشبورد ادامه می‌دهد.")
-                load_price_range_live(cfg, sym_final, ins_final)
-
-        MONITOR = AdaptiveLiveMonitor(
-            cfg,
-            mode=args.mode,
-            symbol=args.symbol,
-            ins_code=args.ins_code,
-            interval=args.interval,
-            scenario=args.scenario,
-            samples=args.samples,
-            normalizer=live_normalizer,
-            storage=live_storage,
-        )
-        MONITOR.start()
-
-    src = ("TSETMC زنده" if args.mode == "live"
-           else f"شبیه‌ساز (سناریو: {args.scenario})" if args.mode == "demo"
-           else "شبیه‌سازی (پخش از بانک)")
-    print("=" * 60)
-    print("داشبورد رصد زنده تطبیقی — Phase 2.1 (ستون آستانه تطبیقی)")
-    print(f"منبع داده : {src}")
-    if MONITOR:
-        print(f"نماد      : {MONITOR.symbol}")
-    if args.mode == "simulation" and MONITOR:
-        sm = MONITOR
-        print(f"تاریخ     : {sm._sim_date}")
-        print(f"نمونه‌ها   : {len(sm._sim_snaps)} (سرعت {sm._sim_speed}x)")
-    elif MONITOR:
-        print(f"نمونه‌برداری: هر {MONITOR.interval} ثانیه")
-    if args.mode == "simulation":
-        print(f"صفحه‌ی انتخاب: http://localhost:{args.port}/sim")
-    if live_storage:
-        print(f"بانک       : {ROOT / args.db}")
     adp = cfg.get("adaptive", {})
     status = "فعال" if adp.get("enabled") else "غیرفعال (fallback ثابت)"
-    print(f"adaptive  : {status} (min_samples={adp.get('min_samples',50)}, percentile={adp.get('percentile',90)})")
-    print(f"آدرس      : http://localhost:{args.port}")
+
+    print("=" * 60)
+    print("داشبورد واحد TSE Early Warning")
+    print(f"نماد پیش‌فرض: {cfg.get('test_symbol', {}).get('name', 'ریتون')}")
+    print(f"adaptive   : {status} (min_samples={adp.get('min_samples',50)}, percentile={adp.get('percentile',90)})")
+    print("-" * 60)
+    print("حالت را از مسیر انتخاب کنید:")
+    print(f"  نمایه     : http://localhost:{args.port}/")
+    print(f"  Live (زنده): http://localhost:{args.port}/live")
+    print(f"  DB   (بانک): http://localhost:{args.port}/db")
+    print(f"  Sim  (شبیه): http://localhost:{args.port}/sim")
+    print(f"  فرم Sim    : http://localhost:{args.port}/sim/select")
+    print("-" * 60)
+    print("جمع‌آوری داده (پس‌زمینه): python run_multi.py --symbols <نماد>")
     print("=" * 60)
 
     try:
-        app.run(host=args.host, port=args.port, threaded=True, debug=False, use_reloader=False)
+        app.run(host=args.host, port=args.port, threaded=True,
+                debug=False, use_reloader=False)
     finally:
-        if live_storage:
+        # بستن storage اگر مانیتوری فعال است
+        if _current_storage is not None:
             try:
-                live_storage.close()
+                _current_storage.close()
             except Exception:
                 pass
 

@@ -1,20 +1,21 @@
 """
-run_multi.py — اجرای همزمان جمع‌آوری داده برای چند نماد.
+run_multi.py — اجرای همزمان جمع‌آوری داده برای چند نماد (تنها فایل جمع‌آوری).
 
-می‌خواند config/symbols.json، برای هر نماد یک subprocess از run_live.py
-راه\u200cاندازی می\u200cکند. هر collector:
+می‌خواند config/symbols.json، برای هر نماد یک subprocess از
+run_live.py (worker داخلی — مستقیم اجرا نمی‌شود) راه‌اندازی می‌کند. هر collector:
   - نماد و کد خود را از آرگومان می‌گیرد
-  - نوع بازار و ساعت معاملات را به\u200cصورت خودکار تشخیص می‌دهد (market_detector)
-  - خارج از جلسه fetch نمی\u200cکند (صرفه\u200cجویی در API TSETMC)
+  - نوع بازار و ساعت معاملات را به‌صورت خودکار تشخیص می‌دهد (market_detector)
+  - خارج از جلسه fetch نمی‌کند (صرفه‌جویی در API TSETMC)
   - در DB جداگانه می‌نویسد (data/multi/{symbol}.sqlite) تا تداخل نباشد
 
 استفاده:
   python run_multi.py
   python run_multi.py --symbols سرود,دابور     # فقط برخی نمادها
-  python run_multi.py --interval 30             # فاصله نمونه\u200cبرداری
+  python run_multi.py --interval 30             # فاصله نمونه‌برداری
 
-سپس برای داشبورد هر نماد (در ترمینال جدا):
-  python web_dashboard_adaptive.py --db data/multi/سرود.sqlite --symbol سرود --port 8052
+سپس داشبورد را در ترمینال جدا اجرا کنید (یک سرور، سه حالت):
+  python web_dashboard_adaptive.py --port 8052
+  سپس: http://localhost:8052/live  یا  /db  یا  /sim
 """
 from __future__ import annotations
 
@@ -112,11 +113,11 @@ def main():
         sys.exit(1)
 
     print()
-    print(f"  {len(procs)} collector \u0631\u0627\u0647\u200c\u0627\u0646\u062f\u0627\u0632\u06cc \u0634\u062f.")
-    print("  \u0628\u0631\u0627\u06cc \u062a\u0648\u0642\u0641: Ctrl+C")
-    print("  \u0628\u0631\u0627\u06cc \u062f\u0627\u0634\u0628\u0648\u0631\u062f \u0647\u0631 \u0646\u0645\u0627\u062f (\u062a\u0631\u0645\u06cc\u0646\u0627\u0644 \u062c\u062f\u0627):")
-    for idx, (name, _) in enumerate(procs):
-        print(f"    python web_dashboard_adaptive.py --db data/multi/{name}.sqlite --symbol {name} --port {8052 + idx}")
+    print(f"  {len(procs)} collector راه‌اندازی شد.")
+    print("  برای توقف: Ctrl+C")
+    print("  برای داشبورد (ترمینال جدا — یک سرور، سه حالت):")
+    print("    python web_dashboard_adaptive.py --port 8052")
+    print("    سپس: http://localhost:8052/  (نمایه) → /live  /db  /sim")
     print("=" * 78)
 
     # مدیریت سیگنال برای توقف تمیز
