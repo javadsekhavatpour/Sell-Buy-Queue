@@ -1182,7 +1182,7 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 
 # مؤلفه‌های نسخه اصلی — web_dashboard_live.py در ریشه (داخلی، مستقیم اجرا نمی‌شود)
 from early_warning import (
@@ -1195,6 +1195,7 @@ from early_warning import (
     BuyPressureDetector,
     AlertEngine,
     SpeedIndicatorEngine,
+    ExcelReportGenerator,
 )
 from early_warning.alert_engine import tier, classify
 
@@ -1393,6 +1394,7 @@ _SIM_BAR_HTML = """<div id="err"></div>
   <button onclick="simStep(-1)" style="background:rgba(255,255,255,0.15);border:none;color:#fff;padding:6px 10px;border-radius:6px;cursor:pointer">◀ ۱-</button>
   <button onclick="simStep(1)" style="background:rgba(255,255,255,0.15);border:none;color:#fff;padding:6px 10px;border-radius:6px;cursor:pointer">۱ ▶</button>
   <button onclick="simStep(10)" style="background:rgba(255,255,255,0.15);border:none;color:#fff;padding:6px 10px;border-radius:6px;cursor:pointer">۱۰ ▶▶</button>
+  <button onclick="simDownloadReport()" title="دانلود ریپورت Excel این شبیه‌سازی" style="background:rgba(76,175,80,0.85);border:none;color:#fff;padding:7px 14px;border-radius:6px;cursor:pointer;font-weight:700;font-size:14px">📊 دانلود ریپورت</button>
   <span id="sim-progress" style="font-size:13px;opacity:0.9"></span>
   <input type="range" id="sim-seek" min="0" max="100" value="0" oninput="simSeekInput(this.value)" style="flex:1;min-width:180px;accent-color:#fff">
 </div>"""
@@ -1457,6 +1459,11 @@ async function simSeekInput(v) {
     body: JSON.stringify({index: Number(v)})});
   setTimeout(() => { _simSeeking = false; }, 500);
   checkSim();
+}
+function simDownloadReport() {
+  // دانلود ریپورت Excel از شبیه‌سازی جاری (نماد + تاریخ فعلی)
+  // سرور فایل را با Content-Disposition: attachment برمی‌گرداند
+  window.location.href = '/sim/report';
 }
 setInterval(checkSim, 1000);
 checkSim();"""
@@ -1589,6 +1596,7 @@ class SimulationAdaptiveMonitor(AdaptiveLiveMonitor):
         self._sim_snaps: list[MarketSnapshot] = []
         self._sim_results: list = []       # (sell_res, buy_res, combined, speed_res)
         self._sim_trades_by_time: dict[str, list[Trade]] = {}
+        self._sim_alert_eng: AlertEngine | None = None  # برای تولید ریپورت
         self._load_and_precompute()
 
     def _load_and_precompute(self):
@@ -1641,11 +1649,58 @@ class SimulationAdaptiveMonitor(AdaptiveLiveMonitor):
             prev = snap
             hist.append(snap)
 
+        # نگهداری AlertEngine برای تولید ریپورت Sim (get_all_events)
+        self._sim_alert_eng = alert_eng
+
         print(f"  شبیه‌سازی: {len(snaps)} نمونه برای «{self.symbol}» در تاریخ {self._sim_date}")
 
         # انتشار اولین نمونه برای نمایش فوری
         if snaps:
             self._publish_sim_rebuild()
+
+    def generate_sim_report(self) -> Path | None:
+        """تولید ریپورت Excel از داده‌های شبیه‌سازی جاری.
+
+        از همان نماد و تاریخی که شبیه‌سازی روی آن اجرا شده استفاده می‌کند.
+        فایل خروجی: reports/sim_report_{نماد}_{تاریخ}.xlsx
+        در شیت Metadata، فیلد «نوع گزارش» = «شبیه‌سازی (Sim)» درج می‌شود.
+        """
+        if not self._sim_snaps:
+            return None
+
+        # جمع‌آوری داده‌ها از pre-compute
+        snapshots = self._sim_snaps
+        sp_results = [r[0] for r in self._sim_results if r[0]]
+        acc_results = [r[1] for r in self._sim_results if r[1]]
+        combined_states = [r[2] for r in self._sim_results if r[2]]
+        alert_events = (self._sim_alert_eng.get_all_events()
+                        if self._sim_alert_eng else [])
+
+        # جمع‌آوری همه‌ی معاملات (از دیکشنری زمان→معاملات)
+        trades: list[Trade] = []
+        for tlist in self._sim_trades_by_time.values():
+            trades.extend(tlist)
+
+        # مسیر خروجی — شامل نماد، تاریخ و علامت Sim
+        safe_sym = self.symbol.replace("/", "_").replace("\\", "_").replace(" ", "_")
+        safe_date = self._sim_date.replace("/", "-")
+        out_path = Path("reports") / f"sim_report_{safe_sym}_{safe_date}.xlsx"
+
+        # تولید گزارش با نشانگر Sim
+        gen = ExcelReportGenerator(self.cfg)
+        gen.generate(
+            symbol=self.symbol,
+            snapshots=snapshots,
+            sp_results=sp_results,
+            acc_results=acc_results,
+            combined_states=combined_states,
+            alert_events=alert_events,
+            output_path=out_path,
+            trades=trades if trades else None,
+            source="شبیه‌سازی (Sim)",
+        )
+        print(f"  📊 ریپورت Sim تولید شد: {out_path} ({len(snapshots)} نمونه)")
+        return out_path
 
     def start(self):
         """شروع حلقه‌ی پخش در پس‌زمینه."""
@@ -3075,6 +3130,31 @@ def sim_status_route():
     if MONITOR and isinstance(MONITOR, SimulationAdaptiveMonitor):
         return jsonify(MONITOR.sim_status())
     return jsonify({"mode": "not_simulation"})
+
+
+@app.route("/sim/report")
+def sim_report_route():
+    """تولید و دانلود ریپورت Excel از شبیه‌سازی جاری.
+
+    از نماد و تاریخی که شبیه‌سازی روی آن اجرا شده استفاده می‌کند.
+    فایل خروجی: sim_report_{نماد}_{تاریخ}.xlsx
+    """
+    if not MONITOR or not isinstance(MONITOR, SimulationAdaptiveMonitor):
+        return jsonify({"error": "شبیه‌سازی فعال نیست. ابتدا یک نماد و تاریخ انتخاب کنید."}), 400
+    try:
+        path = MONITOR.generate_sim_report()
+        if path is None:
+            return jsonify({"error": "داده‌ای برای تولید گزارش وجود ندارد."}), 400
+        return send_file(
+            str(path),
+            as_attachment=True,
+            download_name=path.name,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"خطا در تولید گزارش: {e}"}), 500
 
 
 # ---------------------------------------------------------------------------

@@ -109,9 +109,14 @@ class ExcelReportGenerator:
         combined_states: List[CombinedState],
         alert_events: List[AlertEvent],
         output_path: Path,
-        trades: Optional[List[Trade]] = None
+        trades: Optional[List[Trade]] = None,
+        source: str = "زنده (Live)"
     ) -> Path:
-        """تولید کامل گزارش با هفت شیت."""
+        """تولید کامل گزارش با هفت شیت.
+
+        پارامتر source: منبع داده را در شیت Metadata مشخص می‌کند
+        (مثلاً «شبیه‌سازی (Sim)» یا «زنده (Live)»).
+        """
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         self._build_dashboard(
@@ -123,7 +128,7 @@ class ExcelReportGenerator:
         self._build_snapshots_sheet(snapshots)
         if trades:
             self._build_trades_sheet(trades, symbol)
-        self._build_metadata_sheet(snapshots, symbol)
+        self._build_metadata_sheet(snapshots, symbol, source)
         self._build_history_sheet(snapshots, combined_states)
 
         self.wb.save(str(output_path))
@@ -953,7 +958,8 @@ class ExcelReportGenerator:
     # -----------------------------------------------------------------
     # شیت ۶: Metadata
     # -----------------------------------------------------------------
-    def _build_metadata_sheet(self, snapshots: List[MarketSnapshot], symbol: str):
+    def _build_metadata_sheet(self, snapshots: List[MarketSnapshot], symbol: str,
+                              source: str = "زنده (Live)"):
         ws = self.wb.create_sheet("Metadata")
         ws.sheet_view.rightToLeft = True
 
@@ -983,6 +989,7 @@ class ExcelReportGenerator:
 
             meta_data = [
                 ("نماد", symbol),
+                ("نوع گزارش (Source)", source),
                 ("کد ابزار TSETMC", first.ins_code),
                 ("تاریخ شمسی", first.date_jalali),
                 ("زمان شروع پایش", first.tehran_time),
