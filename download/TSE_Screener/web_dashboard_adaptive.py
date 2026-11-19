@@ -614,11 +614,16 @@ class DBLiveMonitor(AdaptiveLiveMonitor):
     snapshot ذخیره‌شده را هر interval ثانیه می‌خواند و نمایش می‌دهد —
     برای بررسی بصری صحت داده‌های ذخیره‌شده. هیچ فراخوانی TSETMC انجام
     نمی‌شود و چیزی در بانک نوشته نمی‌شود (فقط خوانده می‌شود).
+
+    اگر date_jalali داده شود، فقط آخرین snapshot آن تاریخ معاملاتی خوانده
+    می‌شود (مرور یک روز خاص).
     """
 
-    def __init__(self, cfg, symbol, interval=5, normalizer=None, storage=None):
+    def __init__(self, cfg, symbol, interval=5, normalizer=None, storage=None,
+                 date_jalali: str | None = None):
         super().__init__(cfg, mode="db", symbol=symbol,
                         interval=interval, normalizer=normalizer, storage=storage)
+        self._db_date = date_jalali or ""
 
     def start(self):
         self._thread = threading.Thread(target=self._loop_db, daemon=True,
@@ -631,7 +636,15 @@ class DBLiveMonitor(AdaptiveLiveMonitor):
         while not self._stop.is_set():
             try:
                 if self.storage:
-                    row = self.storage.get_last_snapshot(self.symbol)
+                    if self._db_date:
+                        # آخرین snapshot یک تاریخ خاص
+                        row = self.storage.conn.execute(
+                            "SELECT * FROM snapshots WHERE symbol=? AND date_jalali=? "
+                            "ORDER BY timestamp DESC LIMIT 1",
+                            (self.symbol, self._db_date)).fetchone()
+                        row = dict(row) if row else None
+                    else:
+                        row = self.storage.get_last_snapshot(self.symbol)
                     if row:
                         snap = MarketSnapshot.from_flat_dict(row)
                         # معاملات این لحظه
@@ -693,9 +706,10 @@ def switch_mode(mode: str, symbol: str | None = None, date: str | None = None,
     cfg = load_cfg()
     symbol = symbol or _default_symbol()
     with _switch_lock:
-        # اگر همین حالت + نماد فعالی است، نیاز به تعویض نیست (مگر sim با تاریخ متفاوت)
+        # اگر همین حالت + نماد فعالی است، نیاز به تعویض نیست
+        # (مگر sim یا db با تاریخ متفاوت)
         if (_current_mode == mode and _current_symbol == symbol and MONITOR is not None
-                and not (mode == "sim" and date)):
+                and not ((mode == "sim" or mode == "db") and date)):
             return {"ok": True, "mode": mode, "symbol": symbol, "switched": False}
 
         # توقف مانیتور قبلی
@@ -744,7 +758,8 @@ def switch_mode(mode: str, symbol: str | None = None, date: str | None = None,
                 normalizer = AdaptiveNormalizer(storage, cfg)
                 MONITOR = DBLiveMonitor(
                     cfg, symbol=symbol, interval=5,
-                    normalizer=normalizer, storage=storage)
+                    normalizer=normalizer, storage=storage,
+                    date_jalali=date)
                 _current_storage = storage
 
             elif mode == "sim":
@@ -816,6 +831,9 @@ def _index_page_html() -> str:
   .sim  {{ background: #6a1b9a; }}
   .cur  {{ font-size: 13px; color: #888; margin-top: 14px; text-align: center; }}
   .cur b {{ color: #1a237e; }}
+  .hint {{ font-size: 12px; color: #666; margin: -8px 0 18px; padding: 8px 12px;
+           background: #f0f4ff; border-radius: 8px; border-right: 3px solid #1565c0; }}
+  .hint b {{ color: #1565c0; }}
 </style>
 </head>
 <body>
@@ -824,10 +842,15 @@ def _index_page_html() -> str:
   <div class="sub">یک سرور، سه حالت — حالت را از مسیر انتخاب کنید.</div>
   <div class="card">
     <label>نماد</label>
-    <select id="symbol" onchange="updateLinks()">
+    <select id="symbol" onchange="loadDates()">
       <option value="{cur}" selected>— پیش‌فرض: {cur} —</option>
       {opts}
     </select>
+    <label>تاریخ معاملاتی</label>
+    <select id="date" onchange="updateLinks()">
+      <option value="" selected>— آخرین (پیش‌فرض) —</option>
+    </select>
+    <p class="hint">📅 تاریخ فقط برای حالت <b>DB</b> و <b>Sim</b> اعمال می‌شود (Live همیشه زنده است).</p>
     <div class="modes">
       <a class="mode live" id="btn-live" href="/live">
         <span class="ico">📡</span> Live
@@ -835,7 +858,7 @@ def _index_page_html() -> str:
       </a>
       <a class="mode db" id="btn-db" href="/db">
         <span class="ico">💾</span> DB
-        <span class="dsc">آخرین داده از بانک</span>
+        <span class="dsc">آخرین داده از بانک (یا تاریخ انتخابی)</span>
       </a>
       <a class="mode sim" id="btn-sim" href="/sim">
         <span class="ico">▶</span> Sim
@@ -846,12 +869,38 @@ def _index_page_html() -> str:
   </div>
 </div>
 <script>
+function loadDates() {{
+  const s = document.getElementById('symbol').value;
+  const sel = document.getElementById('date');
+  sel.innerHTML = '<option value="" selected>— آخرین (پیش‌فرض) —</option>';
+  fetch('/api/sim/dates?symbol=' + encodeURIComponent(s))
+    .then(r => r.json())
+    .then(dates => {{
+      if (Array.isArray(dates) && dates.length) {{
+        dates.forEach(d => {{
+          const o = document.createElement('option');
+          o.value = d; o.textContent = d;
+          sel.appendChild(o);
+        }});
+      }} else {{
+        const o = document.createElement('option');
+        o.value = ''; o.textContent = '— داده‌ای در بانک نیست —';
+        o.disabled = true;
+        sel.appendChild(o);
+      }}
+      updateLinks();
+    }})
+    .catch(() => {{ updateLinks(); }});
+}}
 function updateLinks() {{
   const s = document.getElementById('symbol').value;
+  const d = document.getElementById('date').value;
+  const dp = d ? '&date=' + encodeURIComponent(d) : '';
   document.getElementById('btn-live').href = '/live?symbol=' + encodeURIComponent(s);
-  document.getElementById('btn-db').href   = '/db?symbol='   + encodeURIComponent(s);
-  document.getElementById('btn-sim').href  = '/sim?symbol='  + encodeURIComponent(s);
+  document.getElementById('btn-db').href   = '/db?symbol='   + encodeURIComponent(s) + dp;
+  document.getElementById('btn-sim').href  = '/sim?symbol='  + encodeURIComponent(s) + dp;
 }}
+loadDates();
 </script>
 </body>
 </html>"""
@@ -885,9 +934,14 @@ def route_live():
 
 @app.route("/db")
 def route_db():
-    """حالت بانک: خواندن لحظه‌ای آخرین داده از بانک."""
+    """حالت بانک: خواندن لحظه‌ای آخرین داده از بانک.
+
+    ?date=Y (اختیاری) → آخرین snapshot آن تاریخ معاملاتی.
+    بدون date → آخرین snapshot کلی.
+    """
     symbol = request.args.get("symbol") or _default_symbol()
-    res = switch_mode("db", symbol)
+    date = request.args.get("date") or ""
+    res = switch_mode("db", symbol, date=date or None)
     if not res.get("ok"):
         return (_index_page_html() + f"<p style='color:#c62828;text-align:center'>"
                 f"خطا: {res.get('message')}</p>"), 500
