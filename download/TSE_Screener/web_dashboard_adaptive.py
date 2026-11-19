@@ -605,6 +605,52 @@ class SimulationAdaptiveMonitor(AdaptiveLiveMonitor):
         }
 
 
+class DBLiveMonitor(AdaptiveLiveMonitor):
+    """حالت بانک: خواندن لحظه‌ای آخرین داده از بانک (بدون TSETMC).
+
+    وقتی run_multi.py در پس‌زمینه داده جمع می‌کند، این داشبورد آخرین
+    snapshot ذخیره‌شده را هر interval ثانیه می‌خواند و نمایش می‌دهد —
+    برای بررسی بصری صحت داده‌های ذخیره‌شده. هیچ فراخوانی TSETMC انجام
+    نمی‌شود و چیزی در بانک نوشته نمی‌شود (فقط خوانده می‌شود).
+    """
+
+    def __init__(self, cfg, symbol, interval=5, normalizer=None, storage=None):
+        super().__init__(cfg, mode="db", symbol=symbol,
+                        interval=interval, normalizer=normalizer, storage=storage)
+
+    def start(self):
+        self._thread = threading.Thread(target=self._loop_db, daemon=True,
+                                         name="db-monitor")
+        self._thread.start()
+
+    def _loop_db(self):
+        """خواندن آخرین snapshot از بانک هر interval ثانیه."""
+        prev: MarketSnapshot | None = None
+        while not self._stop.is_set():
+            try:
+                if self.storage:
+                    row = self.storage.get_last_snapshot(self.symbol)
+                    if row:
+                        snap = MarketSnapshot.from_flat_dict(row)
+                        # معاملات این لحظه
+                        trades: list[Trade] = []
+                        for t in self.storage.get_trades_for_symbol(self.symbol):
+                            if t.get("trade_time") == snap.tehran_time:
+                                trades.append(Trade(
+                                    trade_time=t.get("trade_time", ""),
+                                    trade_price=float(t.get("trade_price") or 0),
+                                    trade_volume=int(t.get("trade_volume") or 0),
+                                    trade_id=t.get("trade_id"),
+                                    aggressor_side=t.get("aggressor_side")))
+                        self._publish(snap, trades)
+                        prev = snap
+            except Exception as e:
+                with self._lock:
+                    self.last_error = f"خطای خواندن از بانک: {e}"
+                    self.last_fetch_time = datetime.now().isoformat(timespec="seconds")
+            self._stop.wait(self.interval)
+
+
 # ---------------------------------------------------------------------------
 # Flask app تازه با مسیرهای تطبیقی + مسیرهای اصلی
 # ---------------------------------------------------------------------------
