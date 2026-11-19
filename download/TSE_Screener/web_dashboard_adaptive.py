@@ -22,6 +22,10 @@ web_dashboard_adaptive.py — Phase 2.1
 from __future__ import annotations
 
 import argparse
+import json
+import threading
+from collections import deque
+from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, jsonify, request
@@ -38,7 +42,13 @@ from early_warning import (
     MarketDataCollector,
     MarketDataStorage,
     AdaptiveNormalizer,
+    MarketSnapshot,
+    Trade,
+    SellPressureDetector,
+    BuyPressureDetector,
+    AlertEngine,
 )
+from early_warning.alert_engine import tier, classify
 
 ROOT = Path(__file__).resolve().parent
 
@@ -215,8 +225,97 @@ _NEW_TICK_RENDER = """    pushScore(d); renderChart(d);
   } catch (e) {"""
 
 
+# Patch D: نوار کنترل شبیه‌سازی (بعد از <div id="err"></div>)
+_OLD_ERR_DIV = '<div id="err"></div>'
+
+_SIM_BAR_HTML = """<div id="err"></div>
+<div id="sim-bar" style="display:none;background:linear-gradient(135deg,#1a237e,#283593);color:#fff;padding:10px 14px;border-radius:10px;margin-bottom:12px;flex-wrap:wrap;gap:10px;align-items:center;font-size:14px">
+  <span style="font-weight:700;font-size:15px">▶ شبیه‌سازی</span>
+  <button id="sim-play-btn" onclick="simToggle()" style="background:rgba(255,255,255,0.2);border:none;color:#fff;padding:7px 14px;border-radius:6px;cursor:pointer;font-weight:700;font-size:14px">⏸ توقف</button>
+  <select id="sim-speed-sel" onchange="simSetSpeed(this.value)" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);color:#fff;padding:6px 8px;border-radius:6px;font-size:14px">
+    <option value="1">۱x</option>
+    <option value="2">۲x</option>
+    <option value="5">۵x</option>
+    <option value="10" selected>۱۰x</option>
+    <option value="20">۲۰x</option>
+    <option value="50">۵۰x</option>
+    <option value="100">۱۰۰x</option>
+  </select>
+  <button onclick="simStep(-10)" style="background:rgba(255,255,255,0.15);border:none;color:#fff;padding:6px 10px;border-radius:6px;cursor:pointer">◀◀ ۱۰-</button>
+  <button onclick="simStep(-1)" style="background:rgba(255,255,255,0.15);border:none;color:#fff;padding:6px 10px;border-radius:6px;cursor:pointer">◀ ۱-</button>
+  <button onclick="simStep(1)" style="background:rgba(255,255,255,0.15);border:none;color:#fff;padding:6px 10px;border-radius:6px;cursor:pointer">۱ ▶</button>
+  <button onclick="simStep(10)" style="background:rgba(255,255,255,0.15);border:none;color:#fff;padding:6px 10px;border-radius:6px;cursor:pointer">۱۰ ▶▶</button>
+  <span id="sim-progress" style="font-size:13px;opacity:0.9"></span>
+  <input type="range" id="sim-seek" min="0" max="100" value="0" oninput="simSeekInput(this.value)" style="flex:1;min-width:180px;accent-color:#fff">
+</div>"""
+
+# Patch E: JS کنترل شبیه‌سازی (بعد از setInterval(tick, 5000))
+_OLD_TICK_END = "setInterval(tick, 5000);"
+
+_SIM_JS = """setInterval(tick, 5000);
+
+// --- کنترل‌های شبیه‌سازی ---
+let _simSeeking = false;
+async function checkSim() {
+  try {
+    const r = await fetch('/api/sim/status', {cache:'no-store'});
+    const d = await r.json();
+    const bar = document.getElementById('sim-bar');
+    if (d.mode === 'simulation') {
+      bar.style.display = 'flex';
+      updateSimBar(d);
+    } else {
+      bar.style.display = 'none';
+    }
+  } catch(e) {}
+}
+function updateSimBar(d) {
+  const prog = document.getElementById('sim-progress');
+  const btn = document.getElementById('sim-play-btn');
+  const spd = document.getElementById('sim-speed-sel');
+  const seek = document.getElementById('sim-seek');
+  const idx = d.index, total = d.total;
+  prog.textContent = N(idx+1) + ' / ' + N(total) + ' — ' + (d.current_time||'—') +
+    ' — ' + (d.playing ? 'پخش' : 'توقف') + ' — ' + N(d.speed,1) + 'x';
+  btn.textContent = d.playing ? '⏸ توقف' : '▶ پخش';
+  if (spd.value != d.speed) spd.value = d.speed;
+  seek.max = Math.max(1, total - 1);
+  if (!_simSeeking) seek.value = idx;
+  const md = document.getElementById('h-mode');
+  if (md) md.textContent = 'شبیه‌سازی: ' + (d.date||'') + ' — ' + N(d.speed,1) + 'x';
+}
+async function simToggle() {
+  try {
+    const r = await fetch('/api/sim/status', {cache:'no-store'});
+    const d = await r.json();
+    if (d.playing) await fetch('/api/sim/pause', {method:'POST'});
+    else await fetch('/api/sim/play', {method:'POST'});
+    checkSim();
+  } catch(e) {}
+}
+async function simSetSpeed(v) {
+  await fetch('/api/sim/speed', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({speed: Number(v)})});
+  checkSim();
+}
+async function simStep(n) {
+  await fetch('/api/sim/step', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({n: n})});
+  checkSim();
+}
+async function simSeekInput(v) {
+  _simSeeking = true;
+  await fetch('/api/sim/seek', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({index: Number(v)})});
+  setTimeout(() => { _simSeeking = false; }, 500);
+  checkSim();
+}
+setInterval(checkSim, 1000);
+checkSim();"""
+
+
 def _build_adaptive_html() -> str:
-    """ساخت HTML تطبیقی با جایگزینی شش بخش از HTML_PAGE اصلی."""
+    """ساخت HTML تطبیقی با جایگزینی بخش‌های HTML_PAGE اصلی."""
     html = orig.HTML_PAGE
     misses = []
     for old, new, label in [
@@ -226,6 +325,8 @@ def _build_adaptive_html() -> str:
         (_OLD_TICK_HEADER, _NEW_TICK_HEADER, "scoreHist"),
         (_OLD_CHART_TAIL, _NEW_CHART_TAIL, "chart-markers"),
         (_OLD_TICK_RENDER, _NEW_TICK_RENDER, "tick-hook"),
+        (_OLD_ERR_DIV, _SIM_BAR_HTML, "sim-bar"),
+        (_OLD_TICK_END, _SIM_JS, "sim-js"),
     ]:
         if old in html:
             html = html.replace(old, new, 1)
@@ -316,6 +417,194 @@ class AdaptiveLiveMonitor(LiveMonitor):
         return data
 
 
+# ===========================================================================
+# فاز شبیه‌سازی — پخش داده‌های ذخیره‌شده در بانک با کنترل سرعت و پرش
+# ===========================================================================
+
+class SimulationAdaptiveMonitor(AdaptiveLiveMonitor):
+    """حالت شبیه‌سازی: پخش snapshotهای ذخیره‌شده در بانک با کنترل تعاملی.
+
+    به‌جای دریافت لایو از TSETMC، snapshotهای یک نماد + یک تاریخ از بانک
+    SQLite بارگذاری می‌شوند. موتورهای تحلیلی یک‌بار روی همه اجرا می‌شوند
+    (pre-compute) تا پرش جلو/عقب فوری باشد. سپس با سرعت قابل‌تنظیم پخش
+    می‌شوند با کنترل play/pause/step/seek.
+    """
+
+    def __init__(self, cfg, symbol, date_jalali, db_path,
+                 time_speed=10.0, interval=1, normalizer=None, storage=None):
+        super().__init__(cfg, mode="simulation", symbol=symbol,
+                        interval=interval, normalizer=normalizer, storage=storage)
+        self._sim_date = date_jalali
+        self._sim_speed = float(time_speed)
+        self._sim_playing = True
+        self._sim_index = 0
+        self._sim_snaps: list[MarketSnapshot] = []
+        self._sim_results: list = []       # (sell_res, buy_res, combined)
+        self._sim_trades_by_time: dict[str, list[Trade]] = {}
+        self._load_and_precompute()
+
+    def _load_and_precompute(self):
+        """بارگذاری snapshotهای نماد + تاریخ از بانک و pre-compute موتورها."""
+        # پشتیبانی از هر دو فرمت تاریخ (slash و dash)
+        dates = {self._sim_date}
+        dates.add(self._sim_date.replace("/", "-"))
+        dates.add(self._sim_date.replace("-", "/"))
+
+        rows = self.storage.get_snapshots_for_symbol(self.symbol) if self.storage else []
+        snaps = [MarketSnapshot.from_flat_dict(r) for r in rows
+                 if r.get("date_jalali") in dates]
+        snaps.sort(key=lambda s: s.timestamp)
+        self._sim_snaps = snaps
+
+        # بارگذاری معاملات (گروه‌بندی بر اساس trade_time)
+        if self.storage:
+            trade_rows = self.storage.get_trades_for_symbol(self.symbol)
+            for t in trade_rows:
+                tt = t.get("trade_time", "")
+                if tt:
+                    self._sim_trades_by_time.setdefault(tt, []).append(
+                        Trade(trade_time=tt,
+                              trade_price=float(t.get("trade_price") or 0),
+                              trade_volume=int(t.get("trade_volume") or 0),
+                              trade_id=t.get("trade_id"),
+                              aggressor_side=t.get("aggressor_side")))
+
+        # pre-compute: اجرای موتورها روی همه‌ی snapshotها (detectorهای تازه)
+        sp_det = SellPressureDetector(self.cfg, normalizer=self.normalizer)
+        buy_det = BuyPressureDetector(self.cfg, normalizer=self.normalizer)
+        alert_eng = AlertEngine(self.cfg)
+        prev = None
+        hist: list[MarketSnapshot] = []
+        for snap in snaps:
+            sp = sp_det.evaluate(snap, prev)
+            buy = buy_det.evaluate(snap, prev, hist)
+            combined = alert_eng.evaluate(sp, buy) if (sp and buy) else None
+            self._sim_results.append((sp, buy, combined))
+            # ثبت raw_values برای نرمال‌سازی تطبیقی
+            if self.normalizer:
+                if sp:
+                    self.normalizer.record_factors(snap.symbol, "sell", sp.factors,
+                                                   date_jalali=self._sim_date)
+                if buy:
+                    self.normalizer.record_factors(snap.symbol, "buy", buy.factors,
+                                                   date_jalali=self._sim_date)
+            prev = snap
+            hist.append(snap)
+
+        print(f"  شبیه‌سازی: {len(snaps)} نمونه برای «{self.symbol}» در تاریخ {self._sim_date}")
+
+        # انتشار اولین نمونه برای نمایش فوری
+        if snaps:
+            self._publish_sim_rebuild()
+
+    def start(self):
+        """شروع حلقه‌ی پخش در پس‌زمینه."""
+        self._thread = threading.Thread(target=self._loop_sim, daemon=True,
+                                         name="sim-monitor")
+        self._thread.start()
+
+    def _loop_sim(self):
+        """حلقه‌ی پخش: پیشبرد index بر اساس سرعت و وضعیت play/pause."""
+        while not self._stop.is_set():
+            if self._sim_playing and self._sim_index < len(self._sim_snaps) - 1:
+                self._sim_index += 1
+                self._publish_sim_forward()
+            wait = self.interval / max(self._sim_speed, 0.1)
+            self._stop.wait(wait)
+
+    def _publish_sim_forward(self):
+        """پیشروی طبیعی: فقط snapshot جاری را به history اضافه کن."""
+        idx = self._sim_index
+        if idx >= len(self._sim_snaps):
+            return
+        snap = self._sim_snaps[idx]
+        trades = self._sim_trades_by_time.get(snap.tehran_time, [])
+        with self._lock:
+            self.history.append(snap)
+            for tr in trades:
+                self.recent_trades.append(tr)
+            self.last_fetch_time = datetime.now().isoformat(timespec="seconds")
+            self.last_error = ""
+
+    def _publish_sim_rebuild(self):
+        """پس از پرش: history را تا index فعلی بازسازی کن."""
+        idx = self._sim_index
+        if idx >= len(self._sim_snaps):
+            return
+        with self._lock:
+            self.history.clear()
+            start = max(0, idx - 299)
+            for s in self._sim_snaps[start:idx + 1]:
+                self.history.append(s)
+            snap = self._sim_snaps[idx]
+            trades = self._sim_trades_by_time.get(snap.tehran_time, [])
+            self.recent_trades.clear()
+            for tr in trades:
+                self.recent_trades.append(tr)
+            self.last_fetch_time = datetime.now().isoformat(timespec="seconds")
+            self.last_error = ""
+        # در شبیه‌سازی چیزی در بانک نوشته نمی‌شود (فقط خوانده می‌شود)
+
+    def _engine_output(self, hist):
+        """استفاده از نتایج pre-computed به‌جای اجرای مجدد موتورها."""
+        if not self._sim_results or self._sim_index >= len(self._sim_results):
+            return {"available": False}
+        idx = self._sim_index
+        sp, buy, combined = self._sim_results[idx]
+        # امتیاز تجمعی = مجموع امتیازها تا این موقعیت
+        cum_sell = sum(r[0].total_score for r in self._sim_results[:idx + 1] if r[0])
+        cum_buy = sum(r[1].total_score for r in self._sim_results[:idx + 1] if r[1])
+        return {
+            "available": True,
+            "sell": sp.to_dict() if sp else None,
+            "buy": buy.to_dict() if buy else None,
+            "combined": combined.to_dict() if combined else None,
+            "sell_tier": tier(sp.total_score) if sp else "نامشخص",
+            "buy_tier": tier(buy.total_score) if buy else "نامشخص",
+            "classification": classify(
+                sp.total_score if sp else None,
+                buy.total_score if buy else None,
+            ),
+            "cumulative_sell_score": round(cum_sell, 1),
+            "cumulative_buy_score": round(cum_buy, 1),
+            "cumulative_samples": idx + 1,
+        }
+
+    # --- کنترل‌های تعاملی ---
+
+    def sim_play(self):
+        self._sim_playing = True
+
+    def sim_pause(self):
+        self._sim_playing = False
+
+    def sim_set_speed(self, speed):
+        self._sim_speed = max(0.1, float(speed))
+
+    def sim_step(self, n):
+        """پرش n نمونه جلو (مثبت) یا عقب (منفی)."""
+        self._sim_index = max(0, min(len(self._sim_snaps) - 1, self._sim_index + n))
+        self._publish_sim_rebuild()
+
+    def sim_seek(self, idx):
+        """پرش مستقیم به موقعیت idx."""
+        self._sim_index = max(0, min(len(self._sim_snaps) - 1, int(idx)))
+        self._publish_sim_rebuild()
+
+    def sim_status(self) -> dict:
+        return {
+            "mode": "simulation",
+            "symbol": self.symbol,
+            "date": self._sim_date,
+            "index": self._sim_index,
+            "total": len(self._sim_snaps),
+            "playing": self._sim_playing,
+            "speed": self._sim_speed,
+            "current_time": self._sim_snaps[self._sim_index].tehran_time
+                            if self._sim_snaps and self._sim_index < len(self._sim_snaps) else "",
+        }
+
+
 # ---------------------------------------------------------------------------
 # Flask app تازه با مسیرهای تطبیقی + مسیرهای اصلی
 # ---------------------------------------------------------------------------
@@ -348,6 +637,237 @@ def range_rules_save():
     return orig.range_rules_save()
 
 
+# ===========================================================================
+# مسیرهای فاز شبیه‌سازی
+# ===========================================================================
+
+SYMBOLS_PATH = ROOT / "config" / "symbols.json"
+
+
+def _load_symbols_list() -> list[dict]:
+    """بارگذاری لیست نمادها از config/symbols.json."""
+    try:
+        with open(SYMBOLS_PATH, encoding="utf-8") as f:
+            return json.load(f).get("symbols", [])
+    except Exception:
+        return []
+
+
+@app.route("/sim")
+def sim_setup():
+    """فرم انتخاب نماد، تاریخ و سرعت برای شروع شبیه‌سازی."""
+    symbols = _load_symbols_list()
+    opts = "\n".join(
+        f'<option value="{s["name"]}">{s["name"]} — {s.get("market_label", "")}</option>'
+        for s in symbols
+    )
+    return f"""<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>شبیه‌سازی — TSE Early Warning</title>
+<style>
+  body {{ font-family: 'Vazirmatn', Tahoma, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }}
+  .card {{ max-width: 560px; margin: 40px auto; background: #fff; border-radius: 12px;
+           padding: 28px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }}
+  h1 {{ font-size: 22px; color: #1a237e; margin: 0 0 6px; }}
+  .sub {{ color: #666; font-size: 14px; margin-bottom: 24px; }}
+  label {{ display: block; font-size: 14px; font-weight: 600; margin: 16px 0 6px; color: #333; }}
+  select, input {{ width: 100%; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px;
+                   font-size: 15px; box-sizing: border-box; }}
+  button {{ margin-top: 24px; width: 100%; padding: 14px; background: #1a237e; color: #fff;
+            border: none; border-radius: 8px; font-size: 17px; font-weight: 700; cursor: pointer; }}
+  button:hover {{ background: #283593; }}
+  button:disabled {{ background: #999; }}
+  .hint {{ font-size: 13px; color: #888; margin-top: 12px; }}
+  #msg {{ margin-top: 12px; font-size: 14px; }}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>▶ شبیه‌سازی روز معاملاتی</h1>
+  <div class="sub">داده‌های ذخیره‌شده در بانک را با سرعت دلخواه پخش کنید — بدون نیاز به بازار باز.</div>
+
+  <label>نماد</label>
+  <select id="symbol" onchange="loadDates()">
+    <option value="">— انتخاب کنید —</option>
+    {opts}
+  </select>
+
+  <label>تاریخ (روز معاملاتی ذخیره‌شده)</label>
+  <select id="date" disabled>
+    <option value="">— ابتدا نماد را انتخاب کنید —</option>
+  </select>
+
+  <label>سرعت گذر زمان (برابر)</label>
+  <input type="number" id="speed" value="10" min="0.5" max="200" step="0.5">
+  <div class="hint">مثلاً ۱۰ یعنی ۱۰ برابر سریع‌تر از زمان واقعی. کل ۳.۵ ساعت در ~۲۱ دقیقه.</div>
+
+  <button id="startBtn" onclick="startSim()" disabled>شروع شبیه‌سازی ▶</button>
+  <div id="msg"></div>
+</div>
+<script>
+async function loadDates() {{
+  const sym = document.getElementById('symbol').value;
+  const dateSel = document.getElementById('date');
+  const btn = document.getElementById('startBtn');
+  dateSel.innerHTML = '<option value="">— در حال بارگذاری... —</option>';
+  dateSel.disabled = true;
+  btn.disabled = true;
+  if (!sym) {{
+    dateSel.innerHTML = '<option value="">— ابتدا نماد را انتخاب کنید —</option>';
+    return;
+  }}
+  try {{
+    const r = await fetch('/api/sim/dates?symbol=' + encodeURIComponent(sym));
+    const dates = await r.json();
+    if (!dates.length) {{
+      dateSel.innerHTML = '<option value="">— داده‌ای برای این نماد نیست —</option>';
+      document.getElementById('msg').textContent = 'برای این نماد snapshotی در بانک نیست. ابتدا با run_multi.py داده جمع کنید.';
+      return;
+    }}
+    dateSel.innerHTML = dates.map(d => '<option value="' + d + '">' + d + '</option>').join('');
+    dateSel.disabled = false;
+    btn.disabled = false;
+    document.getElementById('msg').textContent = '';
+  }} catch(e) {{
+    dateSel.innerHTML = '<option value="">— خطا —</option>';
+  }}
+}}
+async function startSim() {{
+  const symbol = document.getElementById('symbol').value;
+  const date = document.getElementById('date').value;
+  const speed = parseFloat(document.getElementById('speed').value) || 10;
+  const msg = document.getElementById('msg');
+  msg.textContent = 'در حال بارگذاری...';
+  msg.style.color = '#666';
+  try {{
+    const r = await fetch('/api/sim/start', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{symbol, date, speed}})
+    }});
+    const d = await r.json();
+    if (d.ok) {{
+      window.location.href = '/';
+    }} else {{
+      msg.textContent = d.message || 'خطا در شروع';
+      msg.style.color = '#c62828';
+    }}
+  }} catch(e) {{
+    msg.textContent = 'خطا: ' + e.message;
+    msg.style.color = '#c62828';
+  }}
+}}
+</script>
+</body>
+</html>"""
+
+
+@app.route("/api/sim/dates")
+def sim_dates():
+    """لیست تاریخ‌های موجود برای یک نماد در بانک."""
+    symbol = request.args.get("symbol", "")
+    db_path = ROOT / "data" / "multi" / f"{symbol}.sqlite"
+    if not db_path.exists():
+        return jsonify([])
+    try:
+        storage = MarketDataStorage(db_path)
+        rows = storage.conn.execute(
+            "SELECT DISTINCT date_jalali FROM snapshots WHERE symbol=? "
+            "ORDER BY date_jalali DESC", (symbol,)).fetchall()
+        storage.close()
+        return jsonify([r[0] for r in rows])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/sim/start", methods=["POST"])
+def sim_start():
+    """شروع شبیه‌سازی: ساخت SimulationAdaptiveMonitor با پارامترهای کاربر."""
+    global MONITOR
+    data = request.get_json(force=True)
+    symbol = data.get("symbol", "")
+    date_jalali = data.get("date", "")
+    speed = float(data.get("speed", 10))
+    if not symbol or not date_jalali:
+        return jsonify({"ok": False, "message": "نماد و تاریخ الزامی است"}), 400
+
+    db_path = ROOT / "data" / "multi" / f"{symbol}.sqlite"
+    if not db_path.exists():
+        return jsonify({"ok": False, "message": f"بانک {db_path.name} وجود ندارد"}), 404
+
+    # توقف مانیتور قبلی
+    if MONITOR is not None:
+        try:
+            MONITOR.stop()
+        except Exception:
+            pass
+
+    try:
+        cfg = load_cfg()
+        storage = MarketDataStorage(db_path)
+        normalizer = AdaptiveNormalizer(storage, cfg)
+        MONITOR = SimulationAdaptiveMonitor(
+            cfg, symbol=symbol, date_jalali=date_jalali, db_path=db_path,
+            time_speed=speed, normalizer=normalizer, storage=storage,
+        )
+        MONITOR.start()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "message": str(e)}), 500
+
+
+@app.route("/api/sim/play", methods=["POST"])
+def sim_play_route():
+    if MONITOR and isinstance(MONITOR, SimulationAdaptiveMonitor):
+        MONITOR.sim_play()
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "message": "شبیه‌سازی فعال نیست"}), 400
+
+
+@app.route("/api/sim/pause", methods=["POST"])
+def sim_pause_route():
+    if MONITOR and isinstance(MONITOR, SimulationAdaptiveMonitor):
+        MONITOR.sim_pause()
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "message": "شبیه‌سازی فعال نیست"}), 400
+
+
+@app.route("/api/sim/speed", methods=["POST"])
+def sim_speed_route():
+    if MONITOR and isinstance(MONITOR, SimulationAdaptiveMonitor):
+        speed = float(request.get_json(force=True).get("speed", 10))
+        MONITOR.sim_set_speed(speed)
+        return jsonify({"ok": True, "speed": speed})
+    return jsonify({"ok": False, "message": "شبیه‌سازی فعال نیست"}), 400
+
+
+@app.route("/api/sim/step", methods=["POST"])
+def sim_step_route():
+    if MONITOR and isinstance(MONITOR, SimulationAdaptiveMonitor):
+        n = int(request.get_json(force=True).get("n", 10))
+        MONITOR.sim_step(n)
+        return jsonify({"ok": True, "index": MONITOR._sim_index})
+    return jsonify({"ok": False, "message": "شبیه‌سازی فعال نیست"}), 400
+
+
+@app.route("/api/sim/seek", methods=["POST"])
+def sim_seek_route():
+    if MONITOR and isinstance(MONITOR, SimulationAdaptiveMonitor):
+        idx = int(request.get_json(force=True).get("index", 0))
+        MONITOR.sim_seek(idx)
+        return jsonify({"ok": True, "index": MONITOR._sim_index})
+    return jsonify({"ok": False, "message": "شبیه‌سازی فعال نیست"}), 400
+
+
+@app.route("/api/sim/status")
+def sim_status_route():
+    if MONITOR and isinstance(MONITOR, SimulationAdaptiveMonitor):
+        return jsonify(MONITOR.sim_status())
+    return jsonify({"mode": "not_simulation"})
+
+
 # ---------------------------------------------------------------------------
 # main — مشابه نسخه اصلی اما با AdaptiveLiveMonitor
 # ---------------------------------------------------------------------------
@@ -357,14 +877,18 @@ def main():
     ap = argparse.ArgumentParser(
         description="داشبورد زنده تطبیقی (Phase 2.1) — نمایش ستون آستانه تطبیقی"
     )
-    ap.add_argument("--mode", choices=["live", "demo"], default="live",
-                    help="حالت منبع داده: live=TSETMC واقعی، demo=شبیه‌ساز آفلاین")
+    ap.add_argument("--mode", choices=["live", "demo", "simulation"], default="live",
+                    help="حالت: live=TSETMC واقعی، demo=شبیه‌ساز آفلاین، simulation=پخش از بانک")
     ap.add_argument("--scenario", choices=["normal", "sell_pressure", "accumulation", "mixed"],
                     default="sell_pressure", help="سناریوی شبیه‌ساز در حالت demo")
     ap.add_argument("--symbol", default=None, help="نام نماد (پیش‌فرض: پیکربندی)")
     ap.add_argument("--ins-code", default=None, help="کد TSETMC نماد")
     ap.add_argument("--interval", type=int, default=None, help="فاصله نمونه‌برداری (ثانیه)")
     ap.add_argument("--samples", type=int, default=226, help="تعداد نمونه شبیه‌ساز (حالت demo)")
+    ap.add_argument("--date", default=None,
+                    help="تاریخ شمسی برای شبیه‌سازی (مثلاً 1404/08/28) — با --mode simulation")
+    ap.add_argument("--time-speed", type=float, default=10.0,
+                    help="سرعت گذر زمان در شبیه‌سازی (مثلاً 10 = ۱۰ برابر) — با --mode simulation")
     ap.add_argument("--db", default=None,
                     help="مسیر فایل SQLite (پیش‌فرض: data/multi/{symbol}.sqlite اگر نماد داده شده)")
     ap.add_argument("--port", type=int, default=8052)
@@ -394,42 +918,77 @@ def main():
         else:
             print(f"نماد '{args.symbol}' پیدا نشد - از کد پیکربندی استفاده می‌شود.")
 
-    sym_final = args.symbol or cfg.get("test_symbol", {}).get("name", "")
-    ins_final = args.ins_code or cfg.get("test_symbol", {}).get("ins_code", "")
     live_storage = None
     live_normalizer = None
-    if args.mode == "live" and sym_final:
-        db_path = ROOT / args.db
-        try:
-            live_storage = MarketDataStorage(db_path)
-            load_price_range_live(cfg, sym_final, ins_final, storage=live_storage)
-            live_normalizer = AdaptiveNormalizer(live_storage, cfg)
-        except Exception as e:
-            print(f"  ⚠ خطا در ایجاد storage: {e}")
-            print(f"  ⚠ daily_params/score_history ذخیره نمی‌شود اما داشبورد ادامه می‌دهد.")
-            load_price_range_live(cfg, sym_final, ins_final)
 
-    MONITOR = AdaptiveLiveMonitor(
-        cfg,
-        mode=args.mode,
-        symbol=args.symbol,
-        ins_code=args.ins_code,
-        interval=args.interval,
-        scenario=args.scenario,
-        samples=args.samples,
-        normalizer=live_normalizer,
-        storage=live_storage,
-    )
-    MONITOR.start()
+    if args.mode == "simulation":
+        # حالت شبیه‌سازی: اگر --symbol و --date داده شده، خودکار شروع کن؛
+        # در غیر این صورت، کاربر از صفحه‌ی /sim استفاده می‌کند.
+        if args.symbol and args.date:
+            db_path = ROOT / args.db
+            if db_path.exists():
+                try:
+                    live_storage = MarketDataStorage(db_path)
+                    live_normalizer = AdaptiveNormalizer(live_storage, cfg)
+                    MONITOR = SimulationAdaptiveMonitor(
+                        cfg, symbol=args.symbol, date_jalali=args.date,
+                        db_path=db_path, time_speed=args.time_speed,
+                        normalizer=live_normalizer, storage=live_storage,
+                    )
+                    MONITOR.start()
+                except Exception as e:
+                    print(f"  ⚠ خطا در شروع شبیه‌سازی: {e}")
+                    print(f"  → از صفحه‌ی /sim برای شروع دستی استفاده کنید.")
+            else:
+                print(f"  ⚠ بانک {db_path} وجود ندارد.")
+                print(f"  → از صفحه‌ی /sim برای انتخاب نماد/تاریخ استفاده کنید.")
+        else:
+            print("  → بدون --symbol و --date: از صفحه‌ی /sim برای شروع شبیه‌سازی استفاده کنید.")
+    else:
+        sym_final = args.symbol or cfg.get("test_symbol", {}).get("name", "")
+        ins_final = args.ins_code or cfg.get("test_symbol", {}).get("ins_code", "")
+        if args.mode == "live" and sym_final:
+            db_path = ROOT / args.db
+            try:
+                live_storage = MarketDataStorage(db_path)
+                load_price_range_live(cfg, sym_final, ins_final, storage=live_storage)
+                live_normalizer = AdaptiveNormalizer(live_storage, cfg)
+            except Exception as e:
+                print(f"  ⚠ خطا در ایجاد storage: {e}")
+                print(f"  ⚠ daily_params/score_history ذخیره نمی‌شود اما داشبورد ادامه می‌دهد.")
+                load_price_range_live(cfg, sym_final, ins_final)
 
-    src = "TSETMC زنده" if args.mode == "live" else f"شبیه‌ساز (سناریو: {args.scenario})"
+        MONITOR = AdaptiveLiveMonitor(
+            cfg,
+            mode=args.mode,
+            symbol=args.symbol,
+            ins_code=args.ins_code,
+            interval=args.interval,
+            scenario=args.scenario,
+            samples=args.samples,
+            normalizer=live_normalizer,
+            storage=live_storage,
+        )
+        MONITOR.start()
+
+    src = ("TSETMC زنده" if args.mode == "live"
+           else f"شبیه‌ساز (سناریو: {args.scenario})" if args.mode == "demo"
+           else "شبیه‌سازی (پخش از بانک)")
     print("=" * 60)
     print("داشبورد رصد زنده تطبیقی — Phase 2.1 (ستون آستانه تطبیقی)")
     print(f"منبع داده : {src}")
-    print(f"نماد      : {MONITOR.symbol} (کد: {MONITOR.ins_code})")
-    print(f"نمونه‌برداری: هر {MONITOR.interval} ثانیه")
+    if MONITOR:
+        print(f"نماد      : {MONITOR.symbol}")
+    if args.mode == "simulation" and MONITOR:
+        sm = MONITOR
+        print(f"تاریخ     : {sm._sim_date}")
+        print(f"نمونه‌ها   : {len(sm._sim_snaps)} (سرعت {sm._sim_speed}x)")
+    elif MONITOR:
+        print(f"نمونه‌برداری: هر {MONITOR.interval} ثانیه")
+    if args.mode == "simulation":
+        print(f"صفحه‌ی انتخاب: http://localhost:{args.port}/sim")
     if live_storage:
-        print(f"بانک       : {ROOT / args.db} (daily_params + score_history)")
+        print(f"بانک       : {ROOT / args.db}")
     adp = cfg.get("adaptive", {})
     status = "فعال" if adp.get("enabled") else "غیرفعال (fallback ثابت)"
     print(f"adaptive  : {status} (min_samples={adp.get('min_samples',50)}, percentile={adp.get('percentile',90)})")
