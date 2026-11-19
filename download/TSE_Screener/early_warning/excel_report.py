@@ -194,17 +194,6 @@ class ExcelReportGenerator:
             ws.cell(row=row, column=5, value="قیمت پایانی:").font = _body_font()
             ws.cell(row=row, column=6, value=snapshots[-1].close_price).font = _body_font()
 
-            # درصد نوسان قیمت (نسبت به قیمت دیروز) — مشابه شیت Snapshots
-            last_snap = snapshots[-1]
-            yest = last_snap.yesterday_price
-            pct_last_eod = round((last_snap.last_price - yest) / yest * 100, 2) if yest else None
-            pct_close_eod = round((last_snap.close_price - yest) / yest * 100, 2) if yest else None
-            row = 6
-            ws.cell(row=row, column=1, value="٪ نوسان لحظه‌ای:").font = _body_font()
-            ws.cell(row=row, column=2, value=pct_last_eod).font = _body_font()
-            ws.cell(row=row, column=3, value="٪ نوسان پایانی:").font = _body_font()
-            ws.cell(row=row, column=4, value=pct_close_eod).font = _body_font()
-
             # امتیاز فشار فروش
             row = 7
             ws.merge_cells(start_row=row, end_row=row+1, start_column=1, end_column=1)
@@ -400,7 +389,10 @@ class ExcelReportGenerator:
             ws.cell(row=data_start, column=1, value="نمونه").font = _header_font()
             ws.cell(row=data_start, column=2, value="فشار فروش").font = _header_font()
             ws.cell(row=data_start, column=3, value="جمع‌آوری").font = _header_font()
-            for col in (1, 2, 3):
+            # درصد نوسان قیمت (نسبت به قیمت دیروز) — مشابه شیت Snapshots (در انتهای جدول)
+            ws.cell(row=data_start, column=4, value="٪ نوسان لحظه‌ای").font = _header_font()
+            ws.cell(row=data_start, column=5, value="٪ نوسان پایانی").font = _header_font()
+            for col in (1, 2, 3, 4, 5):
                 ws.cell(row=data_start, column=col).fill = PatternFill("solid", fgColor=Colors.HEADER_BG)
                 ws.cell(row=data_start, column=col).font = _header_font()
                 ws.cell(row=data_start, column=col).alignment = Alignment(horizontal="center")
@@ -409,6 +401,15 @@ class ExcelReportGenerator:
                 ws.cell(row=data_start + i, column=1, value=i)
                 ws.cell(row=data_start + i, column=2, value=round(sp.total_score, 1))
                 ws.cell(row=data_start + i, column=3, value=round(acc.total_score, 1))
+                # snapshot متناظر با این نمونه (برای محاسبه درصد نوسان)
+                snap = snapshots[i - 1] if i - 1 < len(snapshots) else None
+                yest = snap.yesterday_price if snap else 0
+                pct_last = (round((snap.last_price - yest) / yest * 100, 2)
+                            if snap and yest else None)
+                pct_close = (round((snap.close_price - yest) / yest * 100, 2)
+                             if snap and yest else None)
+                ws.cell(row=data_start + i, column=4, value=pct_last)
+                ws.cell(row=data_start + i, column=5, value=pct_close)
 
             # ساخت نمودار خطی
             chart = LineChart()
@@ -448,12 +449,12 @@ class ExcelReportGenerator:
         # هدر جدول
         headers = [
             "زمان",
-            # درصد نوسان قیمت (نسبت به قیمت دیروز) — مشابه شیت Snapshots
-            "٪ نوسان لحظه‌ای", "٪ نوسان پایانی",
             "ضعف قدرت خریدار (۲۰)", "خروج پول حقیقی (۲۰)",
             "برتری سرانه فروش (۱۵)", "فاصله منفی آخرین-پایانی (۱۵)",
             "افزایش سرعت عرضه (۱۵)", "تخلیه تقاضا/کف روز (۱۵)",
-            "مجموع", "سطح"
+            "مجموع", "سطح",
+            # درصد نوسان قیمت (نسبت به قیمت دیروز) — مشابه شیت Snapshots (در انتهای جدول)
+            "٪ نوسان لحظه‌ای", "٪ نوسان پایانی",
         ]
         for i, h in enumerate(headers, 1):
             c = ws.cell(row=3, column=i, value=h)
@@ -464,7 +465,7 @@ class ExcelReportGenerator:
         ws.row_dimensions[3].height = 38
 
         # عرض ستون‌ها
-        widths = [12, 9, 9, 16, 16, 16, 16, 16, 16, 10, 18]
+        widths = [12, 16, 16, 16, 16, 16, 16, 10, 18, 9, 9]
         for i, w in enumerate(widths, 1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -481,7 +482,6 @@ class ExcelReportGenerator:
                          if snap and yest else None)
             row_data = [
                 sp.snapshot_time,
-                pct_last, pct_close,
                 round(factors[0].score, 1),
                 round(factors[1].score, 1),
                 round(factors[2].score, 1),
@@ -490,15 +490,16 @@ class ExcelReportGenerator:
                 round(factors[5].score, 1),
                 round(sp.total_score, 1),
                 sp.level,
+                pct_last, pct_close,
             ]
             for j, v in enumerate(row_data, 1):
                 c = ws.cell(row=r, column=j, value=v)
                 c.font = _body_font()
                 c.alignment = Alignment(horizontal="center", vertical="center")
                 c.border = _border()
-                # رنگ‌دهی به ستون‌های شاخص (ستون‌های ۴ تا ۹)
-                if 4 <= j <= 9 and factors:
-                    f = factors[j - 4]
+                # رنگ‌دهی به ستون‌های شاخص (ستون‌های ۲ تا ۷)
+                if 2 <= j <= 7 and factors:
+                    f = factors[j - 2]
                     if f.normalized >= 0.66:
                         c.fill = PatternFill("solid", fgColor=Colors.DANGER)
                     elif f.normalized >= 0.33:
@@ -506,11 +507,11 @@ class ExcelReportGenerator:
                     else:
                         c.fill = PatternFill("solid", fgColor=Colors.NORMAL)
                 # رنگ مجموع
-                if j == 10:
+                if j == 8:
                     c.fill = PatternFill("solid", fgColor=_score_color(sp.total_score))
                     c.font = Font(name="B Nazanin", size=11, bold=True)
                 # رنگ سطح
-                if j == 11:
+                if j == 9:
                     c.fill = PatternFill("solid", fgColor=_score_color(sp.total_score))
 
         # نمودار ستونی برای شاخص‌ها (آخرین نمونه)
@@ -566,12 +567,12 @@ class ExcelReportGenerator:
 
         headers = [
             "زمان",
-            # درصد نوسان قیمت (نسبت به قیمت دیروز) — مشابه شیت Snapshots
-            "٪ نوسان لحظه‌ای", "٪ نوسان پایانی",
             "قدرت خرید حقیقی (۲۰)", "ورود پول حقیقی (۲۰)",
             "برتری تعداد خریداران (۱۰)", "جذب عرضه/ماندگاری (۲۰)",
             "مقاومت قیمت (۲۰)", "تداوم خرید (۱۰)",
-            "مجموع", "سطح"
+            "مجموع", "سطح",
+            # درصد نوسان قیمت (نسبت به قیمت دیروز) — مشابه شیت Snapshots (در انتهای جدول)
+            "٪ نوسان لحظه‌ای", "٪ نوسان پایانی",
         ]
         for i, h in enumerate(headers, 1):
             c = ws.cell(row=3, column=i, value=h)
@@ -581,7 +582,7 @@ class ExcelReportGenerator:
             c.border = _border()
         ws.row_dimensions[3].height = 38
 
-        widths = [12, 9, 9, 18, 18, 18, 18, 18, 14, 10, 22]
+        widths = [12, 18, 18, 18, 18, 18, 14, 10, 22, 9, 9]
         for i, w in enumerate(widths, 1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -597,7 +598,6 @@ class ExcelReportGenerator:
                          if snap and yest else None)
             row_data = [
                 acc.snapshot_time,
-                pct_last, pct_close,
                 round(factors[0].score, 1),
                 round(factors[1].score, 1),
                 round(factors[2].score, 1),
@@ -606,24 +606,25 @@ class ExcelReportGenerator:
                 round(factors[5].score, 1),
                 round(acc.total_score, 1),
                 acc.level,
+                pct_last, pct_close,
             ]
             for j, v in enumerate(row_data, 1):
                 c = ws.cell(row=r, column=j, value=v)
                 c.font = _body_font()
                 c.alignment = Alignment(horizontal="center", vertical="center")
                 c.border = _border()
-                if 4 <= j <= 9:
-                    f = factors[j - 4]
+                if 2 <= j <= 7:
+                    f = factors[j - 2]
                     if f.normalized >= 0.66:
                         c.fill = PatternFill("solid", fgColor=Colors.GREEN_ALERT)
                     elif f.normalized >= 0.33:
                         c.fill = PatternFill("solid", fgColor=Colors.WATCH)
                     else:
                         c.fill = PatternFill("solid", fgColor=Colors.NEUTRAL)
-                if j == 10:
+                if j == 8:
                     c.fill = PatternFill("solid", fgColor=_acc_color(acc.total_score))
                     c.font = Font(name="B Nazanin", size=11, bold=True)
-                if j == 11:
+                if j == 9:
                     c.fill = PatternFill("solid", fgColor=_acc_color(acc.total_score))
 
         # نمودار آخرین نمونه
@@ -678,11 +679,11 @@ class ExcelReportGenerator:
 
         headers = [
             "زمان", "آخرین قیمت", "قیمت پایانی",
-            # درصد نوسان قیمت (نسبت به قیمت دیروز) — مشابه شیت Snapshots
-            "٪ نوسان لحظه‌ای", "٪ نوسان پایانی",
             "بهترین خرید", "حجم خرید",
             "بهترین فروش", "حجم فروش", "حجم معاملات", "ارزش معاملات",
-            "قدرت خریدار", "ورود/خروج پول حقیقی", "فشار فروش", "جمع‌آوری", "وضعیت"
+            "قدرت خریدار", "ورود/خروج پول حقیقی", "فشار فروش", "جمع‌آوری", "وضعیت",
+            # درصد نوسان قیمت (نسبت به قیمت دیروز) — مشابه شیت Snapshots (در انتهای جدول)
+            "٪ نوسان لحظه‌ای", "٪ نوسان پایانی",
         ]
         for i, h in enumerate(headers, 1):
             c = ws.cell(row=3, column=i, value=h)
@@ -692,7 +693,7 @@ class ExcelReportGenerator:
             c.border = _border()
         ws.row_dimensions[3].height = 30
 
-        widths = [12, 12, 12, 9, 9, 12, 12, 12, 12, 14, 16, 12, 16, 12, 12, 22]
+        widths = [12, 12, 12, 12, 12, 12, 12, 14, 16, 12, 16, 12, 12, 22, 9, 9]
         for i, w in enumerate(widths, 1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -710,7 +711,6 @@ class ExcelReportGenerator:
                 snap.tehran_time,
                 snap.last_price,
                 snap.close_price,
-                pct_last, pct_close,
                 snap.best_buy_price,
                 snap.best_buy_volume,
                 snap.best_sell_price,
@@ -722,6 +722,7 @@ class ExcelReportGenerator:
                 round(state.sell_score, 1),
                 round(state.buy_score, 1),
                 state.combination_label,
+                pct_last, pct_close,
             ]
             for j, v in enumerate(row_data, 1):
                 c = ws.cell(row=r, column=j, value=v)
@@ -729,12 +730,12 @@ class ExcelReportGenerator:
                 c.alignment = Alignment(horizontal="center", vertical="center")
                 c.border = _border()
 
-            # رنگ فشار فروش (ستون ۱۴)
-            ws.cell(row=r, column=14).fill = PatternFill(
+            # رنگ فشار فروش (ستون ۱۲)
+            ws.cell(row=r, column=12).fill = PatternFill(
                 "solid", fgColor=_score_color(state.sell_score)
             )
-            # رنگ فشار خرید (ستون ۱۵)
-            ws.cell(row=r, column=15).fill = PatternFill(
+            # رنگ فشار خرید (ستون ۱۳)
+            ws.cell(row=r, column=13).fill = PatternFill(
                 "solid", fgColor=_acc_color(state.buy_score)
             )
 
@@ -789,8 +790,6 @@ class ExcelReportGenerator:
             # گروه A - قیمت‌ها
             "آخرین قیمت", "قیمت پایانی", "اولین قیمت", "قیمت دیروز",
             "بالاترین روز", "پایین‌ترین روز", "کف مجاز", "سقف مجاز",
-            # درصد نوسان قیمت (نسبت به قیمت دیروز)
-            "٪ نوسان لحظه‌ای", "٪ نوسان پایانی",
             # گروه B - بهترین قیمت و مجموع
             "بهترین خرید", "حجم خرید", "بهترین فروش", "حجم فروش",
             "تعداد سفارش خرید", "تعداد سفارش فروش",
@@ -820,6 +819,8 @@ class ExcelReportGenerator:
             "ورود/خروج پول حقیقی", "نسبت پول حقیقی",
             # کیفیت داده
             "داده کامل", "فیلدهای مفقود",
+            # درصد نوسان قیمت (نسبت به قیمت دیروز) — در انتهای جدول
+            "٪ نوسان لحظه‌ای", "٪ نوسان پایانی",
         ]
         for i, h in enumerate(headers, 1):
             c = ws.cell(row=3, column=i, value=h)
@@ -832,7 +833,6 @@ class ExcelReportGenerator:
         # عرض ستون‌ها - ستون‌های اصلی پهن‌تر
         col_widths = [11, 9, 7, 8, 8, 8, 10,
                        10, 10, 10, 10, 10, 10, 10, 10,
-                       9, 9,  # ٪ نوسان لحظه‌ای و پایانی
                        10, 10, 10, 10, 10, 10,
                        9, 8, 7, 9, 8, 7, 9, 8, 7, 9, 8, 7, 9, 8, 7,
                        9, 8, 7, 9, 8, 7, 9, 8, 7, 9, 8, 7, 9, 8, 7,
@@ -842,7 +842,8 @@ class ExcelReportGenerator:
                        10, 10, 12, 10, 10, 12,
                        12, 12,
                        10, 10, 10, 14, 10,
-                       8, 12]
+                       8, 12,
+                       9, 9]  # ٪ نوسان لحظه‌ای و پایانی (در انتهای جدول)
         for i, w in enumerate(col_widths, 1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -873,11 +874,6 @@ class ExcelReportGenerator:
                 snap.symbol_status, snap.data_status, snap.fetch_error,
                 snap.last_price, snap.close_price, snap.open_price, snap.yesterday_price,
                 snap.daily_high, snap.daily_low, snap.min_allowed_price, snap.max_allowed_price,
-                # درصد نوسان قیمت نسبت به قیمت دیروز
-                round((snap.last_price - snap.yesterday_price) / snap.yesterday_price * 100, 2)
-                    if snap.yesterday_price else None,
-                round((snap.close_price - snap.yesterday_price) / snap.yesterday_price * 100, 2)
-                    if snap.yesterday_price else None,
                 snap.best_buy_price, snap.best_buy_volume, snap.best_sell_price, snap.best_sell_volume,
                 snap.buy_order_count, snap.sell_order_count,
                 *(_pad(bid_prices) + _pad(bid_volumes) + _pad(bid_counts)),
@@ -894,6 +890,11 @@ class ExcelReportGenerator:
                 round(snap.real_money_flow, 0), round(snap.real_money_flow_ratio, 4),
                 "بله" if snap.data_complete else "خیر",
                 ", ".join(snap.missing_fields) if snap.missing_fields else "",
+                # درصد نوسان قیمت نسبت به قیمت دیروز (در انتهای جدول)
+                round((snap.last_price - snap.yesterday_price) / snap.yesterday_price * 100, 2)
+                    if snap.yesterday_price else None,
+                round((snap.close_price - snap.yesterday_price) / snap.yesterday_price * 100, 2)
+                    if snap.yesterday_price else None,
             ]
             for j, v in enumerate(row_data, 1):
                 c = ws.cell(row=r, column=j, value=v)
@@ -951,9 +952,9 @@ class ExcelReportGenerator:
 
         # هدر
         headers = ["ردیف", "زمان معامله", "قیمت معامله",
-                   # درصد نوسان قیمت (نسبت به قیمت دیروز) — مشابه شیت Snapshots
-                   "٪ نوسان لحظه‌ای", "٪ نوسان پایانی",
-                   "حجم معامله", "شناسه معامله", "سمت آغازگر"]
+                   "حجم معامله", "شناسه معامله", "سمت آغازگر",
+                   # درصد نوسان قیمت (نسبت به قیمت دیروز) — مشابه شیت Snapshots (در انتهای جدول)
+                   "٪ نوسان لحظه‌ای", "٪ نوسان پایانی"]
         for i, h in enumerate(headers, 1):
             c = ws.cell(row=3, column=i, value=h)
             c.font = _header_font()
@@ -962,7 +963,7 @@ class ExcelReportGenerator:
             c.border = _border()
         ws.row_dimensions[3].height = 24
 
-        widths = [7, 12, 14, 9, 9, 12, 18, 12]
+        widths = [7, 12, 14, 12, 18, 12, 9, 9]
         for i, w in enumerate(widths, 1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -979,21 +980,21 @@ class ExcelReportGenerator:
                 i + 1,
                 tr.trade_time,
                 tr.trade_price,
-                pct, pct,  # معامله یک قیمت دارد → هر دو ستون یکسان
                 tr.trade_volume,
                 tr.trade_id,
                 aggressor_label,
+                pct, pct,  # معامله یک قیمت دارد → هر دو ستون یکسان
             ]
             for j, v in enumerate(row_data, 1):
                 c = ws.cell(row=r, column=j, value=v)
                 c.font = _body_font()
                 c.alignment = Alignment(horizontal="center", vertical="center")
                 c.border = _border()
-            # رنگ سمت آغازگر (ستون ۸)
+            # رنگ سمت آغازگر (ستون ۶)
             if tr.aggressor_side == "buy":
-                ws.cell(row=r, column=8).fill = PatternFill("solid", fgColor=Colors.NORMAL)
+                ws.cell(row=r, column=6).fill = PatternFill("solid", fgColor=Colors.NORMAL)
             elif tr.aggressor_side == "sell":
-                ws.cell(row=r, column=8).fill = PatternFill("solid", fgColor=Colors.DANGER)
+                ws.cell(row=r, column=6).fill = PatternFill("solid", fgColor=Colors.DANGER)
 
         # خلاصه پایانی
         if trades:

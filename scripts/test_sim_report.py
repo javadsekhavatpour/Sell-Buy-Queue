@@ -173,20 +173,25 @@ try:
     print(f"\n{'='*55}")
     print("بررسی ستون‌های درصد نوسان:")
 
-    # شیت Snapshots — ستون ۱۶ (٪ لحظه‌ای) و ۱۷ (٪ پایانی)
-    hdr16 = ws_snap.cell(row=3, column=16).value
-    hdr17 = ws_snap.cell(row=3, column=17).value
-    print(f"  هدر ستون ۱۶: {hdr16}")
-    print(f"  هدر ستون ۱۷: {hdr17}")
-    snap_pct_hdr_ok = ("نوسان" in str(hdr16) and "نوسان" in str(hdr17))
+    # شیت Snapshots — ستون‌های درصد (آخرین دو ستون هدر، در انتهای جدول)
+    snap_pct_cols = []
+    for col in range(1, ws_snap.max_column + 1):
+        v = ws_snap.cell(row=3, column=col).value
+        if v is not None and "نوسان" in str(v):
+            snap_pct_cols.append((col, str(v)))
+    print(f"  ستون‌های درصد هدر Snapshots: {snap_pct_cols}")
+    snap_pct_hdr_ok = (len(snap_pct_cols) >= 2
+                       and "لحظه" in snap_pct_cols[-2][1]
+                       and "پایان" in snap_pct_cols[-1][1])
+    col_last, col_close = snap_pct_cols[-2][0], snap_pct_cols[-1][0]
 
-    # مقدار درصد snapshot آخر (ردیف ۴+۵=۹) — yesterday=12000, last=12075 → 0.625 → round(۲)=0.62
-    val16 = ws_snap.cell(row=9, column=16).value
-    val17 = ws_snap.cell(row=9, column=17).value
-    print(f"  ستون ۱۶ ردیف ۹ (٪ لحظه‌ای): {val16} (انتظار: 0.62)")
-    print(f"  ستون ۱۷ ردیف ۹ (٪ پایانی):  {val17} (انتظار: 0.62)")
-    snap_pct_val_ok = (val16 is not None and abs(float(val16) - 0.62) < 0.01
-                       and val17 is not None and abs(float(val17) - 0.62) < 0.01)
+    # مقدار درصد snapshot آخر (ردیف ۹) — yesterday=12000, last=12075 → 0.625 → round(۲)=0.62
+    val_last = ws_snap.cell(row=9, column=col_last).value
+    val_close = ws_snap.cell(row=9, column=col_close).value
+    print(f"  ستون {col_last} ردیف ۹ (٪ لحظه‌ای): {val_last} (انتظار: 0.62)")
+    print(f"  ستون {col_close} ردیف ۹ (٪ پایانی):  {val_close} (انتظار: 0.62)")
+    snap_pct_val_ok = (val_last is not None and abs(float(val_last) - 0.62) < 0.01
+                       and val_close is not None and abs(float(val_close) - 0.62) < 0.01)
 
     # شیت Metadata — فیلدهای درصد پایان روز
     meta_pct_last = None

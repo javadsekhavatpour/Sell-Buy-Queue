@@ -121,14 +121,20 @@ print(f"  ٪ پایانی:  {pct_close} (انتظار: {exp_pct})")
 pct_ok = (pct_last is not None and abs(float(pct_last) - exp_pct) < 0.01
           and pct_close is not None and abs(float(pct_close) - exp_pct) < 0.01)
 
-# بررسی Snapshots — ستون‌های درصد
+# بررسی Snapshots — ستون‌های درصد (آخرین دو ستون هدر)
 ws_snap = wb["Snapshots"]
-hdr16 = ws_snap.cell(row=3, column=16).value
-hdr17 = ws_snap.cell(row=3, column=17).value
-snap_pct_hdr = "نوسان" in str(hdr16) and "نوسان" in str(hdr17)
+# ستون‌های هدر درصد را بر اساس برچسب پیدا می‌کنیم (در انتهای جدول)
+snap_pct_cols = []
+for col in range(1, ws_snap.max_column + 1):
+    v = ws_snap.cell(row=3, column=col).value
+    if v is not None and "نوسان" in str(v):
+        snap_pct_cols.append((col, str(v)))
+snap_pct_hdr = (len(snap_pct_cols) >= 2
+                and "لحظه" in snap_pct_cols[-2][1]
+                and "پایان" in snap_pct_cols[-1][1])
 snap_rows = sum(1 for r in ws_snap.iter_rows(values_only=True) if any(c for c in r))
 print(f"  سطرهای Snapshots: {snap_rows}")
-print(f"  هدر ستون ۱۶: {hdr16} / ۱۷: {hdr17}")
+print(f"  ستون‌های درصد هدر: {snap_pct_cols}")
 
 print(f"\n{'='*55}")
 print("تست ۲: _maybe_auto_report (اتوماتیک هنگام بسته‌شدن بازار)")
