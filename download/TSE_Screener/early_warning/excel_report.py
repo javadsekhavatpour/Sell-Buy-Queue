@@ -1,13 +1,19 @@
 """
 excel_report.py
-تولید گزارش Excel با هفت شیت:
+تولید گزارش Excel با هشت شیت:
   1. Dashboard     - وضعیت لحظه‌ای و هشدارها
   2. SellPressure  - شش عامل فشار فروش و امتیازها (به‌مرور زمان)
   3. Accumulation  - شش عامل جمع‌آوری و امتیازها (به‌مرور زمان)
-  4. Snapshots     - تمام نمونه‌های خام تابلو (گروه‌های A-D و F)
-  5. Trades        - معاملات انجام‌شده (گروه E)
-  6. Metadata      - مشخصات نماد، بازه زمانی، وضعیت بازار
-  7. History       - خلاصه روند زمانی
+  4. 5min_Trend    - تجمیع ۵دقیقه‌ای: روند سیگنال vs حرکت قیمت همان بازه
+  5. Snapshots     - تمام نمونه‌های خام تابلو (گروه‌های A-D و F)
+  6. Trades        - معاملات انجام‌شده (گروه E)
+  7. Metadata      - مشخصات نماد، بازه زمانی، وضعیت بازار
+  8. History       - خلاصه روند زمانی
+
+ستون «Δ30ث قیمت٪» (حرکت اخیر قیمت نسبت به نمونهٔ قبلی) در شیت‌های
+SellPressure/Accumulation/History/Dashboard اضافه شده است؛ این معیاری است که
+امتیاز فشار فروش/جمع‌آوری با آن همخوان است (نه با «٪ نوسان لحظه‌ای» که نسبت به
+قیمت دیروز محاسبه می‌شود).
 
 نماد: دابور (نمونه آزمایشی)
 """
@@ -90,6 +96,37 @@ def _acc_color(score: float) -> str:
     return "006100"
 
 
+def _delta_30s_pct(snap, prev_snap) -> Optional[float]:
+    """تغییر درصدی آخرین قیمت نسبت به نمونهٔ قبلی (۳۰ثانیه).
+
+    این معیار «حرکت اخیر قیمت» است — برخلاف «٪ نوسان لحظه‌ای» که نسبت به
+    قیمت دیروز محاسبه می‌شود. امتیاز فشار فروش/جمع‌آوری با این ستون همخوان است،
+    نه با ٪ نسبت‌به‌دیروز (چون sell_score از دلتای ۳۰ثانیه‌ای جریان سفارش ساخته
+    می‌شود).
+
+    فیلتر داده خراب: |Δ| > 20٪ یا قیمت صفر → None.
+    """
+    if not prev_snap or not snap:
+        return None
+    if not prev_snap.last_price or not snap.last_price:
+        return None
+    d = (snap.last_price - prev_snap.last_price) / prev_snap.last_price * 100
+    if abs(d) > 20:
+        return None
+    return round(d, 2)
+
+
+def _delta_color(d) -> str:
+    """رنگ بر اساس جهت حرکت اخیر قیمت (Δ30ث)."""
+    if d is None:
+        return Colors.NEUTRAL
+    if d < -0.1:   # افت قیمت → قرمز
+        return Colors.DANGER
+    if d > 0.1:    # رشد قیمت → سبز
+        return Colors.GREEN_ALERT
+    return Colors.NEUTRAL   # تخت
+
+
 class ExcelReportGenerator:
     """تولید گزارش Excel چهار شیت."""
 
@@ -112,7 +149,7 @@ class ExcelReportGenerator:
         trades: Optional[List[Trade]] = None,
         source: str = "زنده (Live)"
     ) -> Path:
-        """تولید کامل گزارش با هفت شیت.
+        """تولید کامل گزارش با هشت شیت.
 
         پارامتر source: منبع داده را در شیت Metadata مشخص می‌کند
         (مثلاً «شبیه‌سازی (Sim)» یا «زنده (Live)»).
@@ -125,6 +162,7 @@ class ExcelReportGenerator:
         )
         self._build_sell_pressure_sheet(sp_results, snapshots)
         self._build_accumulation_sheet(acc_results, snapshots)
+        self._build_5min_trend_sheet(sp_results, acc_results, snapshots)
         self._build_snapshots_sheet(snapshots)
         if trades:
             yesterday_price = snapshots[-1].yesterday_price if snapshots else 0
@@ -392,7 +430,9 @@ class ExcelReportGenerator:
             # درصد نوسان قیمت (نسبت به قیمت دیروز) — مشابه شیت Snapshots (در انتهای جدول)
             ws.cell(row=data_start, column=4, value="٪ نوسان لحظه‌ای").font = _header_font()
             ws.cell(row=data_start, column=5, value="٪ نوسان پایانی").font = _header_font()
-            for col in (1, 2, 3, 4, 5):
+            # حرکت اخیر قیمت (Δ30ث) — معیاری که امتیازها با آن همخوان است
+            ws.cell(row=data_start, column=6, value="Δ30ث قیمت٪").font = _header_font()
+            for col in (1, 2, 3, 4, 5, 6):
                 ws.cell(row=data_start, column=col).fill = PatternFill("solid", fgColor=Colors.HEADER_BG)
                 ws.cell(row=data_start, column=col).font = _header_font()
                 ws.cell(row=data_start, column=col).alignment = Alignment(horizontal="center")
@@ -403,13 +443,17 @@ class ExcelReportGenerator:
                 ws.cell(row=data_start + i, column=3, value=round(acc.total_score, 1))
                 # snapshot متناظر با این نمونه (برای محاسبه درصد نوسان)
                 snap = snapshots[i - 1] if i - 1 < len(snapshots) else None
+                prev_snap = snapshots[i - 2] if i - 2 >= 0 and (i - 2) < len(snapshots) else None
                 yest = snap.yesterday_price if snap else 0
                 pct_last = (round((snap.last_price - yest) / yest * 100, 2)
                             if snap and yest else None)
                 pct_close = (round((snap.close_price - yest) / yest * 100, 2)
                              if snap and yest else None)
+                delta_30s = _delta_30s_pct(snap, prev_snap)
                 ws.cell(row=data_start + i, column=4, value=pct_last)
                 ws.cell(row=data_start + i, column=5, value=pct_close)
+                dcell = ws.cell(row=data_start + i, column=6, value=delta_30s)
+                dcell.fill = PatternFill("solid", fgColor=_delta_color(delta_30s))
 
             # ساخت نمودار خطی
             chart = LineChart()
@@ -438,7 +482,7 @@ class ExcelReportGenerator:
         ws.sheet_view.rightToLeft = True
 
         # عنوان
-        ws.merge_cells("A1:K1")
+        ws.merge_cells("A1:L1")
         c = ws["A1"]
         c.value = "موتور تشخیص فشار فروش - شش شاخص"
         c.font = _title_font()
@@ -453,7 +497,9 @@ class ExcelReportGenerator:
             "برتری سرانه فروش (۱۵)", "فاصله منفی آخرین-پایانی (۱۵)",
             "افزایش سرعت عرضه (۱۵)", "تخلیه تقاضا/کف روز (۱۵)",
             "مجموع", "سطح",
-            # درصد نوسان قیمت (نسبت به قیمت دیروز) — مشابه شیت Snapshots (در انتهای جدول)
+            # حرکت اخیر قیمت (Δ30ث) — معیاری که sell_score با آن همخوان است
+            "Δ30ث قیمت٪",
+            # درصد نوسان قیمت (نسبت به قیمت دیروز) — در انتهای جدول
             "٪ نوسان لحظه‌ای", "٪ نوسان پایانی",
         ]
         for i, h in enumerate(headers, 1):
@@ -465,7 +511,7 @@ class ExcelReportGenerator:
         ws.row_dimensions[3].height = 38
 
         # عرض ستون‌ها
-        widths = [12, 16, 16, 16, 16, 16, 16, 10, 18, 9, 9]
+        widths = [12, 16, 16, 16, 16, 16, 16, 10, 18, 10, 9, 9]
         for i, w in enumerate(widths, 1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -475,11 +521,13 @@ class ExcelReportGenerator:
             factors = sp.factors
             # snapshot متناظر با این نتیجه (برای محاسبه درصد نوسان)
             snap = snapshots[i] if i < len(snapshots) else None
+            prev_snap = snapshots[i - 1] if i > 0 and (i - 1) < len(snapshots) else None
             yest = snap.yesterday_price if snap else 0
             pct_last = (round((snap.last_price - yest) / yest * 100, 2)
                         if snap and yest else None)
             pct_close = (round((snap.close_price - yest) / yest * 100, 2)
                          if snap and yest else None)
+            delta_30s = _delta_30s_pct(snap, prev_snap)
             row_data = [
                 sp.snapshot_time,
                 round(factors[0].score, 1),
@@ -490,6 +538,7 @@ class ExcelReportGenerator:
                 round(factors[5].score, 1),
                 round(sp.total_score, 1),
                 sp.level,
+                delta_30s,
                 pct_last, pct_close,
             ]
             for j, v in enumerate(row_data, 1):
@@ -513,6 +562,9 @@ class ExcelReportGenerator:
                 # رنگ سطح
                 if j == 9:
                     c.fill = PatternFill("solid", fgColor=_score_color(sp.total_score))
+                # رنگ Δ30ث قیمت (ستون ۱۰) — قرمز=افت، سبز=رشد
+                if j == 10:
+                    c.fill = PatternFill("solid", fgColor=_delta_color(delta_30s))
 
         # نمودار ستونی برای شاخص‌ها (آخرین نمونه)
         if sp_results:
@@ -557,7 +609,7 @@ class ExcelReportGenerator:
         ws.sheet_view.rightToLeft = True
 
         # عنوان
-        ws.merge_cells("A1:K1")
+        ws.merge_cells("A1:L1")
         c = ws["A1"]
         c.value = "موتور تشخیص جمع‌آوری سهم - شش شاخص"
         c.font = _title_font()
@@ -571,7 +623,9 @@ class ExcelReportGenerator:
             "برتری تعداد خریداران (۱۰)", "جذب عرضه/ماندگاری (۲۰)",
             "مقاومت قیمت (۲۰)", "تداوم خرید (۱۰)",
             "مجموع", "سطح",
-            # درصد نوسان قیمت (نسبت به قیمت دیروز) — مشابه شیت Snapshots (در انتهای جدول)
+            # حرکت اخیر قیمت (Δ30ث) — معیاری که buy_score با آن همخوان است
+            "Δ30ث قیمت٪",
+            # درصد نوسان قیمت (نسبت به قیمت دیروز) — در انتهای جدول
             "٪ نوسان لحظه‌ای", "٪ نوسان پایانی",
         ]
         for i, h in enumerate(headers, 1):
@@ -582,7 +636,7 @@ class ExcelReportGenerator:
             c.border = _border()
         ws.row_dimensions[3].height = 38
 
-        widths = [12, 18, 18, 18, 18, 18, 14, 10, 22, 9, 9]
+        widths = [12, 18, 18, 18, 18, 18, 14, 10, 22, 10, 9, 9]
         for i, w in enumerate(widths, 1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -591,11 +645,13 @@ class ExcelReportGenerator:
             factors = acc.factors
             # snapshot متناظر با این نتیجه (برای محاسبه درصد نوسان)
             snap = snapshots[i] if i < len(snapshots) else None
+            prev_snap = snapshots[i - 1] if i > 0 and (i - 1) < len(snapshots) else None
             yest = snap.yesterday_price if snap else 0
             pct_last = (round((snap.last_price - yest) / yest * 100, 2)
                         if snap and yest else None)
             pct_close = (round((snap.close_price - yest) / yest * 100, 2)
                          if snap and yest else None)
+            delta_30s = _delta_30s_pct(snap, prev_snap)
             row_data = [
                 acc.snapshot_time,
                 round(factors[0].score, 1),
@@ -606,6 +662,7 @@ class ExcelReportGenerator:
                 round(factors[5].score, 1),
                 round(acc.total_score, 1),
                 acc.level,
+                delta_30s,
                 pct_last, pct_close,
             ]
             for j, v in enumerate(row_data, 1):
@@ -626,6 +683,9 @@ class ExcelReportGenerator:
                     c.font = Font(name="B Nazanin", size=11, bold=True)
                 if j == 9:
                     c.fill = PatternFill("solid", fgColor=_acc_color(acc.total_score))
+                # رنگ Δ30ث قیمت (ستون ۱۰) — قرمز=افت، سبز=رشد
+                if j == 10:
+                    c.fill = PatternFill("solid", fgColor=_delta_color(delta_30s))
 
         # نمودار آخرین نمونه
         if acc_results:
@@ -661,6 +721,166 @@ class ExcelReportGenerator:
             ws.add_chart(chart, f"M3")
 
     # -----------------------------------------------------------------
+    # شیت ۳.۵: 5min Trend (تجمیع ۵دقیقه‌ای — روند سیگنال vs حرکت قیمت)
+    # -----------------------------------------------------------------
+    def _build_5min_trend_sheet(self, sp_results: List[SellPressureResult],
+                                acc_results: List[AccumulationResult],
+                                snapshots: List):
+        """تجمیع نمونه‌های ۳۰ثانیه‌ای در بازه‌های ۵دقیقه‌ای.
+
+        هر ردیف = یک بازهٔ ۵دقیقه‌ای با:
+          - قیمت ابتدا/انتها و Δقیمت همان بازه (نه نسبت به دیروز)
+          - میانگین فشار فروش/جمع‌آوری و net = جمع‌آوری − فشار فروش
+          - نشانگر همخوانی جهت net با Δقیمت
+
+        این نما نویز ۳۰ثانیه‌ای را هموار می‌کند و چون هم سیگنال و هم قیمت در
+        همان پنجرهٔ ۵دقیقه‌ای سنجیده می‌شوند، مقایسهٔ روند معنادار می‌شود.
+        """
+        import statistics as _st
+        from datetime import datetime as _dt
+
+        ws = self.wb.create_sheet("5min_Trend")
+        ws.sheet_view.rightToLeft = True
+        ws.freeze_panes = "A4"
+
+        # عنوان
+        ws.merge_cells("A1:K1")
+        c = ws["A1"]
+        c.value = "روند تجمیع‌شدهٔ ۵دقیقه‌ای — سیگنال vs حرکت قیمت"
+        c.font = _title_font()
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        c.fill = PatternFill("solid", fgColor=Colors.HEADER_BG)
+        ws.row_dimensions[1].height = 26
+
+        # توضیح
+        ws.merge_cells("A2:K2")
+        c = ws["A2"]
+        c.value = ("Δقیمت٪ = تغییر قیمت درون همان بازهٔ ۵دقیقه‌ای (نه نسبت به دیروز). "
+                   "net = جمع‌آوری − فشار فروش. همخوانی ✓ یعنی جهت net با جهت Δقیمت سازگار است.")
+        c.font = Font(name="B Nazanin", size=9, color="333333")
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        ws.row_dimensions[2].height = 18
+
+        headers = [
+            "بازه", "n", "قیمت ابتدا", "قیمت انتها",
+            "Δقیمت ۵دقیقه٪", "avg فشار فروش", "avg جمع‌آوری",
+            "net سیگنال", "بیشینه فشار", "حجم معاملات", "همخوانی",
+        ]
+        for i, h in enumerate(headers, 1):
+            c = ws.cell(row=3, column=i, value=h)
+            c.font = _header_font()
+            c.fill = PatternFill("solid", fgColor=Colors.HEADER_BG)
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            c.border = _border()
+        ws.row_dimensions[3].height = 34
+
+        widths = [14, 5, 11, 11, 13, 13, 12, 10, 11, 14, 9]
+        for i, w in enumerate(widths, 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+
+        # تجمیع در bucketهای ۵دقیقه‌ای
+        def _to_sec(t):
+            try:
+                d = _dt.strptime(str(t), "%H:%M:%S")
+                return d.hour * 3600 + d.minute * 60 + d.second
+            except Exception:
+                return None
+
+        buckets = {}  # bucket_id -> list of indices
+        n = min(len(snapshots), len(sp_results), len(acc_results))
+        for idx in range(n):
+            s = _to_sec(snapshots[idx].tehran_time)
+            if s is None:
+                continue
+            buckets.setdefault(s // 300, []).append(idx)
+
+        aligned = 0
+        total = 0
+        r = 4
+        for b in sorted(buckets):
+            idxs = buckets[b]
+            grp_snaps = [snapshots[i] for i in idxs]
+            start_price = grp_snaps[0].last_price
+            end_price = grp_snaps[-1].last_price
+            if start_price and end_price and start_price > 0:
+                dpct = round((end_price - start_price) / start_price * 100, 2)
+            else:
+                dpct = None
+            sells = [sp_results[i].total_score for i in idxs]
+            buys = [acc_results[i].total_score for i in idxs]
+            asell = round(_st.mean(sells), 1) if sells else 0.0
+            abuy = round(_st.mean(buys), 1) if buys else 0.0
+            net = round(abuy - asell, 1)
+            mxsell = round(max(sells), 1) if sells else 0.0
+            # حجم معاملات بازه = تفاضل حجم تجمعی (آخر − اول)؛ اگر ریست شد، آخرین
+            vols = [s.total_volume for s in grp_snaps if s.total_volume]
+            if len(vols) >= 2 and vols[-1] >= vols[0]:
+                vol_traded = vols[-1] - vols[0]
+            elif vols:
+                vol_traded = vols[-1]
+            else:
+                vol_traded = 0
+
+            # همخوانی جهت net با جهت Δقیمت
+            if dpct is None or abs(dpct) <= 0.1:
+                flag = "─"
+                total += 1
+            elif (dpct > 0.1 and net > 0) or (dpct < -0.1 and net < 0):
+                flag = "✓"
+                aligned += 1
+                total += 1
+            else:
+                flag = "✗"
+                total += 1
+
+            t0 = str(grp_snaps[0].tehran_time)[:5]
+            t1 = str(grp_snaps[-1].tehran_time)[:5]
+            row_data = [
+                f"{t0}-{t1}", len(idxs), start_price, end_price,
+                dpct, asell, abuy, net, mxsell, vol_traded, flag,
+            ]
+            for j, v in enumerate(row_data, 1):
+                c = ws.cell(row=r, column=j, value=v)
+                c.font = _body_font()
+                c.alignment = Alignment(horizontal="center", vertical="center")
+                c.border = _border()
+            # رنگ Δقیمت (ستون ۵)
+            if dpct is not None:
+                dcol = (Colors.DANGER if dpct < -0.1
+                        else (Colors.GREEN_ALERT if dpct > 0.1 else Colors.NEUTRAL))
+                ws.cell(row=r, column=5).fill = PatternFill("solid", fgColor=dcol)
+            # رنگ net (ستون ۸)
+            ncol = (Colors.DANGER if net < -5
+                    else (Colors.GREEN_ALERT if net > 5 else Colors.NEUTRAL))
+            ws.cell(row=r, column=8).fill = PatternFill("solid", fgColor=ncol)
+            # رنگ avg فشار فروش (ستون ۶) و avg جمع‌آوری (ستون ۷)
+            ws.cell(row=r, column=6).fill = PatternFill("solid", fgColor=_score_color(asell))
+            ws.cell(row=r, column=7).fill = PatternFill("solid", fgColor=_acc_color(abuy))
+            r += 1
+
+        # خلاصه
+        if total:
+            sr = r + 1
+            ws.merge_cells(start_row=sr, end_row=sr, start_column=1, end_column=11)
+            c = ws.cell(row=sr, column=1, value="خلاصه")
+            c.font = _subtitle_font()
+            c.fill = PatternFill("solid", fgColor=Colors.SUBTITLE_BG)
+            c.alignment = Alignment(horizontal="center", vertical="center")
+            notes = [
+                f"بازه‌های ۵دقیقه‌ای: {total}",
+                f"همخوانی net با جهت Δقیمت: {aligned}/{total} = {aligned/total*100:.0f}٪",
+                "نکته: امتیاز فشار فروش/جمع‌آوری با Δ30ث (حرکت اخیر قیمت) همخوان است، "
+                "نه با «٪ نوسان لحظه‌ای» (نسبت به دیروز). ستون Δ30ث قیمت در شیت‌های "
+                "SellPressure/Accumulation/History این همخوانی را در سطح نمونه نشان می‌دهد.",
+            ]
+            for i, note in enumerate(notes):
+                rr = sr + 1 + i
+                ws.merge_cells(start_row=rr, end_row=rr, start_column=1, end_column=11)
+                c = ws.cell(row=rr, column=1, value=note)
+                c.font = _body_font()
+                c.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
+
+    # -----------------------------------------------------------------
     # شیت ۴: History
     # -----------------------------------------------------------------
     def _build_history_sheet(self, snapshots: List, combined_states: List[CombinedState]):
@@ -669,7 +889,7 @@ class ExcelReportGenerator:
         ws.freeze_panes = "A4"
 
         # عنوان
-        ws.merge_cells("A1:P1")
+        ws.merge_cells("A1:Q1")
         c = ws["A1"]
         c.value = "تاریخچه کامل نمونه‌های زمانی"
         c.font = _title_font()
@@ -682,7 +902,9 @@ class ExcelReportGenerator:
             "بهترین خرید", "حجم خرید",
             "بهترین فروش", "حجم فروش", "حجم معاملات", "ارزش معاملات",
             "قدرت خریدار", "ورود/خروج پول حقیقی", "فشار فروش", "جمع‌آوری", "وضعیت",
-            # درصد نوسان قیمت (نسبت به قیمت دیروز) — مشابه شیت Snapshots (در انتهای جدول)
+            # حرکت اخیر قیمت (Δ30ث) — معیاری که sell_score/buy_score با آن همخوان است
+            "Δ30ث قیمت٪",
+            # درصد نوسان قیمت (نسبت به قیمت دیروز) — در انتهای جدول
             "٪ نوسان لحظه‌ای", "٪ نوسان پایانی",
         ]
         for i, h in enumerate(headers, 1):
@@ -693,7 +915,7 @@ class ExcelReportGenerator:
             c.border = _border()
         ws.row_dimensions[3].height = 30
 
-        widths = [12, 12, 12, 12, 12, 12, 12, 14, 16, 12, 16, 12, 12, 22, 9, 9]
+        widths = [12, 12, 12, 12, 12, 12, 12, 14, 16, 12, 16, 12, 12, 22, 10, 9, 9]
         for i, w in enumerate(widths, 1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -706,6 +928,8 @@ class ExcelReportGenerator:
             yest = snap.yesterday_price
             pct_last = (round((snap.last_price - yest) / yest * 100, 2) if yest else None)
             pct_close = (round((snap.close_price - yest) / yest * 100, 2) if yest else None)
+            prev_snap = snapshots[i - 1] if i > 0 else None
+            delta_30s = _delta_30s_pct(snap, prev_snap)
 
             row_data = [
                 snap.tehran_time,
@@ -722,6 +946,7 @@ class ExcelReportGenerator:
                 round(state.sell_score, 1),
                 round(state.buy_score, 1),
                 state.combination_label,
+                delta_30s,
                 pct_last, pct_close,
             ]
             for j, v in enumerate(row_data, 1):
@@ -737,6 +962,10 @@ class ExcelReportGenerator:
             # رنگ فشار خرید (ستون ۱۳)
             ws.cell(row=r, column=13).fill = PatternFill(
                 "solid", fgColor=_acc_color(state.buy_score)
+            )
+            # رنگ Δ30ث قیمت (ستون ۱۵) — قرمز=افت، سبز=رشد
+            ws.cell(row=r, column=15).fill = PatternFill(
+                "solid", fgColor=_delta_color(delta_30s)
             )
 
         # جدول خلاصه در پایان
