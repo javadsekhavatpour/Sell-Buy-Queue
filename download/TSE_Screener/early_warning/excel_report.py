@@ -746,6 +746,8 @@ class ExcelReportGenerator:
             # گروه A - قیمت‌ها
             "آخرین قیمت", "قیمت پایانی", "اولین قیمت", "قیمت دیروز",
             "بالاترین روز", "پایین‌ترین روز", "کف مجاز", "سقف مجاز",
+            # درصد نوسان قیمت (نسبت به قیمت دیروز)
+            "٪ نوسان لحظه‌ای", "٪ نوسان پایانی",
             # گروه B - بهترین قیمت و مجموع
             "بهترین خرید", "حجم خرید", "بهترین فروش", "حجم فروش",
             "تعداد سفارش خرید", "تعداد سفارش فروش",
@@ -787,6 +789,7 @@ class ExcelReportGenerator:
         # عرض ستون‌ها - ستون‌های اصلی پهن‌تر
         col_widths = [11, 9, 7, 8, 8, 8, 10,
                        10, 10, 10, 10, 10, 10, 10, 10,
+                       9, 9,  # ٪ نوسان لحظه‌ای و پایانی
                        10, 10, 10, 10, 10, 10,
                        9, 8, 7, 9, 8, 7, 9, 8, 7, 9, 8, 7, 9, 8, 7,
                        9, 8, 7, 9, 8, 7, 9, 8, 7, 9, 8, 7, 9, 8, 7,
@@ -827,6 +830,11 @@ class ExcelReportGenerator:
                 snap.symbol_status, snap.data_status, snap.fetch_error,
                 snap.last_price, snap.close_price, snap.open_price, snap.yesterday_price,
                 snap.daily_high, snap.daily_low, snap.min_allowed_price, snap.max_allowed_price,
+                # درصد نوسان قیمت نسبت به قیمت دیروز
+                round((snap.last_price - snap.yesterday_price) / snap.yesterday_price * 100, 2)
+                    if snap.yesterday_price else None,
+                round((snap.close_price - snap.yesterday_price) / snap.yesterday_price * 100, 2)
+                    if snap.yesterday_price else None,
                 snap.best_buy_price, snap.best_buy_volume, snap.best_sell_price, snap.best_sell_volume,
                 snap.buy_order_count, snap.sell_order_count,
                 *(_pad(bid_prices) + _pad(bid_volumes) + _pad(bid_counts)),
@@ -864,11 +872,21 @@ class ExcelReportGenerator:
             # رنگ‌دهی بر اساس data_status
             if snap.data_status != "ok":
                 ws.cell(row=r, column=6).fill = PatternFill("solid", fgColor=Colors.WARNING)
-            # رنگ‌دهی ورود/خروج پول
+            # رنگ‌دهی ورود/خروج پول (ستون بعد از شیفت ۲ ستونی = ۶۶)
             if snap.real_money_flow > 0:
-                ws.cell(row=r, column=64).fill = PatternFill("solid", fgColor=Colors.NORMAL)
+                ws.cell(row=r, column=66).fill = PatternFill("solid", fgColor=Colors.NORMAL)
             elif snap.real_money_flow < 0:
-                ws.cell(row=r, column=64).fill = PatternFill("solid", fgColor=Colors.DANGER)
+                ws.cell(row=r, column=66).fill = PatternFill("solid", fgColor=Colors.DANGER)
+
+            # رنگ‌دهی درصد نوسان (ستون ۱۶ = لحظه‌ای، ۱۷ = پایانی)
+            for pct_col in (16, 17):
+                v = ws.cell(row=r, column=pct_col).value
+                if v is None:
+                    continue
+                if v > 0:
+                    ws.cell(row=r, column=pct_col).fill = PatternFill("solid", fgColor=Colors.NORMAL)
+                elif v < 0:
+                    ws.cell(row=r, column=pct_col).fill = PatternFill("solid", fgColor=Colors.DANGER)
 
     # -----------------------------------------------------------------
     # شیت ۵: Trades (گروه E - معاملات انجام‌شده)
@@ -987,6 +1005,11 @@ class ExcelReportGenerator:
             errors = sum(1 for s in snapshots if s.data_status != "ok")
             complete_count = sum(1 for s in snapshots if s.data_complete)
 
+            # درصد نوسان قیمت پایان روز (نسبت به قیمت دیروز)
+            yest = last.yesterday_price
+            pct_last_eod = round((last.last_price - yest) / yest * 100, 2) if yest else None
+            pct_close_eod = round((last.close_price - yest) / yest * 100, 2) if yest else None
+
             meta_data = [
                 ("نماد", symbol),
                 ("نوع گزارش (Source)", source),
@@ -1003,6 +1026,8 @@ class ExcelReportGenerator:
                 ("آخرین قیمت پایان روز", last.last_price),
                 ("قیمت پایانی پایان روز", last.close_price),
                 ("قیمت دیروز (پایه)", last.yesterday_price),
+                ("درصد نوسان قیمت لحظه‌ای (پایان روز)", pct_last_eod),
+                ("درصد نوسان قیمت پایانی (پایان روز)", pct_close_eod),
                 ("کف مجاز روز", last.min_allowed_price),
                 ("سقف مجاز روز", last.max_allowed_price),
                 ("بالاترین قیمت روز", last.daily_high),

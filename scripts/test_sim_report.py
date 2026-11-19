@@ -169,6 +169,39 @@ try:
     if actual_files:
         print(f"  نام فایل: {actual_files[0].name}")
 
+    # --- بررسی ستون‌های درصد نوسان ---
+    print(f"\n{'='*55}")
+    print("بررسی ستون‌های درصد نوسان:")
+
+    # شیت Snapshots — ستون ۱۶ (٪ لحظه‌ای) و ۱۷ (٪ پایانی)
+    hdr16 = ws_snap.cell(row=3, column=16).value
+    hdr17 = ws_snap.cell(row=3, column=17).value
+    print(f"  هدر ستون ۱۶: {hdr16}")
+    print(f"  هدر ستون ۱۷: {hdr17}")
+    snap_pct_hdr_ok = ("نوسان" in str(hdr16) and "نوسان" in str(hdr17))
+
+    # مقدار درصد snapshot آخر (ردیف ۴+۵=۹) — yesterday=12000, last=12075 → 0.625 → round(۲)=0.62
+    val16 = ws_snap.cell(row=9, column=16).value
+    val17 = ws_snap.cell(row=9, column=17).value
+    print(f"  ستون ۱۶ ردیف ۹ (٪ لحظه‌ای): {val16} (انتظار: 0.62)")
+    print(f"  ستون ۱۷ ردیف ۹ (٪ پایانی):  {val17} (انتظار: 0.62)")
+    snap_pct_val_ok = (val16 is not None and abs(float(val16) - 0.62) < 0.01
+                       and val17 is not None and abs(float(val17) - 0.62) < 0.01)
+
+    # شیت Metadata — فیلدهای درصد پایان روز
+    meta_pct_last = None
+    meta_pct_close = None
+    for row in ws_meta.iter_rows(min_row=1, max_row=45, values_only=True):
+        if row and len(row) >= 2:
+            if "نوسان قیمت لحظه‌ای" in str(row[0]):
+                meta_pct_last = row[1]
+            elif "نوسان قیمت پایانی" in str(row[0]):
+                meta_pct_close = row[1]
+    print(f"  Metadata ٪ لحظه‌ای (پایان روز): {meta_pct_last} (انتظار: 0.62)")
+    print(f"  Metadata ٪ پایانی (پایان روز):  {meta_pct_close} (انتظار: 0.62)")
+    meta_pct_ok = (meta_pct_last is not None and abs(float(meta_pct_last) - 0.62) < 0.01
+                   and meta_pct_close is not None and abs(float(meta_pct_close) - 0.62) < 0.01)
+
     # جمع‌بندی
     checks = {
         "شیت Metadata موجود": "Metadata" in wb.sheetnames,
@@ -178,6 +211,9 @@ try:
         "Snapshots داده دارد": snap_rows > 1,
         "Dashboard داده دارد": dash_rows > 2,
         "فایل sim_report ساخته شد": len(actual_files) > 0,
+        "هدر ستون‌های درصد در Snapshots": snap_pct_hdr_ok,
+        "مقدار درصد در Snapshots (۰.۶۲۵٪)": snap_pct_val_ok,
+        "مقدار درصد در Metadata (۰.۶۲۵٪)": meta_pct_ok,
     }
 
     print(f"\n{'='*55}")
