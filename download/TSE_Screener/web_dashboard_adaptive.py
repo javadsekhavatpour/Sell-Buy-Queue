@@ -296,6 +296,7 @@ class LiveMonitor:
         self.collector = None
         self._demo_snaps: list[MarketSnapshot] = []
         self._trades_by_time: dict[str, list[Trade]] = {}
+        self._live_report_date: str | None = None  # جلوگیری از تولید تکراری ریپورت لایو
         # موتورهای تحلیلی (برای نمایش در گروه E)
         try:
             self.sell_pressure = SellPressureDetector(cfg, normalizer=normalizer)
@@ -360,6 +361,8 @@ class LiveMonitor:
                 snap, trades = self.collector.collect(self.symbol, self.ins_code, prev)
                 self._publish(snap, trades)
                 prev = snap if (snap is not None and snap.data_status != "error") else None
+                # تولید اتوماتیک ریپورت لایو هنگام بسته‌شدن بازار
+                self._maybe_auto_report(snap)
             except Exception as e:
                 with self._lock:
                     self.last_error = f"خطای جمع‌آوری: {e}"
@@ -374,6 +377,104 @@ class LiveMonitor:
             self._publish(snap, self._trades_by_time.get(snap.tehran_time, []))
             i += 1
             self._stop.wait(self.interval)
+
+    # --- تولید ریپورت اتوماتیک لایو ---
+
+    def generate_live_report(self) -> Path | None:
+        """تولید ریپورت Excel از داده‌های لایو امروز.
+
+        همه‌ی snapshotهای نماد + امروز را از بانک می‌خواند،
+        موتورهای تحلیلی را دوباره روی آن‌ها اجرا می‌کند (re-compute)
+        و فایلی با source="زنده (Live)" تولید می‌کند.
+        مسیر خروجی: reports/live_report_{نماد}_{تاریخ}.xlsx
+        """
+        if not self.storage:
+            return None
+
+        today = today_jalali_str()
+        dates = {today, today.replace("/", "-"), today.replace("-", "/")}
+
+        # بارگذاری snapshotهای امروز از بانک
+        rows = self.storage.get_snapshots_for_symbol(self.symbol)
+        snaps = [MarketSnapshot.from_flat_dict(r) for r in rows
+                 if r.get("date_jalali") in dates]
+        snaps.sort(key=lambda s: s.timestamp)
+        if not snaps:
+            return None
+
+        # بارگذاری معاملات امروز
+        trade_rows = self.storage.get_trades_for_symbol(self.symbol)
+        trades = []
+        for t in trade_rows:
+            trades.append(Trade(
+                trade_time=t.get("trade_time", ""),
+                trade_price=float(t.get("trade_price") or 0),
+                trade_volume=int(t.get("trade_volume") or 0),
+                trade_id=t.get("trade_id"),
+                aggressor_side=t.get("aggressor_side")))
+
+        # re-compute موتورهای تحلیلی روی همه‌ی snapshotها
+        sp_det = SellPressureDetector(self.cfg, normalizer=self.normalizer)
+        buy_det = BuyPressureDetector(self.cfg, normalizer=self.normalizer)
+        alert_eng = AlertEngine(self.cfg)
+        speed_det = SpeedIndicatorEngine(self.cfg)
+
+        sp_results, buy_results, combined_states = [], [], []
+        prev = None
+        hist: list[MarketSnapshot] = []
+        for snap in snaps:
+            sp = sp_det.evaluate(snap, prev)
+            buy = buy_det.evaluate(snap, prev, hist)
+            combined = alert_eng.evaluate(sp, buy) if (sp and buy) else None
+            speed_det.compute(snap, hist)  # محاسبه برای تکمیل (نمایشی)
+            if sp:
+                sp_results.append(sp)
+            if buy:
+                buy_results.append(buy)
+            if combined:
+                combined_states.append(combined)
+            prev = snap
+            hist.append(snap)
+            hist = hist[-36:]  # buy_support به ۳۶ نمونه نیاز دارد
+
+        alert_events = alert_eng.get_all_events()
+
+        # مسیر خروجی — شامل نماد و تاریخ روز
+        safe_sym = self.symbol.replace("/", "_").replace("\\", "_").replace(" ", "_")
+        safe_date = today.replace("/", "-")
+        out_path = Path("reports") / f"live_report_{safe_sym}_{safe_date}.xlsx"
+
+        gen = ExcelReportGenerator(self.cfg)
+        gen.generate(
+            symbol=self.symbol,
+            snapshots=snaps,
+            sp_results=sp_results,
+            acc_results=buy_results,
+            combined_states=combined_states,
+            alert_events=alert_events,
+            output_path=out_path,
+            trades=trades if trades else None,
+            source="زنده (Live)",
+        )
+        return out_path
+
+    def _maybe_auto_report(self, snap: MarketSnapshot | None):
+        """تولید اتوماتیک ریپورت لایو هنگام بسته‌شدن بازار (یک‌بار در روز)."""
+        if snap is None or not self.storage:
+            return
+        today = today_jalali_str()
+        # فقط یک‌بار در هر روز
+        if self._live_report_date == today:
+            return
+        # وقتی فاز بازار «بسته» شد → تولید ریپورت
+        if snap.market_phase == "closed":
+            try:
+                path = self.generate_live_report()
+                if path:
+                    self._live_report_date = today
+                    print(f"  📊 ریپورت اتوماتیک لایو تولید شد: {path}")
+            except Exception as e:
+                print(f"  ⚠ خطای ریپورت اتوماتیک لایو: {e}")
 
     # --- شاخص‌های مشتق برای تایید بصری (گروه A) ---
 
@@ -683,6 +784,7 @@ td.num{direction:ltr;text-align:right;font-variant-numeric:tabular-nums}
     <span class="badge b-blue" id="h-phase">—</span>
     <span class="badge b-gray" id="h-mode">—</span>
     <span class="badge b-gray" id="h-datast">—</span>
+    <button id="btn-report" onclick="downloadReport()" title="دانلود ریپورت Excel" style="background:rgba(76,175,80,0.9);border:none;color:#fff;padding:5px 12px;border-radius:6px;cursor:pointer;font-weight:700;font-size:13px">📊 ریپورت</button>
     <span class="badge b-green" id="h-conn"><span class="dot"></span>متصل</span>
     <div class="clockbox">
       <div class="clock" id="h-clock">—</div>
@@ -775,6 +877,16 @@ function renderHeader(d) {
   const dst = DATAST[s.data_status] || s.data_status;
   ds.textContent = "داده: " + dst + (s.data_complete ? "" : " (ناقص)");
   ds.className = "badge " + (s.data_status==="ok" ? "b-green" : (s.data_status==="error" ? "b-red" : "b-amber"));
+}
+
+/* دانلود ریپورت Excel — انتخاب مسیر بر اساس حالت جاری */
+function downloadReport() {
+  const p = window.location.pathname;
+  if (p.indexOf('/sim') >= 0) {
+    window.location.href = '/sim/report';
+  } else {
+    window.location.href = '/live/report';
+  }
 }
 
 /* ---------- گروه A ---------- */
@@ -2145,6 +2257,34 @@ def route_live():
     return HTML_PAGE_ADAPTIVE
 
 
+@app.route("/live/report")
+def live_report_route():
+    """تولید و دانلود ریپورت Excel از داده‌های لایو امروز (دستی).
+
+    همه‌ی snapshotهای نماد + امروز را از بانک می‌خواند و ریپورت تولید می‌کند.
+    تولید اتوماتیک هم هنگام بسته‌شدن بازار رخ می‌دهد (_maybe_auto_report).
+    """
+    if not MONITOR or not isinstance(MONITOR, AdaptiveLiveMonitor):
+        return jsonify({"error": "حالت زنده فعال نیست. ابتدا /live را باز کنید."}), 400
+    # SimulationAdaptiveMonitor هم از AdaptiveLiveMonitor ارث می‌برد؛ فقط لایو واقعی
+    if isinstance(MONITOR, SimulationAdaptiveMonitor):
+        return jsonify({"error": "این مسیر فقط برای حالت لایو است. برای شبیه‌سازی /sim/report را بزنید."}), 400
+    try:
+        path = MONITOR.generate_live_report()
+        if path is None:
+            return jsonify({"error": "داده‌ای برای امروز در بانک وجود ندارد."}), 400
+        return send_file(
+            str(path),
+            as_attachment=True,
+            download_name=path.name,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"خطا در تولید گزارش: {e}"}), 500
+
+
 @app.route("/db")
 def route_db():
     """حالت بانک: خواندن لحظه‌ای آخرین داده از بانک.
@@ -2408,6 +2548,7 @@ td.num{direction:ltr;text-align:right;font-variant-numeric:tabular-nums}
     <span class="badge b-blue" id="h-phase">—</span>
     <span class="badge b-gray" id="h-mode">—</span>
     <span class="badge b-gray" id="h-datast">—</span>
+    <button id="btn-report" onclick="downloadReport()" title="دانلود ریپورت Excel" style="background:rgba(76,175,80,0.9);border:none;color:#fff;padding:5px 12px;border-radius:6px;cursor:pointer;font-weight:700;font-size:13px">📊 ریپورت</button>
     <span class="badge b-green" id="h-conn"><span class="dot"></span>متصل</span>
     <div class="clockbox">
       <div class="clock" id="h-clock">—</div>
@@ -2500,6 +2641,16 @@ function renderHeader(d) {
   const dst = DATAST[s.data_status] || s.data_status;
   ds.textContent = "داده: " + dst + (s.data_complete ? "" : " (ناقص)");
   ds.className = "badge " + (s.data_status==="ok" ? "b-green" : (s.data_status==="error" ? "b-red" : "b-amber"));
+}
+
+/* دانلود ریپورت Excel — انتخاب مسیر بر اساس حالت جاری */
+function downloadReport() {
+  const p = window.location.pathname;
+  if (p.indexOf('/sim') >= 0) {
+    window.location.href = '/sim/report';
+  } else {
+    window.location.href = '/live/report';
+  }
 }
 
 /* ---------- گروه A ---------- */
