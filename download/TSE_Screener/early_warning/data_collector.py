@@ -745,25 +745,10 @@ class MarketDataCollector:
             legal_buy_count=ct.get("legal_buy_count", 0) if ct else 0,
             legal_sell_count=ct.get("legal_sell_count", 0) if ct else 0,
         )
-
-        # مقادیر بازه‌ای: حجم کل/قیمت از ClosingPrice (قابل‌اعتماد و لحظه‌ای)؛
-        # فشار حقیقی/حقوقی با تشخیص تأخیر ClientType + fallback مبتنی بر معاملات
-        # (جلوگیری از دوباره‌شماری دادهٔ تجمعی و رفع پرش‌های جبرانی).
-        if prev_snap is not None:
-            snap.last_fresh_real_frac = prev_snap.last_fresh_real_frac
-            snap.interval_volume = max(0, snap.total_volume - prev_snap.total_volume)
-            snap.interval_value = max(0, snap.total_value - prev_snap.total_value)
-            snap.interval_trade_count = max(0, snap.total_trade_count - prev_snap.total_trade_count)
-            self._classify_interval_real(snap, prev_snap, trades)
-
-        # مجموع حجم ۵ ردیف عرضه/تقاضا (برای موتورهای فروش/خرید)
-        snap.ask5_volume = float(sum(r.volume for r in (snap.sell_rows or [])[:5]))
-        snap.bid5_volume = float(sum(r.volume for r in (snap.buy_rows or [])[:5]))
-
-        # محاسبه شاخص‌های مشتق
-        self._compute_derived(snap)
-        self._mark_completeness(snap)
-
+        # بانک اصلی فقط دادهٔ خام را ذخیره می‌کند (آنچه از TSE دریافت می‌شود).
+        # محاسبات مشتق (interval_real_*، per_capita، real_money_flow،
+        # data_complete، …) در لایهٔ جداگانهٔ derived_compute و فقط در حافظه
+        # انجام می‌شوند — بدون نوشتن در بانک اصلی.
         return snap, trades
 
     def _detect_market_phase(self) -> str:
@@ -808,7 +793,8 @@ class MarketDataCollector:
                   snap.real_sell_volume == prev_snap.real_sell_volume and d_total > 0)
         backward = (d_rbv < 0 or d_rsv < 0)
         spike = (d_total > 0 and classified > d_total * 1.2)         # پرش جبرانی > حجم واقعی
-        coverage = ((snap.real_buy_volume + snap.legal_buy_volume) /
+        coverage = ((snap.real_buy_volume + snap.real_sell_volume +
+                     snap.legal_buy_volume + snap.legal_sell_volume) /
                     max(snap.total_volume, 1))
         lagged = coverage < 0.95                                     # بخشی هنوز طبقه‌بندی‌نشده
 
@@ -880,7 +866,8 @@ class MarketDataCollector:
         snap.real_money_flow = snap.interval_real_buy_value - snap.interval_real_sell_value
         snap.real_money_flow_ratio = snap.real_money_flow / max(snap.interval_value, 1.0)
 
-    def _compute_derived(self, s: MarketSnapshot):
+    @staticmethod
+    def _compute_derived(s: MarketSnapshot):
         """محاسبه شاخص‌های مشتق.
 
         real_buy_value/real_sell_value تجمعیِ تقریبی (volume×avg_price) برای نمایش و
@@ -897,7 +884,8 @@ class MarketDataCollector:
         s.legal_buy_value = s.legal_buy_volume * avg_price
         s.legal_sell_value = s.legal_sell_volume * avg_price
 
-    def _mark_completeness(self, s: MarketSnapshot):
+    @staticmethod
+    def _mark_completeness(s: MarketSnapshot):
         """علامت‌گذاری فیلدهای مفقود."""
         missing = []
         if s.last_price <= 0: missing.append("last_price")
@@ -1299,6 +1287,7 @@ class SimulationDataCollector:
         st["price_path"].append(last)
 
         snap.data_complete = True
+        snap._enriched = True  # شبیه‌ساز: snapshot از پیش مشتق‌شده → enrich در _publish رد می‌شود
         return snap, trades_in_minute
 
 

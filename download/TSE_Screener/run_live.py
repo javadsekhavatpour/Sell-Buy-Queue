@@ -57,6 +57,7 @@ from early_warning import (
     compute_daily_params,
     to_jalali,
 )
+from early_warning.derived_compute import enrich_series, enrich_snapshot
 from early_warning.market_detector import detect_market, in_trading_window, tehran_now
 
 
@@ -397,6 +398,7 @@ def main():
     snapshots = []            # همه نمونه‌ها (هر interval ثانیه) - برای بانک و CSV
     engine_snapshots = []     # نمونه‌های لحظه اجرای موتورها (هر analysis_interval ثانیه)
     engine_prev = None        # نمونه قبلی از دید موتورها (گام تحلیل)
+    prev_enriched = None      # نمونهٔ قبلیِ enriched برای لایهٔ derived (هر interval)
     engine_history = []       # تاریخچه پیوسته برای موتور جمع‌آوری و شاخص‌های سرعتی
     last_engine_eval = 0.0
     sp_results = []
@@ -465,6 +467,14 @@ def main():
             storage.insert_trades(trades, symbol=args.symbol,
                                    snapshot_time=snap.tehran_time)
         snap.snapshot_id = snap_id
+
+        # ۳.۵) لایهٔ derived: مشتق و رفع مغایرت فقط در حافظه (بانک اصلی خام ماند).
+        # موتورهای inline و نرمال‌ساز مقادیر enriched را می‌بینند.
+        try:
+            enrich_snapshot(snap, prev_enriched, trades or [])
+            prev_enriched = snap
+        except Exception as e:
+            print(f"  ⚠ خطای enrich در حافظه: {e}")
 
         # ۴) اجرای موتورها - فقط در فاز پیوسته و با گام تحلیل
         # تابلو هر interval ثانیه جمع می‌شود ولی موتورهای تحلیلی با گام
@@ -573,6 +583,12 @@ def main():
         )
         for t in db_trade_rows
     ]
+    # لایهٔ derived: مشتق و رفع مغایرت در حافظه — بانک اصلی دست‌نخورده.
+    db_trades_by_time: dict[str, list[Trade]] = {}
+    for tr in db_trades:
+        if tr.trade_time:
+            db_trades_by_time.setdefault(tr.trade_time, []).append(tr)
+    enrich_series(db_snaps, db_trades_by_time)
 
     if db_snaps:
         print(f"  بازخوانی از بانک: {len(db_snaps)} نمونه، {len(db_trades)} معامله")

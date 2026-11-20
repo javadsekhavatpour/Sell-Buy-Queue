@@ -69,6 +69,7 @@ from early_warning.data_collector import (
     MarketSnapshot,
     Trade,
 )
+from early_warning.derived_compute import enrich_series, enrich_snapshot
 from early_warning.price_range import (
     load_range_rules,
     get_symbol_category,
@@ -354,6 +355,17 @@ class LiveMonitor:
             except Exception as e:
                 print(f"  ⚠ خطای ذخیره snapshot در DB: {e}")
 
+        # بانک اصلی فقط خام ذخیره شد. اکنون مشتق‌ها (interval_real_*، …) را فقط
+        # در حافظه روی همان شیء محاسبه می‌کنیم تا self.history برای موتورهای لایو
+        # enriched باشد. snapshotهای ازپیش-enrichedشده (مثل demo شبیه‌ساز) رد می‌شوند.
+        if snap is not None and snap.data_status != "error":
+            with self._lock:
+                prev_e = self.history[-2] if len(self.history) >= 2 else None
+            try:
+                enrich_snapshot(snap, prev_e, trades or [])
+            except Exception as e:
+                print(f"  ⚠ خطای enrich در حافظه: {e}")
+
     def _loop_live(self):
         prev: MarketSnapshot | None = None
         while not self._stop.is_set():
@@ -412,6 +424,12 @@ class LiveMonitor:
                 trade_volume=int(t.get("trade_volume") or 0),
                 trade_id=t.get("trade_id"),
                 aggressor_side=t.get("aggressor_side")))
+        # لایهٔ derived: محاسبهٔ مشتق و رفع مغایرت در حافظه (بدون تغییر در بانک اصلی)
+        trades_by_time: dict[str, list[Trade]] = {}
+        for tr in trades:
+            if tr.trade_time:
+                trades_by_time.setdefault(tr.trade_time, []).append(tr)
+        enrich_series(snaps, trades_by_time)
 
         # re-compute موتورهای تحلیلی روی همه‌ی snapshotها
         sp_det = SellPressureDetector(self.cfg, normalizer=self.normalizer)
@@ -592,6 +610,8 @@ class LiveMonitor:
                     rows = [dict(r) for r in cur.fetchall()]
                 if rows:
                     snaps = [MarketSnapshot.from_flat_dict(r) for r in rows]
+                    # لایهٔ derived: مشتق و رفع مغایرت در حافظه (بانک اصلی دست‌نخورده)
+                    enrich_series(snaps)
                     cum_s = 0.0
                     cum_b = 0.0
                     for idx, s_i in enumerate(snaps):
@@ -1736,6 +1756,10 @@ class SimulationAdaptiveMonitor(AdaptiveLiveMonitor):
                               trade_volume=int(t.get("trade_volume") or 0),
                               trade_id=t.get("trade_id"),
                               aggressor_side=t.get("aggressor_side")))
+
+        # لایهٔ derived: محاسبهٔ مشتق و رفع مغایرت در حافظه — بانک اصلی فقط خام است
+        # و دست‌نخورده باقی می‌ماند؛ interval_real_* از معاملات واقعی بازه محاسبه می‌شود.
+        enrich_series(snaps, self._sim_trades_by_time)
 
         # pre-compute: اجرای موتورها روی همه‌ی snapshotها (detectorهای تازه)
         sp_det = SellPressureDetector(self.cfg, normalizer=self.normalizer)
