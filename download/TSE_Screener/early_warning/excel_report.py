@@ -127,6 +127,105 @@ def _delta_color(d) -> str:
     return Colors.NEUTRAL   # تخت
 
 
+# ----- ردیف نام فیلد انگلیسی (زیر هدر فارسی) -----
+EN_ROW_BG = "DDEBF7"
+EN_ROW_FG = "1F4E78"
+
+
+def _write_en_field_row(ws, header_row: int, field_names):
+    """نام انگلیسی فیلدها را در ردیف header_row+1 با استایل متمایز می‌نویسد.
+
+    داده‌ها باید از ردیف header_row+2 آغاز شوند (یعنی هدر فارسی در header_row،
+    نام انگلیسی در header_row+1، داده از header_row+2).
+    """
+    en_row = header_row + 1
+    for i, en in enumerate(field_names, 1):
+        c = ws.cell(row=en_row, column=i, value=en)
+        c.font = Font(name="B Nazanin", size=9, color=EN_ROW_FG)
+        c.fill = PatternFill("solid", fgColor=EN_ROW_BG)
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        c.border = _border()
+    ws.row_dimensions[en_row].height = 18
+    return en_row
+
+
+# نام فیلدهای انگلیسی هر شیت (به‌ترتیب ستون‌های هدر فارسی)
+SELL_FACTOR_FIELDS = ["sell_breadth", "sell_flow", "sell_ticket",
+                      "sell_price", "sell_supply", "sell_lower"]
+BUY_FACTOR_FIELDS = ["buy_breadth", "buy_flow", "buy_ticket",
+                     "buy_price", "buy_absorption", "buy_support"]
+
+BUYSELLPRESSURE_FA = [
+    "زمان",
+    "ضعف قدرت خریدار (۲۰)", "خروج پول حقیقی (۲۰)", "برتری سرانه فروش (۱۵)",
+    "فاصله منفی آخرین-پایانی (۱۵)", "افزایش سرعت عرضه (۱۵)", "تخلیه تقاضا/کف روز (۱۵)",
+    "قدرت خرید حقیقی (۲۰)", "ورود پول حقیقی (۲۰)", "برتری تعداد خریداران (۱۰)",
+    "جذب عرضه/ماندگاری (۲۰)", "مقاومت قیمت (۲۰)", "تداوم خرید (۱۰)",
+    "مجموع فشار فروش", "سطح فشار فروش", "مجموع جمع‌آوری", "سطح جمع‌آوری",
+    "امتیاز کلی", "Δ30ث قیمت٪", "٪ نوسان لحظه‌ای", "٪ نوسان پایانی",
+    "فشار فروش تجمعی ۵دقیقه", "فشار خرید تجمعی ۵دقیقه",
+    "فشار فروش تجمعی ۱۵دقیقه", "فشار خرید تجمعی ۱۵دقیقه",
+]
+BUYSELLPRESSURE_EN = [
+    "snapshot_time",
+    *SELL_FACTOR_FIELDS, *BUY_FACTOR_FIELDS,
+    "sell_total_score", "sell_level", "buy_total_score", "buy_level",
+    "overall_score", "delta_30s_pct", "pct_last", "pct_close",
+    "sell_cum_5min", "buy_cum_5min", "sell_cum_15min", "buy_cum_15min",
+]
+BUYSELLPRESSURE_WIDTHS = [12] + [14]*12 + [11]*4 + [11, 11, 12, 12] + [14]*4
+
+HISTORY_EN = ["snapshot_time", "last_price", "close_price", "best_bid", "bid_volume",
+              "best_ask", "ask_volume", "total_volume", "total_value", "buyer_power",
+              "ind_money_flow", "sell_pressure", "accumulation", "status",
+              "delta_30s_pct", "pct_last", "pct_close"]
+
+SNAPSHOTS_EN = [
+    "date_jalali", "tehran_time", "symbol", "market_phase", "symbol_status",
+    "data_status", "fetch_error",
+    "last_price", "close_price", "open_price", "yesterday_price",
+    "daily_high", "daily_low", "min_allowed_price", "max_allowed_price",
+    "best_bid", "bid_volume", "best_ask", "ask_volume",
+    "buy_order_count", "sell_order_count",
+    "bid_price_1", "bid_vol_1", "bid_count_1", "bid_price_2", "bid_vol_2", "bid_count_2",
+    "bid_price_3", "bid_vol_3", "bid_count_3", "bid_price_4", "bid_vol_4", "bid_count_4",
+    "bid_price_5", "bid_vol_5", "bid_count_5",
+    "ask_price_1", "ask_vol_1", "ask_count_1", "ask_price_2", "ask_vol_2", "ask_count_2",
+    "ask_price_3", "ask_vol_3", "ask_count_3", "ask_price_4", "ask_vol_4", "ask_count_4",
+    "ask_price_5", "ask_vol_5", "ask_count_5",
+    "total_volume", "total_value", "total_trade_count", "base_volume",
+    "interval_volume", "interval_value", "interval_trade_count",
+    "real_buy_count", "real_buy_volume", "real_buy_value",
+    "real_sell_count", "real_sell_volume", "real_sell_value",
+    "legal_buy_count", "legal_buy_volume", "legal_buy_value",
+    "legal_sell_count", "legal_sell_volume", "legal_sell_value",
+    "interval_real_buy_volume", "interval_real_sell_volume",
+    "buyer_power", "per_capita_buy", "per_capita_sell",
+    "real_money_flow", "real_money_flow_ratio",
+    "data_complete", "missing_fields", "pct_last", "pct_close",
+]
+
+TRADES_EN = ["row_num", "trade_time", "trade_price", "trade_volume", "trade_id",
+             "aggressor_side", "pct_last", "pct_close"]
+
+TREND5_EN = ["bucket", "n", "start_price", "end_price", "delta_5min_pct",
+             "avg_sell", "avg_buy", "net_signal", "max_sell", "volume", "alignment",
+             "pct_last", "pct_close"]
+
+DASH_ALERT_EN = ["timestamp", "level", "title", "message", "sell_score",
+                 "buy_score", "classification", "suggested_action"]
+DASH_TREND_EN = ["sample_idx", "sell_total_score", "buy_total_score",
+                 "pct_last", "pct_close", "delta_30s_pct"]
+
+METADATA_EN = ["symbol", "source", "ins_code", "date_jalali", "start_time", "end_time",
+               "total_samples", "complete_samples", "error_samples", "symbol_status",
+               "phase_distribution", "open_price", "last_price_eod", "close_price_eod",
+               "yesterday_price", "pct_last_eod", "pct_close_eod", "min_allowed_price",
+               "max_allowed_price", "daily_high", "daily_low", "total_volume",
+               "total_value", "total_trade_count", "base_volume", "price_unit",
+               "volume_unit", "data_source", "sampling_interval", "engine_version"]
+
+
 class ExcelReportGenerator:
     """تولید گزارش Excel چهار شیت."""
 
@@ -160,8 +259,8 @@ class ExcelReportGenerator:
             symbol, snapshots, sp_results, acc_results,
             combined_states, alert_events
         )
-        self._build_sell_pressure_sheet(sp_results, snapshots)
-        self._build_accumulation_sheet(acc_results, snapshots)
+        # فشار فروش و فشار خرید در یک شیت دوطرفه (BuySellPressure) — شیت جدا حذف شد
+        self._build_buysell_pressure_sheet(sp_results, acc_results, snapshots)
         self._build_5min_trend_sheet(sp_results, acc_results, snapshots)
         self._build_snapshots_sheet(snapshots)
         if trades:
@@ -362,7 +461,7 @@ class ExcelReportGenerator:
 
             # هدر جدول هشدارها
             row = 23
-            headers = ["زمان", "سطح", "عنوان", "پیام", "فشار فروش", "جمع‌آوری", "اقدام"]
+            headers = ["زمان", "سطح", "عنوان", "پیام", "فشار فروش", "جمع‌آوری", "طبقه‌بندی", "اقدام پیشنهادی"]
             for i, h in enumerate(headers, 1):
                 c = ws.cell(row=row, column=i, value=h)
                 c.font = _header_font()
@@ -370,10 +469,11 @@ class ExcelReportGenerator:
                 c.alignment = Alignment(horizontal="center", vertical="center")
                 c.border = _border()
             ws.row_dimensions[row].height = 22
+            _write_en_field_row(ws, row, DASH_ALERT_EN)
 
             # ردیف‌های هشدار
             for i, ev in enumerate(alert_events):
-                r = 24 + i
+                r = 25 + i
                 vals = [
                     ev.timestamp,
                     ev.level.value,
@@ -415,7 +515,7 @@ class ExcelReportGenerator:
                     c.border = _border()
 
             # ----- نمودار روند امتیازها -----
-            chart_row = 24 + len(alert_events) + 2
+            chart_row = 25 + len(alert_events) + 2
             ws.merge_cells(start_row=chart_row, end_row=chart_row, start_column=1, end_column=7)
             c = ws.cell(row=chart_row, column=1, value="روند امتیاز فشار فروش و جمع‌آوری")
             c.font = _subtitle_font()
@@ -436,11 +536,12 @@ class ExcelReportGenerator:
                 ws.cell(row=data_start, column=col).fill = PatternFill("solid", fgColor=Colors.HEADER_BG)
                 ws.cell(row=data_start, column=col).font = _header_font()
                 ws.cell(row=data_start, column=col).alignment = Alignment(horizontal="center")
+            _write_en_field_row(ws, data_start, DASH_TREND_EN)
 
             for i, (sp, acc) in enumerate(zip(sp_results, acc_results), 1):
-                ws.cell(row=data_start + i, column=1, value=i)
-                ws.cell(row=data_start + i, column=2, value=round(sp.total_score, 1))
-                ws.cell(row=data_start + i, column=3, value=round(acc.total_score, 1))
+                ws.cell(row=data_start + 1 + i, column=1, value=i)
+                ws.cell(row=data_start + 1 + i, column=2, value=round(sp.total_score, 1))
+                ws.cell(row=data_start + 1 + i, column=3, value=round(acc.total_score, 1))
                 # snapshot متناظر با این نمونه (برای محاسبه درصد نوسان)
                 snap = snapshots[i - 1] if i - 1 < len(snapshots) else None
                 prev_snap = snapshots[i - 2] if i - 2 >= 0 and (i - 2) < len(snapshots) else None
@@ -450,9 +551,9 @@ class ExcelReportGenerator:
                 pct_close = (round((snap.close_price - yest) / yest * 100, 2)
                              if snap and yest else None)
                 delta_30s = _delta_30s_pct(snap, prev_snap)
-                ws.cell(row=data_start + i, column=4, value=pct_last)
-                ws.cell(row=data_start + i, column=5, value=pct_close)
-                dcell = ws.cell(row=data_start + i, column=6, value=delta_30s)
+                ws.cell(row=data_start + 1 + i, column=4, value=pct_last)
+                ws.cell(row=data_start + 1 + i, column=5, value=pct_close)
+                dcell = ws.cell(row=data_start + 1 + i, column=6, value=delta_30s)
                 dcell.fill = PatternFill("solid", fgColor=_delta_color(delta_30s))
 
             # ساخت نمودار خطی
@@ -465,111 +566,148 @@ class ExcelReportGenerator:
             chart.width = 18
 
             data_ref = Reference(ws, min_col=2, min_row=data_start,
-                                  max_col=3, max_row=data_start + len(sp_results))
-            cats_ref = Reference(ws, min_col=1, min_row=data_start + 1,
-                                  max_row=data_start + len(sp_results))
+                                  max_col=3, max_row=data_start + 1 + len(sp_results))
+            cats_ref = Reference(ws, min_col=1, min_row=data_start + 2,
+                                  max_row=data_start + 1 + len(sp_results))
             chart.add_data(data_ref, titles_from_data=True)
             chart.set_categories(cats_ref)
 
             ws.add_chart(chart, f"E{chart_row}")
 
     # -----------------------------------------------------------------
-    # شیت ۲: SellPressure
+    # شیت ۲: BuySellPressure (دوطرفه — ادغام فشار فروش و فشار خرید)
     # -----------------------------------------------------------------
-    def _build_sell_pressure_sheet(self, sp_results: List[SellPressureResult],
-                                    snapshots: List):
-        ws = self.wb.create_sheet("SellPressure")
+    def _build_buysell_pressure_sheet(self, sp_results: List[SellPressureResult],
+                                      acc_results: List[AccumulationResult],
+                                      snapshots: List):
+        """فشار فروش و فشار خرید در یک شیت، کنار هم.
+        ستون‌ها: زمان، ۶ شاخص فروش، ۶ شاخص خرید، مجموع/سطح هر سمت، امتیاز کلی،
+        Δ30ث، ٪ نوسان لحظه‌ای/پایانی، و تجمعی ۵/۱۵ دقیقه هر دو سمت.
+        ردیف ۳: هدر فارسی، ردیف ۴: نام فیلد انگلیسی، داده از ردیف ۵.
+        """
+        from datetime import datetime as _dt
+        ws = self.wb.create_sheet("BuySellPressure")
         ws.sheet_view.rightToLeft = True
 
+        n_cols = len(BUYSELLPRESSURE_FA)
         # عنوان
-        ws.merge_cells("A1:L1")
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=n_cols)
         c = ws["A1"]
-        c.value = "موتور تشخیص فشار فروش - شش شاخص"
+        c.value = "موتور تشخیص فشار خرید و فروش (دوطرفه) — شش شاخص هر سمت"
         c.font = _title_font()
         c.alignment = Alignment(horizontal="center", vertical="center")
         c.fill = PatternFill("solid", fgColor=Colors.HEADER_BG)
         ws.row_dimensions[1].height = 26
 
-        # هدر جدول
-        headers = [
-            "زمان",
-            "ضعف قدرت خریدار (۲۰)", "خروج پول حقیقی (۲۰)",
-            "برتری سرانه فروش (۱۵)", "فاصله منفی آخرین-پایانی (۱۵)",
-            "افزایش سرعت عرضه (۱۵)", "تخلیه تقاضا/کف روز (۱۵)",
-            "مجموع", "سطح",
-            # حرکت اخیر قیمت (Δ30ث) — معیاری که sell_score با آن همخوان است
-            "Δ30ث قیمت٪",
-            # درصد نوسان قیمت (نسبت به قیمت دیروز) — در انتهای جدول
-            "٪ نوسان لحظه‌ای", "٪ نوسان پایانی",
-        ]
-        for i, h in enumerate(headers, 1):
+        # ردیف ۳: هدر فارسی
+        for i, h in enumerate(BUYSELLPRESSURE_FA, 1):
             c = ws.cell(row=3, column=i, value=h)
             c.font = _header_font()
             c.fill = PatternFill("solid", fgColor=Colors.HEADER_BG)
             c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             c.border = _border()
-        ws.row_dimensions[3].height = 38
-
-        # عرض ستون‌ها
-        widths = [12, 16, 16, 16, 16, 16, 16, 10, 18, 10, 9, 9]
-        for i, w in enumerate(widths, 1):
+        ws.row_dimensions[3].height = 40
+        # ردیف ۴: نام فیلد انگلیسی
+        _write_en_field_row(ws, 3, BUYSELLPRESSURE_EN)
+        for i, w in enumerate(BUYSELLPRESSURE_WIDTHS, 1):
             ws.column_dimensions[get_column_letter(i)].width = w
+        ws.freeze_panes = "B5"
 
-        # داده‌ها
-        for i, sp in enumerate(sp_results):
-            r = 4 + i
-            factors = sp.factors
-            # snapshot متناظر با این نتیجه (برای محاسبه درصد نوسان)
+        # زمان‌ها برای تجمعی پنجره‌ای (۵/۱۵ دقیقه)
+        def _to_sec(t):
+            try:
+                d = _dt.strptime(str(t).split()[-1][:8], "%H:%M:%S")
+                return d.hour * 3600 + d.minute * 60 + d.second
+            except Exception:
+                return None
+        sp_sec = [_to_sec(r.snapshot_time) for r in sp_results]
+        acc_sec = [_to_sec(r.snapshot_time) for r in acc_results]
+
+        def _window_avg(results, secs, idx, window_sec):
+            t0 = secs[idx]
+            if t0 is None:
+                return None
+            picked = [results[j].total_score for j in range(idx + 1)
+                      if secs[j] is not None and (t0 - secs[j]) <= window_sec]
+            return round(sum(picked) / len(picked), 1) if picked else None
+
+        n = max(len(sp_results), len(acc_results))
+        for i in range(n):
+            sp = sp_results[i] if i < len(sp_results) else None
+            acc = acc_results[i] if i < len(acc_results) else None
             snap = snapshots[i] if i < len(snapshots) else None
             prev_snap = snapshots[i - 1] if i > 0 and (i - 1) < len(snapshots) else None
+
+            sp_total = sp.total_score if sp else None
+            acc_total = acc.total_score if acc else None
+            overall = None
+            if sp_total is not None and acc_total is not None:
+                overall = round(min(max(50 + 0.5 * (acc_total - sp_total), 0), 100), 1)
+
             yest = snap.yesterday_price if snap else 0
-            pct_last = (round((snap.last_price - yest) / yest * 100, 2)
-                        if snap and yest else None)
-            pct_close = (round((snap.close_price - yest) / yest * 100, 2)
-                         if snap and yest else None)
+            pct_last = (round((snap.last_price - yest) / yest * 100, 2) if snap and yest else None)
+            pct_close = (round((snap.close_price - yest) / yest * 100, 2) if snap and yest else None)
             delta_30s = _delta_30s_pct(snap, prev_snap)
-            row_data = [
-                sp.snapshot_time,
-                round(factors[0].score, 1),
-                round(factors[1].score, 1),
-                round(factors[2].score, 1),
-                round(factors[3].score, 1),
-                round(factors[4].score, 1),
-                round(factors[5].score, 1),
-                round(sp.total_score, 1),
-                sp.level,
-                delta_30s,
-                pct_last, pct_close,
+
+            sell_cum5 = _window_avg(sp_results, sp_sec, i, 300)
+            buy_cum5 = _window_avg(acc_results, acc_sec, i, 300)
+            sell_cum15 = _window_avg(sp_results, sp_sec, i, 900)
+            buy_cum15 = _window_avg(acc_results, acc_sec, i, 900)
+
+            row_data = [sp.snapshot_time if sp else (acc.snapshot_time if acc else None)]
+            for k in range(6):
+                row_data.append(round(sp.factors[k].score, 1) if sp and len(sp.factors) > k else None)
+            for k in range(6):
+                row_data.append(round(acc.factors[k].score, 1) if acc and len(acc.factors) > k else None)
+            row_data += [
+                round(sp_total, 1) if sp_total is not None else None,
+                sp.level if sp else None,
+                round(acc_total, 1) if acc_total is not None else None,
+                acc.level if acc else None,
+                overall, delta_30s, pct_last, pct_close,
+                sell_cum5, buy_cum5, sell_cum15, buy_cum15,
             ]
+
+            r = 5 + i
             for j, v in enumerate(row_data, 1):
                 c = ws.cell(row=r, column=j, value=v)
                 c.font = _body_font()
                 c.alignment = Alignment(horizontal="center", vertical="center")
                 c.border = _border()
-                # رنگ‌دهی به ستون‌های شاخص (ستون‌های ۲ تا ۷)
-                if 2 <= j <= 7 and factors:
-                    f = factors[j - 2]
-                    if f.normalized >= 0.66:
-                        c.fill = PatternFill("solid", fgColor=Colors.DANGER)
-                    elif f.normalized >= 0.33:
-                        c.fill = PatternFill("solid", fgColor=Colors.WATCH)
-                    else:
-                        c.fill = PatternFill("solid", fgColor=Colors.NORMAL)
-                # رنگ مجموع
-                if j == 8:
-                    c.fill = PatternFill("solid", fgColor=_score_color(sp.total_score))
+                # ستون‌های شاخص فشار فروش (۲..۷)
+                if 2 <= j <= 7 and sp and len(sp.factors) >= j - 1:
+                    f = sp.factors[j - 2]
+                    c.fill = PatternFill("solid", fgColor=(
+                        Colors.DANGER if f.normalized >= 0.66 else
+                        Colors.WATCH if f.normalized >= 0.33 else Colors.NORMAL))
+                # ستون‌های شاخص فشار خرید (۸..۱۳)
+                elif 8 <= j <= 13 and acc and len(acc.factors) >= j - 7:
+                    f = acc.factors[j - 8]
+                    c.fill = PatternFill("solid", fgColor=(
+                        Colors.GREEN_ALERT if f.normalized >= 0.66 else
+                        Colors.WATCH if f.normalized >= 0.33 else Colors.NEUTRAL))
+                elif j == 14 and sp_total is not None:    # مجموع فشار فروش
+                    c.fill = PatternFill("solid", fgColor=_score_color(sp_total))
                     c.font = Font(name="B Nazanin", size=11, bold=True)
-                # رنگ سطح
-                if j == 9:
-                    c.fill = PatternFill("solid", fgColor=_score_color(sp.total_score))
-                # رنگ Δ30ث قیمت (ستون ۱۰) — قرمز=افت، سبز=رشد
-                if j == 10:
+                elif j == 15 and sp_total is not None:     # سطح فشار فروش
+                    c.fill = PatternFill("solid", fgColor=_score_color(sp_total))
+                elif j == 16 and acc_total is not None:    # مجموع جمع‌آوری
+                    c.fill = PatternFill("solid", fgColor=_acc_color(acc_total))
+                    c.font = Font(name="B Nazanin", size=11, bold=True)
+                elif j == 17 and acc_total is not None:    # سطح جمع‌آوری
+                    c.fill = PatternFill("solid", fgColor=_acc_color(acc_total))
+                elif j == 18 and overall is not None:      # امتیاز کلی
+                    col = _score_color(overall) if overall < 50 else _acc_color(overall)
+                    c.fill = PatternFill("solid", fgColor=col)
+                    c.font = Font(name="B Nazanin", size=11, bold=True)
+                elif j == 19:                              # Δ30ث
                     c.fill = PatternFill("solid", fgColor=_delta_color(delta_30s))
+                elif j in (20, 21):                        # ٪ نوسان لحظه‌ای/پایانی
+                    c.fill = PatternFill("solid", fgColor=_delta_color(v))
 
-        # نمودار ستونی برای شاخص‌ها (آخرین نمونه)
-        if sp_results:
-            last = sp_results[-1]
-            chart_data_row = 4 + len(sp_results) + 2
+        # نمودار ستونی: تجزیهٔ امتیاز دو طرف (آخرین نمونه)
+        if sp_results or acc_results:
+            chart_data_row = 5 + n + 2
             ws.cell(row=chart_data_row, column=1, value="شاخص").font = _header_font()
             ws.cell(row=chart_data_row, column=2, value="امتیاز").font = _header_font()
             ws.cell(row=chart_data_row, column=3, value="حداکثر").font = _header_font()
@@ -577,148 +715,34 @@ class ExcelReportGenerator:
                 ws.cell(row=chart_data_row, column=col).fill = PatternFill("solid", fgColor=Colors.HEADER_BG)
                 ws.cell(row=chart_data_row, column=col).font = _header_font()
                 ws.cell(row=chart_data_row, column=col).alignment = Alignment(horizontal="center")
-
-            for i, f in enumerate(last.factors):
-                r = chart_data_row + 1 + i
-                ws.cell(row=r, column=1, value=f.label)
-                ws.cell(row=r, column=2, value=round(f.score, 1))
-                ws.cell(row=r, column=3, value=f.max_points)
-
+            last_sp = sp_results[-1] if sp_results else None
+            last_acc = acc_results[-1] if acc_results else None
+            rows_chart = []
+            if last_sp:
+                for f in last_sp.factors:
+                    rows_chart.append((f.label, round(f.score, 1), f.max_points))
+            if last_acc:
+                for f in last_acc.factors:
+                    rows_chart.append((f.label, round(f.score, 1), f.max_points))
+            for k, (lab, sc, mx) in enumerate(rows_chart):
+                rr = chart_data_row + 1 + k
+                ws.cell(row=rr, column=1, value=lab)
+                ws.cell(row=rr, column=2, value=sc)
+                ws.cell(row=rr, column=3, value=mx)
             chart = BarChart()
-            chart.type = "bar"
-            chart.style = 12
-            chart.title = "تجزیه امتیاز فشار فروش (آخرین نمونه)"
-            chart.y_axis.title = "شاخص"
-            chart.x_axis.title = "امتیاز"
-            chart.height = 10
-            chart.width = 22
+            chart.type = "bar"; chart.style = 12
+            chart.title = "تجزیهٔ امتیاز فشار فروش و خرید (آخرین نمونه)"
+            chart.y_axis.title = "شاخص"; chart.x_axis.title = "امتیاز"
+            chart.height = 12; chart.width = 24
+            kk = max(len(rows_chart), 1)
             data_ref = Reference(ws, min_col=2, min_row=chart_data_row,
-                                  max_col=3, max_row=chart_data_row + 6)
+                                 max_col=3, max_row=chart_data_row + kk)
             cats_ref = Reference(ws, min_col=1, min_row=chart_data_row + 1,
-                                  max_row=chart_data_row + 6)
+                                 max_row=chart_data_row + kk)
             chart.add_data(data_ref, titles_from_data=True)
             chart.set_categories(cats_ref)
-            ws.add_chart(chart, f"M3")
+            ws.add_chart(chart, f"{get_column_letter(n_cols + 2)}3")
 
-    # -----------------------------------------------------------------
-    # شیت ۳: Accumulation
-    # -----------------------------------------------------------------
-    def _build_accumulation_sheet(self, acc_results: List[AccumulationResult],
-                                   snapshots: List):
-        ws = self.wb.create_sheet("Accumulation")
-        ws.sheet_view.rightToLeft = True
-
-        # عنوان
-        ws.merge_cells("A1:L1")
-        c = ws["A1"]
-        c.value = "موتور تشخیص جمع‌آوری سهم - شش شاخص"
-        c.font = _title_font()
-        c.alignment = Alignment(horizontal="center", vertical="center")
-        c.fill = PatternFill("solid", fgColor=Colors.HEADER_BG)
-        ws.row_dimensions[1].height = 26
-
-        headers = [
-            "زمان",
-            "قدرت خرید حقیقی (۲۰)", "ورود پول حقیقی (۲۰)",
-            "برتری تعداد خریداران (۱۰)", "جذب عرضه/ماندگاری (۲۰)",
-            "مقاومت قیمت (۲۰)", "تداوم خرید (۱۰)",
-            "مجموع", "سطح",
-            # حرکت اخیر قیمت (Δ30ث) — معیاری که buy_score با آن همخوان است
-            "Δ30ث قیمت٪",
-            # درصد نوسان قیمت (نسبت به قیمت دیروز) — در انتهای جدول
-            "٪ نوسان لحظه‌ای", "٪ نوسان پایانی",
-        ]
-        for i, h in enumerate(headers, 1):
-            c = ws.cell(row=3, column=i, value=h)
-            c.font = _header_font()
-            c.fill = PatternFill("solid", fgColor=Colors.HEADER_BG)
-            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            c.border = _border()
-        ws.row_dimensions[3].height = 38
-
-        widths = [12, 18, 18, 18, 18, 18, 14, 10, 22, 10, 9, 9]
-        for i, w in enumerate(widths, 1):
-            ws.column_dimensions[get_column_letter(i)].width = w
-
-        for i, acc in enumerate(acc_results):
-            r = 4 + i
-            factors = acc.factors
-            # snapshot متناظر با این نتیجه (برای محاسبه درصد نوسان)
-            snap = snapshots[i] if i < len(snapshots) else None
-            prev_snap = snapshots[i - 1] if i > 0 and (i - 1) < len(snapshots) else None
-            yest = snap.yesterday_price if snap else 0
-            pct_last = (round((snap.last_price - yest) / yest * 100, 2)
-                        if snap and yest else None)
-            pct_close = (round((snap.close_price - yest) / yest * 100, 2)
-                         if snap and yest else None)
-            delta_30s = _delta_30s_pct(snap, prev_snap)
-            row_data = [
-                acc.snapshot_time,
-                round(factors[0].score, 1),
-                round(factors[1].score, 1),
-                round(factors[2].score, 1),
-                round(factors[3].score, 1),
-                round(factors[4].score, 1),
-                round(factors[5].score, 1),
-                round(acc.total_score, 1),
-                acc.level,
-                delta_30s,
-                pct_last, pct_close,
-            ]
-            for j, v in enumerate(row_data, 1):
-                c = ws.cell(row=r, column=j, value=v)
-                c.font = _body_font()
-                c.alignment = Alignment(horizontal="center", vertical="center")
-                c.border = _border()
-                if 2 <= j <= 7:
-                    f = factors[j - 2]
-                    if f.normalized >= 0.66:
-                        c.fill = PatternFill("solid", fgColor=Colors.GREEN_ALERT)
-                    elif f.normalized >= 0.33:
-                        c.fill = PatternFill("solid", fgColor=Colors.WATCH)
-                    else:
-                        c.fill = PatternFill("solid", fgColor=Colors.NEUTRAL)
-                if j == 8:
-                    c.fill = PatternFill("solid", fgColor=_acc_color(acc.total_score))
-                    c.font = Font(name="B Nazanin", size=11, bold=True)
-                if j == 9:
-                    c.fill = PatternFill("solid", fgColor=_acc_color(acc.total_score))
-                # رنگ Δ30ث قیمت (ستون ۱۰) — قرمز=افت، سبز=رشد
-                if j == 10:
-                    c.fill = PatternFill("solid", fgColor=_delta_color(delta_30s))
-
-        # نمودار آخرین نمونه
-        if acc_results:
-            last = acc_results[-1]
-            chart_data_row = 4 + len(acc_results) + 2
-            ws.cell(row=chart_data_row, column=1, value="شاخص").font = _header_font()
-            ws.cell(row=chart_data_row, column=2, value="امتیاز").font = _header_font()
-            ws.cell(row=chart_data_row, column=3, value="حداکثر").font = _header_font()
-            for col in (1, 2, 3):
-                ws.cell(row=chart_data_row, column=col).fill = PatternFill("solid", fgColor=Colors.HEADER_BG)
-                ws.cell(row=chart_data_row, column=col).font = _header_font()
-
-            for i, f in enumerate(last.factors):
-                r = chart_data_row + 1 + i
-                ws.cell(row=r, column=1, value=f.label)
-                ws.cell(row=r, column=2, value=round(f.score, 1))
-                ws.cell(row=r, column=3, value=f.max_points)
-
-            chart = BarChart()
-            chart.type = "bar"
-            chart.style = 11
-            chart.title = "تجزیه امتیاز جمع‌آوری (آخرین نمونه)"
-            chart.y_axis.title = "شاخص"
-            chart.x_axis.title = "امتیاز"
-            chart.height = 10
-            chart.width = 22
-            data_ref = Reference(ws, min_col=2, min_row=chart_data_row,
-                                  max_col=3, max_row=chart_data_row + 6)
-            cats_ref = Reference(ws, min_col=1, min_row=chart_data_row + 1,
-                                  max_row=chart_data_row + 6)
-            chart.add_data(data_ref, titles_from_data=True)
-            chart.set_categories(cats_ref)
-            ws.add_chart(chart, f"M3")
 
     # -----------------------------------------------------------------
     # شیت ۳.۵: 5min Trend (تجمیع ۵دقیقه‌ای — روند سیگنال vs حرکت قیمت)
@@ -741,10 +765,10 @@ class ExcelReportGenerator:
 
         ws = self.wb.create_sheet("5min_Trend")
         ws.sheet_view.rightToLeft = True
-        ws.freeze_panes = "A4"
+        ws.freeze_panes = "A5"
 
         # عنوان
-        ws.merge_cells("A1:K1")
+        ws.merge_cells("A1:M1")
         c = ws["A1"]
         c.value = "روند تجمیع‌شدهٔ ۵دقیقه‌ای — سیگنال vs حرکت قیمت"
         c.font = _title_font()
@@ -753,7 +777,7 @@ class ExcelReportGenerator:
         ws.row_dimensions[1].height = 26
 
         # توضیح
-        ws.merge_cells("A2:K2")
+        ws.merge_cells("A2:M2")
         c = ws["A2"]
         c.value = ("Δقیمت٪ = تغییر قیمت درون همان بازهٔ ۵دقیقه‌ای (نه نسبت به دیروز). "
                    "net = جمع‌آوری − فشار فروش. همخوانی ✓ یعنی جهت net با جهت Δقیمت سازگار است.")
@@ -765,6 +789,7 @@ class ExcelReportGenerator:
             "بازه", "n", "قیمت ابتدا", "قیمت انتها",
             "Δقیمت ۵دقیقه٪", "avg فشار فروش", "avg جمع‌آوری",
             "net سیگنال", "بیشینه فشار", "حجم معاملات", "همخوانی",
+            "٪ نوسان لحظه‌ای", "٪ نوسان پایانی",
         ]
         for i, h in enumerate(headers, 1):
             c = ws.cell(row=3, column=i, value=h)
@@ -773,8 +798,9 @@ class ExcelReportGenerator:
             c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             c.border = _border()
         ws.row_dimensions[3].height = 34
+        _write_en_field_row(ws, 3, TREND5_EN)
 
-        widths = [14, 5, 11, 11, 13, 13, 12, 10, 11, 14, 9]
+        widths = [14, 5, 11, 11, 13, 13, 12, 10, 11, 14, 9, 9, 9]
         for i, w in enumerate(widths, 1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -796,7 +822,7 @@ class ExcelReportGenerator:
 
         aligned = 0
         total = 0
-        r = 4
+        r = 5
         for b in sorted(buckets):
             idxs = buckets[b]
             grp_snaps = [snapshots[i] for i in idxs]
@@ -835,9 +861,16 @@ class ExcelReportGenerator:
 
             t0 = str(grp_snaps[0].tehran_time)[:5]
             t1 = str(grp_snaps[-1].tehran_time)[:5]
+            end_snap = grp_snaps[-1]
+            yest_e = end_snap.yesterday_price
+            pct_last_b = (round((end_snap.last_price - yest_e) / yest_e * 100, 2)
+                          if yest_e else None)
+            pct_close_b = (round((end_snap.close_price - yest_e) / yest_e * 100, 2)
+                           if yest_e else None)
             row_data = [
                 f"{t0}-{t1}", len(idxs), start_price, end_price,
                 dpct, asell, abuy, net, mxsell, vol_traded, flag,
+                pct_last_b, pct_close_b,
             ]
             for j, v in enumerate(row_data, 1):
                 c = ws.cell(row=r, column=j, value=v)
@@ -856,12 +889,21 @@ class ExcelReportGenerator:
             # رنگ avg فشار فروش (ستون ۶) و avg جمع‌آوری (ستون ۷)
             ws.cell(row=r, column=6).fill = PatternFill("solid", fgColor=_score_color(asell))
             ws.cell(row=r, column=7).fill = PatternFill("solid", fgColor=_acc_color(abuy))
+            # رنگ ٪ نوسان لحظه‌ای/پایانی (ستون‌های ۱۲ و ۱۳)
+            for pct_col in (12, 13):
+                v = ws.cell(row=r, column=pct_col).value
+                if v is None:
+                    continue
+                ws.cell(row=r, column=pct_col).fill = PatternFill(
+                    "solid",
+                    fgColor=(Colors.GREEN_ALERT if v > 0 else
+                             Colors.DANGER if v < 0 else Colors.NEUTRAL))
             r += 1
 
         # خلاصه
         if total:
             sr = r + 1
-            ws.merge_cells(start_row=sr, end_row=sr, start_column=1, end_column=11)
+            ws.merge_cells(start_row=sr, end_row=sr, start_column=1, end_column=13)
             c = ws.cell(row=sr, column=1, value="خلاصه")
             c.font = _subtitle_font()
             c.fill = PatternFill("solid", fgColor=Colors.SUBTITLE_BG)
@@ -875,7 +917,7 @@ class ExcelReportGenerator:
             ]
             for i, note in enumerate(notes):
                 rr = sr + 1 + i
-                ws.merge_cells(start_row=rr, end_row=rr, start_column=1, end_column=11)
+                ws.merge_cells(start_row=rr, end_row=rr, start_column=1, end_column=13)
                 c = ws.cell(row=rr, column=1, value=note)
                 c.font = _body_font()
                 c.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
@@ -886,7 +928,7 @@ class ExcelReportGenerator:
     def _build_history_sheet(self, snapshots: List, combined_states: List[CombinedState]):
         ws = self.wb.create_sheet("History")
         ws.sheet_view.rightToLeft = True
-        ws.freeze_panes = "A4"
+        ws.freeze_panes = "A5"
 
         # عنوان
         ws.merge_cells("A1:Q1")
@@ -914,13 +956,14 @@ class ExcelReportGenerator:
             c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             c.border = _border()
         ws.row_dimensions[3].height = 30
+        _write_en_field_row(ws, 3, HISTORY_EN)
 
         widths = [12, 12, 12, 12, 12, 12, 12, 14, 16, 12, 16, 12, 12, 22, 10, 9, 9]
         for i, w in enumerate(widths, 1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
         for i, (snap, state) in enumerate(zip(snapshots, combined_states)):
-            r = 4 + i
+            r = 5 + i
             money_flow = snap.real_money_flow
             money_label = f"{money_flow/1e9:+.2f} میلیارد"
             if abs(money_flow) < 1e9:
@@ -969,7 +1012,7 @@ class ExcelReportGenerator:
             )
 
         # جدول خلاصه در پایان
-        summary_row = 4 + len(snapshots) + 2
+        summary_row = 5 + len(snapshots) + 2
         ws.cell(row=summary_row, column=1, value="خلاصه").font = _subtitle_font()
         ws.cell(row=summary_row, column=1).fill = PatternFill("solid", fgColor=Colors.SUBTITLE_BG)
         ws.merge_cells(start_row=summary_row, end_row=summary_row, start_column=1, end_column=4)
@@ -1000,7 +1043,7 @@ class ExcelReportGenerator:
     def _build_snapshots_sheet(self, snapshots: List[MarketSnapshot]):
         ws = self.wb.create_sheet("Snapshots")
         ws.sheet_view.rightToLeft = True
-        ws.freeze_panes = "B4"
+        ws.freeze_panes = "B5"
 
         # عنوان
         ws.merge_cells("A1:BL1")
@@ -1058,6 +1101,7 @@ class ExcelReportGenerator:
             c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             c.border = _border()
         ws.row_dimensions[3].height = 32
+        _write_en_field_row(ws, 3, SNAPSHOTS_EN)
 
         # عرض ستون‌ها - ستون‌های اصلی پهن‌تر
         col_widths = [11, 9, 7, 8, 8, 8, 10,
@@ -1085,7 +1129,7 @@ class ExcelReportGenerator:
             "closed": "بسته",
         }
         for i, snap in enumerate(snapshots):
-            r = 4 + i
+            r = 5 + i
             bid_prices = [row.price for row in snap.buy_rows]
             bid_volumes = [row.volume for row in snap.buy_rows]
             bid_counts = [row.order_count for row in snap.buy_rows]
@@ -1168,7 +1212,7 @@ class ExcelReportGenerator:
                              yesterday_price: float = 0):
         ws = self.wb.create_sheet("Trades")
         ws.sheet_view.rightToLeft = True
-        ws.freeze_panes = "B4"
+        ws.freeze_panes = "B5"
 
         # عنوان
         ws.merge_cells("A1:H1")
@@ -1191,6 +1235,7 @@ class ExcelReportGenerator:
             c.alignment = Alignment(horizontal="center", vertical="center")
             c.border = _border()
         ws.row_dimensions[3].height = 24
+        _write_en_field_row(ws, 3, TRADES_EN)
 
         widths = [7, 12, 14, 12, 18, 12, 9, 9]
         for i, w in enumerate(widths, 1):
@@ -1198,7 +1243,7 @@ class ExcelReportGenerator:
 
         # داده‌ها
         for i, tr in enumerate(trades):
-            r = 4 + i
+            r = 5 + i
             aggressor_label = {"buy": "خرید", "sell": "فروش"}.get(
                 tr.aggressor_side, "نامشخص"
             )
@@ -1227,7 +1272,7 @@ class ExcelReportGenerator:
 
         # خلاصه پایانی
         if trades:
-            summary_row = 4 + len(trades) + 2
+            summary_row = 5 + len(trades) + 2
             ws.cell(row=summary_row, column=1, value="خلاصه").font = _subtitle_font()
             ws.cell(row=summary_row, column=1).fill = PatternFill("solid", fgColor=Colors.SUBTITLE_BG)
             ws.merge_cells(start_row=summary_row, end_row=summary_row, start_column=1, end_column=8)
@@ -1262,17 +1307,26 @@ class ExcelReportGenerator:
         ws.sheet_view.rightToLeft = True
 
         # عرض ستون‌ها
-        for col, w in zip("AB", [32, 60]):
+        for col, w in zip("ABC", [30, 26, 60]):
             ws.column_dimensions[col].width = w
 
         # عنوان
-        ws.merge_cells("A1:B1")
+        ws.merge_cells("A1:C1")
         c = ws["A1"]
         c.value = "Metadata - مشخصات نماد و جلسه معاملاتی"
         c.font = _title_font()
         c.alignment = Alignment(horizontal="center", vertical="center")
         c.fill = PatternFill("solid", fgColor=Colors.HEADER_BG)
         ws.row_dimensions[1].height = 26
+
+        # هدر: فارسی | نام فیلد انگلیسی | مقدار
+        for i, h in enumerate(["فیلد (فارسی)", "نام فیلد (English)", "مقدار"], 1):
+            hc = ws.cell(row=2, column=i, value=h)
+            hc.font = _header_font()
+            hc.fill = PatternFill("solid", fgColor=Colors.HEADER_BG)
+            hc.alignment = Alignment(horizontal="center", vertical="center")
+            hc.border = _border()
+        ws.row_dimensions[2].height = 22
 
         # محاسبه خلاصه
         if snapshots:
@@ -1327,13 +1381,20 @@ class ExcelReportGenerator:
 
         for i, (k, v) in enumerate(meta_data, 1):
             r = 2 + i
+            en = METADATA_EN[i - 1] if i - 1 < len(METADATA_EN) else ""
             c = ws.cell(row=r, column=1, value=k)
             c.font = _subtitle_font()
             c.fill = PatternFill("solid", fgColor=Colors.SUBTITLE_BG)
             c.alignment = Alignment(horizontal="right", vertical="center")
             c.border = _border()
 
-            c = ws.cell(row=r, column=2, value=str(v))
+            c = ws.cell(row=r, column=2, value=en)
+            c.font = Font(name="B Nazanin", size=9, color=EN_ROW_FG)
+            c.fill = PatternFill("solid", fgColor=EN_ROW_BG)
+            c.alignment = Alignment(horizontal="center", vertical="center")
+            c.border = _border()
+
+            c = ws.cell(row=r, column=3, value=str(v))
             c.font = _body_font()
             c.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
             c.border = _border()
