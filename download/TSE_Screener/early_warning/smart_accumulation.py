@@ -136,6 +136,13 @@ class BuyPressureDetector:
             return fallback
         return self.normalizer.get_threshold(symbol, factor_name, fallback)
 
+    def _stale_factor(self, snap):
+        """مهار امتیاز وقتی ClientType تأخیر دارد (دادهٔ تخمینی)."""
+        try:
+            return 0.5 if getattr(snap, "clienttype_stale", False) else 1.0
+        except Exception:
+            return 1.0
+
     # -------------------------------------------------------------------
     # شاخص ۱: گستردگی مشارکت خریداران حقیقی (۱۵ امتیاز)
     #   (Nb−Ns)/(Nb+Ns)  —  آینه‌ای sell_breadth
@@ -144,8 +151,9 @@ class BuyPressureDetector:
                             prev_snap: Optional[MarketSnapshot]) -> BuyPressureFactorResult:
         if prev_snap is None:
             return self._no_prev("buy_breadth", "تعداد معاملات حقیقی")
-        nb = snap.real_buy_count - prev_snap.real_buy_count
-        ns = snap.real_sell_count - prev_snap.real_sell_count
+        # از فیلدهای بازه‌ای تصحیح‌شده (در data_collector._classify_interval_real)
+        nb = snap.interval_real_buy_count
+        ns = snap.interval_real_sell_count
         denom = nb + ns
         if denom == 0:
             return self._no_trades(
@@ -154,8 +162,9 @@ class BuyPressureDetector:
         raw = _safe_div(nb - ns, denom)
         full_at = self._get_threshold(snap.symbol, "buy_breadth")
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
-        score = norm * self.weights["buy_breadth"]
-        desc = f"Δ خریداران={nb}، Δ فروشندگان={ns} → گستردگی={raw:+.3f} (افزایش خریدار = مثبت)"
+        score = norm * self.weights["buy_breadth"] * self._stale_factor(snap)
+        stale_txt = " (ClientType تأخیر)" if getattr(snap, "clienttype_stale", False) else ""
+        desc = f"Δ خریداران={nb}، Δ فروشندگان={ns} → گستردگی={raw:+.3f} (افزایش خریدار = مثبت){stale_txt}"
         return BuyPressureFactorResult(
             name="buy_breadth", label=self.LABELS["buy_breadth"],
             max_points=self.weights["buy_breadth"], raw_value=raw,
@@ -170,8 +179,9 @@ class BuyPressureDetector:
                          prev_snap: Optional[MarketSnapshot]) -> BuyPressureFactorResult:
         if prev_snap is None:
             return self._no_prev("buy_flow", "ارزش معاملات حقیقی")
-        vb = snap.real_buy_value - prev_snap.real_buy_value
-        vs = snap.real_sell_value - prev_snap.real_sell_value
+        # از ارزش بازه‌ای تصحیح‌شده (از معاملات واقعی، نه دلتای تجمعی ClientType)
+        vb = snap.interval_real_buy_value
+        vs = snap.interval_real_sell_value
         denom = vb + vs
         if denom == 0:
             return self._no_trades(
@@ -180,8 +190,9 @@ class BuyPressureDetector:
         raw = _safe_div(vb - vs, denom)
         full_at = self._get_threshold(snap.symbol, "buy_flow")
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
-        score = norm * self.weights["buy_flow"]
-        desc = f"Δ ارزش خرید={vb:,.0f}، Δ ارزش فروش={vs:,.0f} → ورود={raw:+.3f}"
+        score = norm * self.weights["buy_flow"] * self._stale_factor(snap)
+        stale_txt = " (ClientType تأخیر)" if getattr(snap, "clienttype_stale", False) else ""
+        desc = f"Δ ارزش خرید={vb:,.0f}، Δ ارزش فروش={vs:,.0f} → ورود={raw:+.3f}{stale_txt}"
         return BuyPressureFactorResult(
             name="buy_flow", label=self.LABELS["buy_flow"],
             max_points=self.weights["buy_flow"], raw_value=raw,
@@ -196,10 +207,11 @@ class BuyPressureDetector:
                            prev_snap: Optional[MarketSnapshot]) -> BuyPressureFactorResult:
         if prev_snap is None:
             return self._no_prev("buy_ticket", "سرانه معاملات حقیقی")
-        nb = snap.real_buy_count - prev_snap.real_buy_count
-        ns = snap.real_sell_count - prev_snap.real_sell_count
-        vb = snap.real_buy_value - prev_snap.real_buy_value
-        vs = snap.real_sell_value - prev_snap.real_sell_value
+        # از فیلدهای بازه‌ای تصحیح‌شده
+        nb = snap.interval_real_buy_count
+        ns = snap.interval_real_sell_count
+        vb = snap.interval_real_buy_value
+        vs = snap.interval_real_sell_value
         if nb == 0 and ns == 0:
             return self._no_trades(
                 "buy_ticket", "معامله حقیقی",
@@ -210,8 +222,9 @@ class BuyPressureDetector:
         raw = math.log(ratio) if (not math.isnan(ratio) and ratio > 0) else float("nan")
         full_at = self._get_threshold(snap.symbol, "buy_ticket")
         norm = _clamp(_safe_div(raw, full_at)) if not math.isnan(raw) else 0.0
-        score = norm * self.weights["buy_ticket"]
-        desc = f"سرانه خرید={avg_b:,.0f}، سرانه فروش={avg_s:,.0f} → ln={raw:+.3f}"
+        score = norm * self.weights["buy_ticket"] * self._stale_factor(snap)
+        stale_txt = " (ClientType تأخیر)" if getattr(snap, "clienttype_stale", False) else ""
+        desc = f"سرانه خرید={avg_b:,.0f}، سرانه فروش={avg_s:,.0f} → ln={raw:+.3f}{stale_txt}"
         return BuyPressureFactorResult(
             name="buy_ticket", label=self.LABELS["buy_ticket"],
             max_points=self.weights["buy_ticket"], raw_value=raw,

@@ -18,7 +18,7 @@ import random
 import time
 import math
 import re
-from dataclasses import dataclass, field, asdict, fields
+from dataclasses import dataclass, field, asdict, fields, MISSING
 from datetime import datetime, timedelta, date, timezone
 from enum import Enum
 from pathlib import Path
@@ -133,6 +133,14 @@ class MarketSnapshot:
     interval_real_sell_value: float = 0.0
     interval_real_buy_count: int = 0
     interval_real_sell_count: int = 0
+    # --- کیفیت دادهٔ حقیقی/حقوقی (پچ رفع تأخیر ClientType) ---
+    # حجم/ارزش بازهٔ حقیقی اکنون در _classify_interval_real از معاملات (aggressor)
+    # و interval_volume محاسبه می‌شود، نه از دلتای تجمعی ClientType.
+    clienttype_stale: bool = False          # True اگر ClientType تأخیر داشته/پرش کرده
+    clienttype_lag_shares: int = 0          # سهم معامله‌شده ولی هنوز طبقه‌بندی‌نشده
+    interval_buy_volume: int = 0            # حجم خریدآغازگر واقعی در بازه (از trades)
+    interval_sell_volume: int = 0           # حجم فروش‌آغازگر واقعی در بازه
+    last_fresh_real_frac: float = 0.5       # نسبت حقیقی حمل‌شده از آخرین نمونهٔ تازه
     ask5_volume: float = 0.0   # مجموع حجم ۵ ردیف عرضه (محاسبه‌شده)
     bid5_volume: float = 0.0   # مجموع حجم ۵ ردیف تقاضا (محاسبه‌شده)
 
@@ -200,11 +208,23 @@ class MarketSnapshot:
         dc = d.get("data_complete")
         data_complete = bool(dc) if dc is not None else True
         # فقط فیلدهای معتبر dataclass را از d بگیریم (ستون‌های اضافی DB مثل snapshot_id نادیده)
+        # تبدیل None → پیش‌فرض فیلد: ستون‌های جدیدِ اضافه‌شده (ALTER TABLE) روی ردیف‌های
+        # قدیمیِ DB مقدار NULL دارند؛ بدون این تبدیل، None به موتور می‌رسد و
+        # «NoneType - NoneType» می‌شود.
+        defaults: Dict = {}
+        for f in fields(cls):
+            if f.default is not MISSING:
+                defaults[f.name] = f.default
+            elif f.default_factory is not MISSING:  # لیست‌ها (buy_rows و …) جدا مدیریت می‌شوند
+                defaults[f.name] = None
         valid = {f.name for f in fields(cls)}
         kwargs: Dict = {}
         for k, v in d.items():
             if k in valid:
-                kwargs[k] = v
+                if v is None and defaults.get(k) is not None:
+                    kwargs[k] = defaults[k]
+                else:
+                    kwargs[k] = v
         kwargs["buy_rows"] = buy_rows
         kwargs["sell_rows"] = sell_rows
         kwargs["missing_fields"] = missing_fields
@@ -726,17 +746,15 @@ class MarketDataCollector:
             legal_sell_count=ct.get("legal_sell_count", 0) if ct else 0,
         )
 
-        # مقادیر بازه‌ای از تفاضل نمونه قبلی (جلوگیری از دوباره‌شماری داده تجمعی)
+        # مقادیر بازه‌ای: حجم کل/قیمت از ClosingPrice (قابل‌اعتماد و لحظه‌ای)؛
+        # فشار حقیقی/حقوقی با تشخیص تأخیر ClientType + fallback مبتنی بر معاملات
+        # (جلوگیری از دوباره‌شماری دادهٔ تجمعی و رفع پرش‌های جبرانی).
         if prev_snap is not None:
+            snap.last_fresh_real_frac = prev_snap.last_fresh_real_frac
             snap.interval_volume = max(0, snap.total_volume - prev_snap.total_volume)
             snap.interval_value = max(0, snap.total_value - prev_snap.total_value)
             snap.interval_trade_count = max(0, snap.total_trade_count - prev_snap.total_trade_count)
-            snap.interval_real_buy_volume = max(0, snap.real_buy_volume - prev_snap.real_buy_volume)
-            snap.interval_real_sell_volume = max(0, snap.real_sell_volume - prev_snap.real_sell_volume)
-            snap.interval_real_buy_value = max(0.0, snap.real_buy_value - prev_snap.real_buy_value)
-            snap.interval_real_sell_value = max(0.0, snap.real_sell_value - prev_snap.real_sell_value)
-            snap.interval_real_buy_count = max(0, snap.real_buy_count - prev_snap.real_buy_count)
-            snap.interval_real_sell_count = max(0, snap.real_sell_count - prev_snap.real_sell_count)
+            self._classify_interval_real(snap, prev_snap, trades)
 
         # مجموع حجم ۵ ردیف عرضه/تقاضا (برای موتورهای فروش/خرید)
         snap.ask5_volume = float(sum(r.volume for r in (snap.sell_rows or [])[:5]))
@@ -766,8 +784,110 @@ class MarketDataCollector:
         else:
             return MarketPhase.CLOSED.value
 
+    @staticmethod
+    def _classify_interval_real(snap, prev_snap, trades):
+        """محاسبهٔ حجم/ارزش فشار حقیقی در بازه با تشخیص تأخیر ClientType.
+
+        اولویت داده‌ها (از قابل‌اعتماد به کم‌اعتماد):
+          ۱) interval_volume و معاملات (aggressor side) — هر دو لحظه‌ای از TSETMC.
+          ۲) دلتای تجمعی ClientType — فقط اگر تازه باشد.
+        در هر حالت، خروجی در بازهٔ interval_volume مهار می‌شود تا پرش جبرانی نباشد
+        (مثل ۳۴٬۰۰۰ در برابر ۵۲۸). money_flow به‌صورت بازه‌ای از ارزش واقعی معاملات
+        محاسبه می‌شود، نه از حجم تجمعی × قیمت پایانی.
+        """
+        d_total = max(0, snap.total_volume - prev_snap.total_volume)
+        d_trade_count = max(0, snap.total_trade_count - prev_snap.total_trade_count)
+        d_rbv = snap.real_buy_volume - prev_snap.real_buy_volume
+        d_rsv = snap.real_sell_volume - prev_snap.real_sell_volume
+        d_rbc = snap.real_buy_count - prev_snap.real_buy_count
+        d_rsc = snap.real_sell_count - prev_snap.real_sell_count
+        classified = max(0, d_rbv) + max(0, d_rsv)
+
+        # --- تشخیص تأخیر/پرش ClientType ---
+        frozen = (snap.real_buy_volume == prev_snap.real_buy_volume and
+                  snap.real_sell_volume == prev_snap.real_sell_volume and d_total > 0)
+        backward = (d_rbv < 0 or d_rsv < 0)
+        spike = (d_total > 0 and classified > d_total * 1.2)         # پرش جبرانی > حجم واقعی
+        coverage = ((snap.real_buy_volume + snap.legal_buy_volume) /
+                    max(snap.total_volume, 1))
+        lagged = coverage < 0.95                                     # بخشی هنوز طبقه‌بندی‌نشده
+
+        snap.clienttype_stale = bool(frozen or backward or spike or lagged)
+        snap.clienttype_lag_shares = max(
+            0, snap.total_volume - (snap.real_buy_volume + snap.legal_buy_volume))
+
+        # --- حجم واقعی خرید/فروش در بازه از روی معاملات (قابل‌اعتماد، لحظه‌ای) ---
+        t0, t1 = str(prev_snap.tehran_time), str(snap.tehran_time)
+
+        def _in_win(t):
+            ts = str(t)
+            return t0 <= ts <= t1
+
+        iv_buy = sum(t.trade_volume for t in trades
+                     if getattr(t, "aggressor_side", None) == "buy" and _in_win(getattr(t, "trade_time", "")))
+        iv_sell = sum(t.trade_volume for t in trades
+                      if getattr(t, "aggressor_side", None) == "sell" and _in_win(getattr(t, "trade_time", "")))
+        vb = sum(t.trade_price * t.trade_volume for t in trades
+                 if getattr(t, "aggressor_side", None) == "buy" and _in_win(getattr(t, "trade_time", "")))
+        vs = sum(t.trade_price * t.trade_volume for t in trades
+                 if getattr(t, "aggressor_side", None) == "sell" and _in_win(getattr(t, "trade_time", "")))
+        snap.interval_buy_volume = iv_buy
+        snap.interval_sell_volume = iv_sell
+
+        # اگر در بازه معامله‌ای نداشتیم، نصف d_total به هر سمت (خنثی)
+        base_buy = iv_buy if (iv_buy + iv_sell) > 0 else d_total / 2.0
+        base_sell = iv_sell if (iv_buy + iv_sell) > 0 else d_total / 2.0
+
+        # نسبت حقیقی: از نمونهٔ فعلی اگر تازه، وگرنه حمل‌شده
+        rb = snap.real_buy_volume + snap.real_sell_volume
+        lb = snap.legal_buy_volume + snap.legal_sell_volume
+        if (rb + lb) > 0:
+            frac_real = rb / (rb + lb)
+            if not snap.clienttype_stale:
+                snap.last_fresh_real_frac = frac_real
+        else:
+            frac_real = snap.last_fresh_real_frac
+        if snap.clienttype_stale:
+            frac_real = snap.last_fresh_real_frac
+
+        # --- حجم حقیقی بازه (مهار در d_total) ---
+        snap.interval_real_buy_volume = round(base_buy * frac_real)
+        snap.interval_real_sell_volume = round(base_sell * frac_real)
+        tot = snap.interval_real_buy_volume + snap.interval_real_sell_volume
+        if d_total > 0 and tot > d_total:
+            f = d_total / tot
+            snap.interval_real_buy_volume = round(snap.interval_real_buy_volume * f)
+            snap.interval_real_sell_volume = round(snap.interval_real_sell_volume * f)
+
+        # --- تعداد حقیقی بازه: دلتای تجمعی مهارشده در d_trade_count (یا توزیع بر frac_real) ---
+        nb_raw = max(0, d_rbc)
+        ns_raw = max(0, d_rsc)
+        if (nb_raw + ns_raw) > d_trade_count and d_trade_count > 0:
+            # پرش تعداد هم مهار می‌شود
+            f = d_trade_count / (nb_raw + ns_raw)
+            nb_raw, ns_raw = round(nb_raw * f), round(ns_raw * f)
+        if snap.clienttype_stale and d_trade_count > 0 and (nb_raw + ns_raw) == 0:
+            nb_raw = round(d_trade_count * frac_real)
+            ns_raw = round(d_trade_count * (1 - frac_real))
+        snap.interval_real_buy_count = nb_raw
+        snap.interval_real_sell_count = ns_raw
+
+        # --- ارزش و money_flow از ارزش واقعی معاملات (نه proxy حجم×قیمت پایانی) ---
+        px = snap.close_price or snap.last_price or 0
+        snap.interval_real_buy_value = round(vb * frac_real, 0) if vb else snap.interval_real_buy_volume * px
+        snap.interval_real_sell_value = round(vs * frac_real, 0) if vs else snap.interval_real_sell_volume * px
+        # money_flow به‌صورت بازه‌ای (ورود/خروج پول حقیقی در همین لحظه) — معنادارتر برای موتور
+        snap.real_money_flow = snap.interval_real_buy_value - snap.interval_real_sell_value
+        snap.real_money_flow_ratio = snap.real_money_flow / max(snap.interval_value, 1.0)
+
     def _compute_derived(self, s: MarketSnapshot):
-        """محاسبه شاخص‌های مشتق."""
+        """محاسبه شاخص‌های مشتق.
+
+        real_buy_value/real_sell_value تجمعیِ تقریبی (volume×avg_price) برای نمایش و
+        ذخیره باقی می‌ماند. real_money_flow و real_money_flow_ratio اکنون در
+        _classify_interval_real از ارزش واقعی معاملاتِ بازه محاسبه می‌شوند
+        (در این‌جا بازنویسی نمی‌شوند).
+        """
         s.per_capita_buy_real = s.real_buy_volume / max(s.real_buy_count, 1)
         s.per_capita_sell_real = s.real_sell_volume / max(s.real_sell_count, 1)
         s.buyer_power = s.per_capita_buy_real / max(s.per_capita_sell_real, 1e-9)
@@ -776,8 +896,6 @@ class MarketDataCollector:
         s.real_sell_value = s.real_sell_volume * avg_price
         s.legal_buy_value = s.legal_buy_volume * avg_price
         s.legal_sell_value = s.legal_sell_volume * avg_price
-        s.real_money_flow = s.real_buy_value - s.real_sell_value
-        s.real_money_flow_ratio = s.real_money_flow / max(s.total_value, 1e-9)
 
     def _mark_completeness(self, s: MarketSnapshot):
         """علامت‌گذاری فیلدهای مفقود."""
@@ -790,7 +908,10 @@ class MarketDataCollector:
         if s.total_value <= 0: missing.append("total_value")
         if not s.buy_rows: missing.append("buy_rows")
         if not s.sell_rows: missing.append("sell_rows")
-        if s.real_buy_count == 0 and s.real_sell_count == 0: missing.append("clienttype")
+        if s.real_buy_count == 0 and s.real_sell_count == 0:
+            missing.append("clienttype")
+        elif s.clienttype_stale:
+            missing.append("clienttype_stale")   # داده هست ولی تأخیر دارد → تخمینی
         s.missing_fields = missing
         s.data_complete = (len(missing) == 0)
 
@@ -1147,16 +1268,29 @@ class SimulationDataCollector:
         if not is_pre_open:
             snap.interval_real_buy_volume = real_buy_vol
             snap.interval_real_sell_volume = real_sell_vol
+            # ارزش/تعداد حقیقیِ بازه (از دادهٔ دقیقِ sim، نه دلتای تجمعی)
+            snap.interval_real_buy_value = real_buy_vol * snap.close_price
+            snap.interval_real_sell_value = real_sell_vol * snap.close_price
+            snap.interval_real_buy_count = new_buyers
+            snap.interval_real_sell_count = new_sellers
+            snap.interval_buy_volume = sum(t.trade_volume for t in trades_in_minute
+                                           if t.aggressor_side == "buy")
+            snap.interval_sell_volume = sum(t.trade_volume for t in trades_in_minute
+                                            if t.aggressor_side == "sell")
+            snap.clienttype_stale = False   # دادهٔ sim تأخیر ندارد
+            snap.clienttype_lag_shares = 0
 
         snap.per_capita_buy_real = snap.real_buy_volume / max(snap.real_buy_count, 1)
         snap.per_capita_sell_real = snap.real_sell_volume / max(snap.real_sell_count, 1)
         snap.buyer_power = snap.per_capita_buy_real / max(snap.per_capita_sell_real, 1e-9)
+        # ارزش تجمعیِ تقریبی (برای نمایش/ذخیره)
         snap.real_buy_value = snap.real_buy_volume * snap.close_price
         snap.real_sell_value = snap.real_sell_volume * snap.close_price
         snap.legal_buy_value = snap.legal_buy_volume * snap.close_price
         snap.legal_sell_value = snap.legal_sell_volume * snap.close_price
-        snap.real_money_flow = snap.real_buy_value - snap.real_sell_value
-        snap.real_money_flow_ratio = snap.real_money_flow / max(snap.total_value, 1e-9)
+        # money_flow بازه‌ای (ورود/خروج پول حقیقی در همین دقیقه) — معنادار برای موتور
+        snap.real_money_flow = snap.interval_real_buy_value - snap.interval_real_sell_value
+        snap.real_money_flow_ratio = snap.real_money_flow / max(snap.interval_value, 1e-9)
 
         st["money_flow_history"].append(snap.real_money_flow)
         st["buyer_power_history"].append(snap.buyer_power)

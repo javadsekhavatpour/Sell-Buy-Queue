@@ -99,6 +99,15 @@ CREATE TABLE IF NOT EXISTS snapshots (
     legal_sell_value REAL,
     interval_real_buy_volume  INTEGER,
     interval_real_sell_volume INTEGER,
+    interval_real_buy_value   REAL,
+    interval_real_sell_value  REAL,
+    interval_real_buy_count   INTEGER,
+    interval_real_sell_count  INTEGER,
+    interval_buy_volume       INTEGER,
+    interval_sell_volume      INTEGER,
+    clienttype_stale          INTEGER,
+    clienttype_lag_shares     INTEGER,
+    last_fresh_real_frac      REAL,
 
     -- شاخص‌های مشتق
     buyer_power      REAL,
@@ -218,6 +227,10 @@ SNAPSHOT_COLUMNS = [
     "legal_buy_count", "legal_buy_volume", "legal_buy_value",
     "legal_sell_count", "legal_sell_volume", "legal_sell_value",
     "interval_real_buy_volume", "interval_real_sell_volume",
+    "interval_real_buy_value", "interval_real_sell_value",
+    "interval_real_buy_count", "interval_real_sell_count",
+    "interval_buy_volume", "interval_sell_volume",
+    "clienttype_stale", "clienttype_lag_shares", "last_fresh_real_frac",
     "buyer_power", "per_capita_buy_real", "per_capita_sell_real",
     "real_money_flow", "real_money_flow_ratio",
     "data_complete", "missing_fields",
@@ -267,7 +280,36 @@ class MarketDataStorage:
         cur.executescript(SCHEMA_METADATA)
         cur.executescript(SCHEMA_DAILY_PARAMS)
         cur.executescript(SCHEMA_SCORE_HISTORY)
+        self._migrate_snapshots()
         self.conn.commit()
+
+    def _migrate_snapshots(self):
+        """افزودن ستون‌های جدید به جدول snapshots موجود (پچ رفع مغایرت‌ها).
+        CREATE TABLE IF NOT EXISTS ستون‌های جدید را روی DB قدیمی اضافه نمی‌کند،
+        پس با ALTER TABLE به‌صورت idempotent مهاجرت می‌کنیم."""
+        cur = self.conn.cursor()
+        try:
+            cur.execute("PRAGMA table_info(snapshots)")
+            existing = {row[1] for row in cur.fetchall()}
+        except Exception:
+            existing = set()
+        new_cols = {
+            "interval_real_buy_value": "REAL",
+            "interval_real_sell_value": "REAL",
+            "interval_real_buy_count": "INTEGER",
+            "interval_real_sell_count": "INTEGER",
+            "interval_buy_volume": "INTEGER",
+            "interval_sell_volume": "INTEGER",
+            "clienttype_stale": "INTEGER",
+            "clienttype_lag_shares": "INTEGER",
+            "last_fresh_real_frac": "REAL",
+        }
+        for col, typ in new_cols.items():
+            if col not in existing:
+                try:
+                    cur.execute(f"ALTER TABLE snapshots ADD COLUMN {col} {typ}")
+                except Exception:
+                    pass  # ستون از قبل وجود دارد یا DB فقط‌خواندنی
 
     # ----- snapshots -----
     def insert_snapshot(self, snap: MarketSnapshot) -> int:

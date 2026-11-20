@@ -125,6 +125,30 @@ class DataValidator:
         if snap.total_volume > 0 and snap.real_buy_volume + snap.real_sell_volume > snap.total_volume * 1.5:
             report.anomalies.append("حجم حقیقی بیش از ۱.۵ برابر کل معاملات")
 
+        # ----- بررسی‌های تأخیر ClientType (پچ رفع مغایرت‌های Snapshots) -----
+        # پرش جبرانی: interval_real از interval_volume بیشتر (غیرممکن)
+        if (snap.interval_volume > 0 and
+                (snap.interval_real_buy_volume + snap.interval_real_sell_volume) >
+                snap.interval_volume * 1.05):
+            report.anomalies.append(
+                f"پرش جبرانی حقیقی: Δحقیقی={snap.interval_real_buy_volume + snap.interval_real_sell_volume:,} "
+                f"> Δحجم‌کل={snap.interval_volume:,}")
+
+        # جاماندگی: حجم کل جلو رفته ولی حقیقی صفر و stale flag نخورده
+        if (snap.interval_volume > 0 and snap.interval_real_buy_volume == 0
+                and not getattr(snap, "clienttype_stale", False)):
+            report.anomalies.append(
+                f"جاماندگی ClientType: Δحجم‌کل={snap.interval_volume:,} ولی Δحقیقی=۰")
+
+        # پوشش ClientType کم: بخش بزرگی از حجم طبقه‌بندی‌نشده
+        if snap.total_volume > 0:
+            cov = ((snap.real_buy_volume + snap.legal_buy_volume) /
+                   max(snap.total_volume, 1))
+            if cov < 0.90:
+                report.anomalies.append(
+                    f"پوشش ClientType کم: {cov*100:.1f}٪ "
+                    f"(جامانده={getattr(snap, 'clienttype_lag_shares', 0):,})")
+
         # ----- محاسبه کمال -----
         total_fields = len(self.CRITICAL_FIELDS) + len(self.OPTIONAL_FIELDS)
         missing_count = (

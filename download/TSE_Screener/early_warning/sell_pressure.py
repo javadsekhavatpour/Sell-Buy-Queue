@@ -285,6 +285,15 @@ class SellPressureDetector:
     # -------------------------------------------------------------------
     # هسته
     # -------------------------------------------------------------------
+    def _stale_factor(self, snap):
+        """مهار امتیاز وقتی ClientType تأخیر دارد (دادهٔ تخمینی).
+        تخمین را صفر نمی‌کند تا سیگنال محو نشود، ولی وزن آن را نصف می‌کند
+        تا آلارم کاذب بر پایهٔ دادهٔ جامانده صادر نشود."""
+        try:
+            return 0.5 if getattr(snap, "clienttype_stale", False) else 1.0
+        except Exception:
+            return 1.0
+
     def _score_signed(self, name, raw, raw_unit, norm_signed, damp, description):
         w = self.weights.get(name, 0)
         if norm_signed > 0:
@@ -308,10 +317,9 @@ class SellPressureDetector:
     def _factor_sell_breadth(self, snap, prev_snap):
         if prev_snap is None:
             return self._no_prev("sell_breadth", "تعداد معاملات حقیقی")
-        nb = snap.real_buy_count - prev_snap.real_buy_count
-        ns = snap.real_sell_count - prev_snap.real_sell_count
-        if nb < 0 or ns < 0:
-            return self._counter_reset("sell_breadth", nb, ns)
+        # از فیلدهای بازه‌ای تصحیح‌شده (در data_collector._classify_interval_real)
+        nb = snap.interval_real_buy_count
+        ns = snap.interval_real_sell_count
         if nb == 0 and ns == 0:
             return self._no_trades("sell_breadth", "معامله حقیقی")
         raw = (ns - nb) / (nb + ns)
@@ -319,9 +327,10 @@ class SellPressureDetector:
         if not self._valid_full_at(full_at):
             return self._invalid_threshold("sell_breadth", full_at)
         norm_signed = _clamp_signed(raw / full_at)
-        damp = self._damp_for(norm_signed, snap)
+        damp = self._damp_for(norm_signed, snap) * self._stale_factor(snap)
         side_txt = "فشار فروش" if norm_signed > 0 else ("فشار خرید" if norm_signed < 0 else "تعادل")
-        desc = f"Δ خریداران={nb}، Δ فروشندگان={ns} → {side_txt} ({raw:+.3f})"
+        stale_txt = " (ClientType تأخیر)" if getattr(snap, "clienttype_stale", False) else ""
+        desc = f"Δ خریداران={nb}، Δ فروشندگان={ns} → {side_txt} ({raw:+.3f}){stale_txt}"
         return self._score_signed("sell_breadth", raw, "نسبت", norm_signed, damp, desc)
 
     # -------------------------------------------------------------------
@@ -330,10 +339,9 @@ class SellPressureDetector:
     def _factor_sell_flow(self, snap, prev_snap):
         if prev_snap is None:
             return self._no_prev("sell_flow", "ارزش معاملات حقیقی")
-        vb = snap.real_buy_value - prev_snap.real_buy_value
-        vs = snap.real_sell_value - prev_snap.real_sell_value
-        if vb < 0 or vs < 0:
-            return self._counter_reset("sell_flow", vb, vs)
+        # از ارزش بازه‌ای تصحیح‌شده (از معاملات واقعی، نه دلتای تجمعی ClientType)
+        vb = snap.interval_real_buy_value
+        vs = snap.interval_real_sell_value
         if vb == 0 and vs == 0:
             return self._no_trades("sell_flow", "معامله حقیقی")
         raw = (vs - vb) / (vb + vs)
@@ -341,9 +349,10 @@ class SellPressureDetector:
         if not self._valid_full_at(full_at):
             return self._invalid_threshold("sell_flow", full_at)
         norm_signed = _clamp_signed(raw / full_at)
-        damp = self._damp_for(norm_signed, snap)
+        damp = self._damp_for(norm_signed, snap) * self._stale_factor(snap)
         side_txt = "خروج پول" if norm_signed > 0 else ("ورود پول" if norm_signed < 0 else "تعادل")
-        desc = f"Δ خرید={vb:,.0f}، Δ فروش={vs:,.0f} → {side_txt} ({raw:+.3f})"
+        stale_txt = " (ClientType تأخیر)" if getattr(snap, "clienttype_stale", False) else ""
+        desc = f"Δ خرید={vb:,.0f}، Δ فروش={vs:,.0f} → {side_txt} ({raw:+.3f}){stale_txt}"
         return self._score_signed("sell_flow", raw, "نسبت", norm_signed, damp, desc)
 
     # -------------------------------------------------------------------
@@ -352,12 +361,11 @@ class SellPressureDetector:
     def _factor_sell_ticket(self, snap, prev_snap):
         if prev_snap is None:
             return self._no_prev("sell_ticket", "سرانه معاملات حقیقی")
-        nb = snap.real_buy_count - prev_snap.real_buy_count
-        ns = snap.real_sell_count - prev_snap.real_sell_count
-        vb = snap.real_buy_value - prev_snap.real_buy_value
-        vs = snap.real_sell_value - prev_snap.real_sell_value
-        if nb < 0 or ns < 0 or vb < 0 or vs < 0:
-            return self._counter_reset("sell_ticket", nb, ns)
+        # از فیلدهای بازه‌ای تصحیح‌شده
+        nb = snap.interval_real_buy_count
+        ns = snap.interval_real_sell_count
+        vb = snap.interval_real_buy_value
+        vs = snap.interval_real_sell_value
         if nb == 0 and ns == 0:
             return self._no_trades("sell_ticket", "معامله حقیقی")
         full_at = self._get_threshold(snap.symbol, "sell_ticket")
@@ -377,7 +385,9 @@ class SellPressureDetector:
             raw = math.log(ratio)
             norm_signed = _clamp_signed(raw / full_at)
             desc = f"ln(سرانه فروش/خرید)={raw:+.4f}"
-        damp = self._damp_for(norm_signed, snap)
+        if getattr(snap, "clienttype_stale", False):
+            desc += " (ClientType تأخیر)"
+        damp = self._damp_for(norm_signed, snap) * self._stale_factor(snap)
         return self._score_signed("sell_ticket", raw, "ln(نسبت)", norm_signed, damp, desc)
 
     # -------------------------------------------------------------------
