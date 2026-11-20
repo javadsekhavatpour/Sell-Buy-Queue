@@ -69,7 +69,10 @@ from early_warning.data_collector import (
     MarketSnapshot,
     Trade,
 )
-from early_warning.derived_compute import enrich_series, enrich_snapshot
+from early_warning.derived_compute import (
+    enrich_series, enrich_snapshot, load_enriched_series,
+    aggregate_interval, _bucket_start,
+)
 from early_warning.price_range import (
     load_range_rules,
     get_symbol_category,
@@ -366,6 +369,64 @@ class LiveMonitor:
             except Exception as e:
                 print(f"  ⚠ خطای enrich در حافظه: {e}")
 
+        # بانک پردازش‌شده: درج derived_samples برای این نمونهٔ enriched (با dup-check
+        # بر اساس timestamp، مطابق snapshots). factors ماندگار می‌شوند تا /db و /sim
+        # بدون محاسبهٔ مجدد از بانک بخوانند.
+        if snap is not None and snap.data_status != "error" and self.storage is not None:
+            try:
+                with self._db_lock:
+                    cur = self.storage.conn.cursor()
+                    cur.execute(
+                        "SELECT 1 FROM derived_samples WHERE symbol=? AND timestamp=? LIMIT 1",
+                        (snap.symbol, snap.timestamp))
+                    if cur.fetchone() is None:
+                        self.storage.insert_derived_sample(
+                            snap, snapshot_id=getattr(snap, "snapshot_id", None))
+            except Exception as e:
+                print(f"  ⚠ خطای درج derived_sample: {e}")
+
+            # flush مرزهای تجمیعی ۵د/۱۵د (بازهٔ تکمیل‌شده) → aggregate_*
+            try:
+                self._flush_aggregate_boundaries(snap)
+            except Exception as e:
+                print(f"  ⚠ خطای flush aggregate: {e}")
+
+    def _flush_aggregate_boundaries(self, snap: MarketSnapshot):
+        """flush بازه‌های ۵د/۱۵د تکمیل‌شده در جداول aggregate_* (بانک پردازش‌شده).
+
+        وقتی bucket جاری با bucket قبلی فرق کند، یعنی بازهٔ قبلی بسته شده:
+        snapshotهای enriched آن بازه از history تجمیع و در aggregate_5min/15min
+        درج (upsert) می‌شوند. در داشبورد، ریپورت دوره‌ای Excel بر عهدهٔ run_live
+        است؛ اینجا فقط aggregate ماندگار نگه داشته می‌شود تا /db و /sim بخوانند.
+        """
+        if snap is None or not getattr(snap, "_enriched", False) or self.storage is None:
+            return
+        sym = snap.symbol
+        dj = snap.date_jalali or ""
+        cur5 = _bucket_start(snap.tehran_time, 300)
+        cur15 = _bucket_start(snap.tehran_time, 900)
+        prev5 = getattr(self, "_cur5_bucket", None)
+        prev15 = getattr(self, "_cur15_bucket", None)
+
+        if prev5 is not None and cur5 != prev5 and getattr(self, "_last5_flushed", None) != prev5:
+            with self._lock:
+                hist = list(self.history)
+            group = [s for s in hist if _bucket_start(getattr(s, "tehran_time", ""), 300) == prev5]
+            for r in aggregate_interval(group, 300, sym, dj):
+                self.storage.insert_aggregate("aggregate_5min", r)
+            self._last5_flushed = prev5
+
+        if prev15 is not None and cur15 != prev15 and getattr(self, "_last15_flushed", None) != prev15:
+            with self._lock:
+                hist = list(self.history)
+            group = [s for s in hist if _bucket_start(getattr(s, "tehran_time", ""), 900) == prev15]
+            for r in aggregate_interval(group, 900, sym, dj):
+                self.storage.insert_aggregate("aggregate_15min", r)
+            self._last15_flushed = prev15
+
+        self._cur5_bucket = cur5
+        self._cur15_bucket = cur15
+
     def _loop_live(self):
         prev: MarketSnapshot | None = None
         while not self._stop.is_set():
@@ -404,13 +465,9 @@ class LiveMonitor:
             return None
 
         today = today_jalali_str()
-        dates = {today, today.replace("/", "-"), today.replace("-", "/")}
 
-        # بارگذاری snapshotهای امروز از بانک
-        rows = self.storage.get_snapshots_for_symbol(self.symbol)
-        snaps = [MarketSnapshot.from_flat_dict(r) for r in rows
-                 if r.get("date_jalali") in dates]
-        snaps.sort(key=lambda s: s.timestamp)
+        # بارگذاری snapshotهای امروز از بانک (factors از derived_samples)
+        snaps = load_enriched_series(self.storage, self.symbol, today)
         if not snaps:
             return None
 
@@ -424,12 +481,7 @@ class LiveMonitor:
                 trade_volume=int(t.get("trade_volume") or 0),
                 trade_id=t.get("trade_id"),
                 aggressor_side=t.get("aggressor_side")))
-        # لایهٔ derived: محاسبهٔ مشتق و رفع مغایرت در حافظه (بدون تغییر در بانک اصلی)
-        trades_by_time: dict[str, list[Trade]] = {}
-        for tr in trades:
-            if tr.trade_time:
-                trades_by_time.setdefault(tr.trade_time, []).append(tr)
-        enrich_series(snaps, trades_by_time)
+        # factors از بانک خوانده شد (load_enriched_series)؛ trades صرفاً برای Excel.
 
         # re-compute موتورهای تحلیلی روی همه‌ی snapshotها
         sp_det = SellPressureDetector(self.cfg, normalizer=self.normalizer)
@@ -609,9 +661,8 @@ class LiveMonitor:
                         (self.symbol, today_dash, today_slash))
                     rows = [dict(r) for r in cur.fetchall()]
                 if rows:
-                    snaps = [MarketSnapshot.from_flat_dict(r) for r in rows]
-                    # لایهٔ derived: مشتق و رفع مغایرت در حافظه (بانک اصلی دست‌نخورده)
-                    enrich_series(snaps)
+                    # factors پردازش‌شده از بانک (derived_samples) — نه محاسبه در حافظه.
+                    snaps = load_enriched_series(self.storage, self.symbol, today_dash)
                     cum_s = 0.0
                     cum_b = 0.0
                     for idx, s_i in enumerate(snaps):
@@ -1757,9 +1808,11 @@ class SimulationAdaptiveMonitor(AdaptiveLiveMonitor):
                               trade_id=t.get("trade_id"),
                               aggressor_side=t.get("aggressor_side")))
 
-        # لایهٔ derived: محاسبهٔ مشتق و رفع مغایرت در حافظه — بانک اصلی فقط خام است
-        # و دست‌نخورده باقی می‌ماند؛ interval_real_* از معاملات واقعی بازه محاسبه می‌شود.
-        enrich_series(snaps, self._sim_trades_by_time)
+        # بانک پردازش‌شده: factors مشتق از derived_samples خوانده می‌شوند (نه محاسبه
+        # در حافظه). fallback به enrich_series برای بانک‌های قدیمی بدون derived_rows.
+        if self.storage:
+            snaps = load_enriched_series(self.storage, self.symbol, self._sim_date)
+            self._sim_snaps = snaps
 
         # pre-compute: اجرای موتورها روی همه‌ی snapshotها (detectorهای تازه)
         sp_det = SellPressureDetector(self.cfg, normalizer=self.normalizer)

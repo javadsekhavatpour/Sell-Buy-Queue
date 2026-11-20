@@ -57,8 +57,139 @@ from early_warning import (
     compute_daily_params,
     to_jalali,
 )
-from early_warning.derived_compute import enrich_series, enrich_snapshot
+from early_warning.derived_compute import (
+    enrich_series, enrich_snapshot, aggregate_interval, _bucket_start,
+)
 from early_warning.market_detector import detect_market, in_trading_window, tehran_now
+
+
+# ---------------------------------------------------------------------------
+# بانک پردازش‌شده: نویسندهٔ derived_samples / aggregate_5min / aggregate_15min
+# و تولید ریپورت Excel (دوره‌ای در مرز ۵د/۱۵د، پایان جلسه، و درخواستی در طول جلسه).
+#
+#   - هر ۳۰ث (interval): یک ردیف derived_samples از snapshotِ enriched نوشته می‌شود.
+#   - در مرز ۵د/۱۵د: ردیف aggregate_* برای بازهٔ تکمیل‌شده نوشته می‌شود و یک
+#     ریپورت Excel از بانک بازتولید می‌شود.
+#   - پایان جلسه: ریپورت نهایی (پیش‌فرض).
+#   - درخواستی: با ایجاد فایل triggers/report_{نماد} یک ریپورت فوری ساخته می‌شود.
+# ---------------------------------------------------------------------------
+
+# فاصله‌های تجمیعی (ثانیه)
+AGG_5MIN = 300
+AGG_15MIN = 900
+
+
+def _composite_from_combined(combined) -> tuple[float | None, str | None]:
+    """استخراج امتیاز ترکیبی و سطح آلارم از CombinedState موتور."""
+    if combined is None:
+        return None, None
+    try:
+        score = max(float(getattr(combined, "sell_score", 0) or 0),
+                    float(getattr(combined, "buy_score", 0) or 0))
+    except Exception:
+        score = None
+    alert = getattr(combined, "alert", None)
+    level = None
+    if alert is not None:
+        level = getattr(getattr(alert, "level", None), "value", None)
+    if level is None:
+        level = getattr(combined, "classification", None)
+    return score, level
+
+
+def _generate_excel_from_bank(storage, config, symbol, normalizer, out_path) -> Path:
+    """تولید ریپورت Excel از بانک (خام + enriched در حافظه) — بدون نیاز به وب.
+
+    بازخوانی همهٔ snapshotها و معاملات از بانک خام، enrich در حافظه، اجرای مجدد
+    موتورها و ساخت Excel. برای ریپورت‌های دوره‌ای، درخواستی و پایان جلسه به‌کار
+    می‌رود. بانک خام دست‌نخورده می‌ماند.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    db_rows = storage.get_snapshots_for_symbol(symbol)
+    db_snaps = [MarketSnapshot.from_flat_dict(r) for r in db_rows]
+    db_trade_rows = storage.get_trades_for_symbol(symbol)
+    db_trades = [
+        Trade(
+            trade_time=t.get("trade_time", ""),
+            trade_price=float(t.get("trade_price") or 0),
+            trade_volume=int(t.get("trade_volume") or 0),
+            trade_id=t.get("trade_id"),
+            aggressor_side=t.get("aggressor_side"),
+        )
+        for t in db_trade_rows
+    ]
+    db_trades_by_time: dict[str, list[Trade]] = {}
+    for tr in db_trades:
+        if tr.trade_time:
+            db_trades_by_time.setdefault(tr.trade_time, []).append(tr)
+    enrich_series(db_snaps, db_trades_by_time)
+
+    if not db_snaps:
+        return out_path  # بانک خالی → چیزی برای گزارش نیست
+
+    replay_sp = SellPressureDetector(config, normalizer=normalizer)
+    replay_buy = BuyPressureDetector(config, normalizer=normalizer)
+    replay_alert = AlertEngine(config)
+    excel_sp, excel_buy, excel_combined = [], [], []
+    prev = None
+    hist: list = []
+    for snap in db_snaps:
+        sp = replay_sp.evaluate(snap, prev)
+        buy = replay_buy.evaluate(snap, prev, hist)
+        excel_sp.append(sp)
+        excel_buy.append(buy)
+        excel_combined.append(replay_alert.evaluate(sp, buy))
+        prev = snap
+        hist.append(snap)
+        hist = hist[-36:]
+
+    gen = ExcelReportGenerator(config)
+    gen.generate(
+        symbol=symbol,
+        snapshots=db_snaps,
+        sp_results=excel_sp,
+        acc_results=excel_buy,
+        combined_states=excel_combined,
+        alert_events=replay_alert.get_all_events(),
+        output_path=out_path,
+        trades=db_trades,
+    )
+    return out_path
+
+
+def _flush_aggregate(storage, enriched_snaps, symbol, date_jalali,
+                     bucket_seconds, table, bucket_start) -> None:
+    """تجمیع enriched_snaps متعلق به bucket_start و درج در جدول aggregate_*.
+
+    enriched_snaps باید از پیش enrich شده باشند (فیلدهای مشتق پر شده).
+    """
+    group = [s for s in enriched_snaps
+             if _bucket_start(getattr(s, "tehran_time", ""), bucket_seconds) == bucket_start]
+    if not group:
+        return
+    rows = aggregate_interval(group, bucket_seconds, symbol, date_jalali)
+    for r in rows:
+        if r.get("bucket_start") == bucket_start:
+            storage.insert_aggregate(table, r)
+
+
+def _check_report_trigger(symbol) -> bool:
+    """اگر فایل triggers/report_{نماد} وجود داشت، آن را مصرف (حذف) و True برگردان."""
+    trig = ROOT / "triggers" / f"report_{symbol}"
+    if trig.exists():
+        try:
+            trig.unlink()
+        except OSError:
+            pass
+        return True
+    return False
+
+
+def _report_path(symbol, tag: str) -> Path:
+    """مسیر ریپورت Excel با تگ (5min/15min/final/snapshot)."""
+    date_jalali = to_jalali(date.today())
+    safe_tag = tag or "report"
+    return ROOT / "reports" / f"early_warning_report_{symbol}_{date_jalali}_{safe_tag}.xlsx"
 
 
 def load_config() -> dict:
@@ -406,6 +537,12 @@ def main():
     combined_states = []
     all_trades = []
 
+    # ردیابی مرزهای تجمیعی برای بانک پردازش‌شده و ریپورت دوره‌ای
+    last_5min_bucket: str | None = None     # آخرین بازهٔ ۵دقیقه‌ای تکمیل‌شده
+    last_15min_bucket: str | None = None    # آخرین بازهٔ ۱۵دقیقه‌ای تکمیل‌شده
+    cur_5min_bucket: str | None = None      # بازهٔ جاری ۵دقیقه‌ای
+    cur_15min_bucket: str | None = None     # بازهٔ جاری ۱۵دقیقه‌ای
+
     # توقف نرم: Ctrl+C (SIGINT) یا SIGTERM از run_multi → flag تنظیم می‌شود
     # تا حلقه در ابتدای تکرار بعدی break کند و گزارش Excel (گام ۷-۸) تولید شود.
     # بدون این، Ctrl+C یا kill کردن پروسه‌ی run_live از run_multi باعث می‌شد
@@ -522,6 +659,55 @@ def main():
         snapshots.append(snap)
         all_trades.extend(trades)
 
+        # ۳.۶) بانک پردازش‌شده: درج derived_samples برای این نمونهٔ enriched.
+        # composite_score/alarm از آخرین ارزیابی موتور (اگر در این گام اجرا شده).
+        combined_now = combined_states[-1] if combined_states else None
+        comp_score, comp_level = _composite_from_combined(combined_now)
+        try:
+            storage.insert_derived_sample(
+                snap, snapshot_id=snap.snapshot_id,
+                composite_score=comp_score, alarm_level=comp_level)
+        except Exception as e:
+            print(f"  ⚠ خطای درج derived_sample: {e}")
+
+        # ۳.۷) مرزهای تجمیعی ۵د/۱۵د → درج aggregate + ریپورت دوره‌ای Excel.
+        date_jalali = snap.date_jalali or to_jalali(date.today())
+        prev5 = cur_5min_bucket
+        prev15 = cur_15min_bucket
+        cur_5min_bucket = _bucket_start(snap.tehran_time, AGG_5MIN)
+        cur_15min_bucket = _bucket_start(snap.tehran_time, AGG_15MIN)
+        # مرز ۵دقیقه‌ای تکمیل شد (بازه قبلی بسته شد)
+        if prev5 is not None and cur_5min_bucket != prev5 and last_5min_bucket != prev5:
+            try:
+                _flush_aggregate(storage, snapshots, args.symbol, date_jalali,
+                                 AGG_5MIN, "aggregate_5min", prev5)
+                p5 = _report_path(args.symbol, "5min")
+                _generate_excel_from_bank(storage, config, args.symbol, normalizer, p5)
+                print(f"  📊 ریپورت ۵دقیقه‌ای: {p5.name}")
+            except Exception as e:
+                print(f"  ⚠ خطای aggregate/ریپورت ۵د: {e}")
+            last_5min_bucket = prev5
+        # مرز ۱۵دقیقه‌ای تکمیل شد (بازه قبلی بسته شد)
+        if prev15 is not None and cur_15min_bucket != prev15 and last_15min_bucket != prev15:
+            try:
+                _flush_aggregate(storage, snapshots, args.symbol, date_jalali,
+                                 AGG_15MIN, "aggregate_15min", prev15)
+                p15 = _report_path(args.symbol, "15min")
+                _generate_excel_from_bank(storage, config, args.symbol, normalizer, p15)
+                print(f"  📊 ریپورت ۱۵دقیقه‌ای: {p15.name}")
+            except Exception as e:
+                print(f"  ⚠ خطای aggregate/ریپورت ۱۵د: {e}")
+            last_15min_bucket = prev15
+
+        # ۳.۸) ریپورت درخواستی در طول جلسه — فایل triggers/report_{نماد}.
+        if _check_report_trigger(args.symbol):
+            try:
+                psnap = _report_path(args.symbol, "snapshot")
+                _generate_excel_from_bank(storage, config, args.symbol, normalizer, psnap)
+                print(f"  📄 ریپورت درخواستی: {psnap.name}")
+            except Exception as e:
+                print(f"  ⚠ خطای ریپورت درخواستی: {e}")
+
         # ۵) انتظار تا نمونه بعدی
         if i < max_samples - 1:
             time.sleep(interval)
@@ -560,79 +746,39 @@ def main():
         symbol=args.symbol,
     )
 
-    # ۸) تولید گزارش Excel نهایی
+    # ۸) تولید گزارش Excel نهایی (پیش‌فرض در پایان جلسه)
     # داده‌ها از بانک بازخوانی می‌شوند تا اکسل همه‌ی نمونه‌های امروز را شامل شود،
     # حتی اگر توسط داشبورد adaptive یا session قبلی run_live جمع‌آوری شده باشند.
-    # (in-memory snapshots فقط نمونه‌های همین session را دارد؛ بانک همه را دارد.)
     print("\n" + "=" * 70)
     print("  تولید گزارش Excel نهایی...")
+
+    # ۸.۱) flush آخرین بازه‌های ناتمام ۵د/۱۵د (بازهٔ جاری که مرز را قطع نکرد)
+    if snapshots:
+        last_snap = snapshots[-1]
+        date_jalali = last_snap.date_jalali or to_jalali(date.today())
+        final5 = _bucket_start(last_snap.tehran_time, AGG_5MIN)
+        final15 = _bucket_start(last_snap.tehran_time, AGG_15MIN)
+        try:
+            if last_5min_bucket != final5:
+                _flush_aggregate(storage, snapshots, args.symbol, date_jalali,
+                                 AGG_5MIN, "aggregate_5min", final5)
+            if last_15min_bucket != final15:
+                _flush_aggregate(storage, snapshots, args.symbol, date_jalali,
+                                 AGG_15MIN, "aggregate_15min", final15)
+        except Exception as e:
+            print(f"  ⚠ خطای flush نهایی aggregate: {e}")
+
+    # ۸.۲) ریپورت نهایی از بانک (خام + enriched در حافظه)
     out_path = ROOT / args.output
     out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # بازخوانی همه‌ی snapshot‌ها و معاملات از بانک
-    db_rows = storage.get_snapshots_for_symbol(args.symbol)
-    db_snaps = [MarketSnapshot.from_flat_dict(r) for r in db_rows]
-    db_trade_rows = storage.get_trades_for_symbol(args.symbol)
-    db_trades = [
-        Trade(
-            trade_time=t.get("trade_time", ""),
-            trade_price=float(t.get("trade_price") or 0),
-            trade_volume=int(t.get("trade_volume") or 0),
-            trade_id=t.get("trade_id"),
-            aggressor_side=t.get("aggressor_side"),
-        )
-        for t in db_trade_rows
-    ]
-    # لایهٔ derived: مشتق و رفع مغایرت در حافظه — بانک اصلی دست‌نخورده.
-    db_trades_by_time: dict[str, list[Trade]] = {}
-    for tr in db_trades:
-        if tr.trade_time:
-            db_trades_by_time.setdefault(tr.trade_time, []).append(tr)
-    enrich_series(db_snaps, db_trades_by_time)
-
-    if db_snaps:
-        print(f"  بازخوانی از بانک: {len(db_snaps)} نمونه، {len(db_trades)} معامله")
-        # اجرای مجدد موتورها روی داده‌ی بانک (detectorهای تازه برای reset حالت)
-        replay_sp = SellPressureDetector(config, normalizer=normalizer)
-        replay_buy = BuyPressureDetector(config, normalizer=normalizer)
-        replay_alert = AlertEngine(config)
-        excel_sp, excel_buy, excel_combined = [], [], []
-        prev = None
-        hist = []
-        for snap in db_snaps:
-            sp = replay_sp.evaluate(snap, prev)
-            buy = replay_buy.evaluate(snap, prev, hist)
-            excel_sp.append(sp)
-            excel_buy.append(buy)
-            excel_combined.append(replay_alert.evaluate(sp, buy))
-            prev = snap
-            hist.append(snap)
-        excel_snapshots = db_snaps
-        excel_alert = replay_alert
-        excel_trades = db_trades
-    else:
-        # fallback: داده‌ی in-memory (بانک خالی)
-        print(f"  بانک خالی — استفاده از داده‌ی in-memory ({len(snapshots)} نمونه)")
-        excel_snapshots = engine_snapshots if engine_snapshots else snapshots
-        excel_sp = sp_results
-        excel_buy = buy_results
-        excel_combined = combined_states
-        excel_alert = alert_engine
-        excel_trades = all_trades
-
-    gen = ExcelReportGenerator(config)
-    gen.generate(
-        symbol=args.symbol,
-        snapshots=excel_snapshots,
-        sp_results=excel_sp,
-        acc_results=excel_buy,   # buy_results → acc_results (نام پارامتر در ExcelReport)
-        combined_states=excel_combined,
-        alert_events=excel_alert.get_all_events(),
-        output_path=out_path,
-        trades=excel_trades,
-    )
-    print(f"  گزارش: {out_path}")
+    try:
+        _generate_excel_from_bank(storage, config, args.symbol, normalizer, out_path)
+        print(f"  گزارش: {out_path}")
+    except Exception as e:
+        print(f"  ⚠ خطای تولید گزارش نهایی: {e}")
     print(f"  پایگاه داده: {db_path}")
+    ds = storage.count_derived_samples(args.symbol)
+    print(f"  ردیف‌های پردازش‌شده (derived_samples): {ds}")
     storage.close()
     print("=" * 70)
 
