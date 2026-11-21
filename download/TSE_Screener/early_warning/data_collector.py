@@ -605,20 +605,68 @@ class MarketDataCollector:
         return None
 
     def fetch_trades(self, ins_code: str) -> List[Trade]:
-        """
-        دریافت معاملات انجام‌شده اخیر از API جدید.
+        """دریافت لیست معاملات امروز از API جدید TSETMC.
 
-        نکته: API جدید TSETMC (cdn.tsetmc.com) endpoint جداگانه برای
-        تاریخچه معاملات اخیر ندارد. داده‌های معاملات در GetClosingPriceInfo
-        به‌صورت تجمعی موجود است (zTotTran تعداد، qTotTran5J حجم، qTotCap ارزش).
-        برای دریافت لیست معاملات لحظه‌ای، از MarketWatch استفاده می‌کنیم.
+        Endpoint: Trade/GetTradeList/{insCode}/{dateYYYYMMDD}
+          date = تاریخ میلادی امروز به‌صورت فشرده (مثل 20261121).
+          (تاریخ میلادی، نه شمسی — dEven در API TSETMC میلادی است.)
+        پاسخ: {"tradeList": [...]} که هر مورد شامل:
+          pTran (قیمت)، qTitMeTran (حجم)، hEven (ساعت به‌صورت int HHMMSS)،
+          nSBN (شماره سفارش خرید)، nSSN (شماره سفارش فروش)، dEven (تاریخ).
 
-        این متد لیست خالی برمی‌گرداند تا با موتورهای تحلیلی سازگار باشد.
+        aggressor_side در این متد None گذاشته می‌شود (TSETMC مستقیماً اعلام
+        نمی‌کند) و در collect() با مقایسهٔ قیمت معامله با best_bid/best_ask
+        استنتاج می‌شود.
+
+        اگر endpoint در دسترس نباشد (مثلاً IP غیرایرانی بلاک یا 502) یا داده‌ای
+        نبود، لیست خالی برمی‌گردد (سازگار با رفتار قبلی؛ موتورها به fallback
+        دلتای تجمعی ClientType برمی‌شوند).
         """
-        # در API جدید، داده‌های تجمعی معاملات در fetch_intraday آمده
-        # برای معاملات لحظه‌ای می‌توان از MarketWatch استفاده کرد
-        # ولی برای سادگی فعلاً لیست خالی برمی‌گردانیم
-        return []
+        greg_today = date.today().strftime("%Y%m%d")  # 20261121
+        data = self._api_get(f"Trade/GetTradeList/{ins_code}/{greg_today}")
+        if not data or not isinstance(data, dict):
+            return []
+        trade_list = (data.get("tradeList") or data.get("TradeList") or [])
+        if not isinstance(trade_list, list):
+            return []
+
+        def _fmt_time(h):
+            """تبدیل hEven (int HHMMSS مثل 91500 یا 9155) به 'HH:MM:SS'."""
+            try:
+                s = str(int(h)).zfill(6)
+                return f"{s[0:2]}:{s[2:4]}:{s[4:6]}"
+            except (ValueError, TypeError):
+                return ""
+
+        def _get(row, *names):
+            for n in names:
+                if n in row and row[n] is not None:
+                    return row[n]
+            return None
+
+        trades: List[Trade] = []
+        for row in trade_list:
+            if not isinstance(row, dict):
+                continue
+            try:
+                price = float(_get(row, "pTran") or 0)
+                vol = int(float(_get(row, "qTitMeTran") or 0))
+            except (ValueError, TypeError):
+                continue
+            if price <= 0 or vol <= 0:
+                continue
+            n_sbn = _get(row, "nSBN")
+            n_ssn = _get(row, "nSSN")
+            trades.append(Trade(
+                trade_time=_fmt_time(_get(row, "hEven")),
+                trade_price=price,
+                trade_volume=vol,
+                trade_id=f"{n_sbn}/{n_ssn}" if (n_sbn or n_ssn) else None,
+                aggressor_side=None,
+            ))
+        # مرتب بر اساس زمان صعودی
+        trades.sort(key=lambda t: str(t.trade_time or ""))
+        return trades
 
     def search_symbol(self, query: str) -> List[Dict]:
         """جستجوی نماد در TSETMC."""
@@ -650,6 +698,11 @@ class MarketDataCollector:
         inst = self.fetch_intraday(ins_code)
         ct = self.fetch_clienttype(ins_code)
         trades = self.fetch_trades(ins_code) if fetch_trades else []
+        # فیلتر معاملات جدید: فقط معاملاتی که بعد از snapshot قبلی‌اند.
+        # این از درج duplicate در trades table جلوگیری می‌کند (هر معامله یک‌بار).
+        if fetch_trades and prev_snap is not None and trades:
+            prev_t = str(prev_snap.tehran_time or "")
+            trades = [t for t in trades if str(t.trade_time or "") > prev_t]
 
         # اگر هیچ داده‌ای دریافت نشد
         if not inst or (inst.get("last_price", 0) == 0 and inst.get("close_price", 0) == 0):
@@ -749,6 +802,20 @@ class MarketDataCollector:
         # محاسبات مشتق (interval_real_*، per_capita، real_money_flow،
         # data_complete، …) در لایهٔ جداگانهٔ derived_compute و فقط در حافظه
         # انجام می‌شوند — بدون نوشتن در بانک اصلی.
+        # استنتاج طرف آغازگر (aggressor) معامله: TSETMC در لیست معاملات اعلام
+        # نمی‌کند؛ با مقایسهٔ قیمت معامله با best_bid/best_ask تخمین می‌زنیم:
+        #   قیمت >= best_ask → خریدار آغازگر (buy)   (ask را برداشته)
+        #   قیمت <= best_bid  → فروشنده آغازگر (sell) (bid را زد)
+        if trades:
+            bb = snap.best_buy_price or 0
+            ba = snap.best_sell_price or 0
+            for t in trades:
+                if ba > 0 and t.trade_price >= ba:
+                    t.aggressor_side = "buy"
+                elif bb > 0 and t.trade_price <= bb:
+                    t.aggressor_side = "sell"
+                else:
+                    t.aggressor_side = None
         return snap, trades
 
     def _detect_market_phase(self) -> str:

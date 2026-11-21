@@ -234,6 +234,12 @@ CREATE TABLE IF NOT EXISTS derived_samples (
     clienttype_lag_shares     INTEGER,
     last_fresh_real_frac      REAL,
 
+    -- ارزش‌های تجمعی حقیقی/حقوقی (محاسبه‌شده در _compute_derived: volume×avg_price)
+    real_buy_value            REAL,
+    real_sell_value           REAL,
+    legal_buy_value           REAL,
+    legal_sell_value          REAL,
+
     -- شاخص‌های مشتقِ نمایشی
     buyer_power               REAL,
     per_capita_buy_real       REAL,
@@ -373,6 +379,7 @@ DERIVED_SAMPLES_COLUMNS = [
     "interval_real_buy_count", "interval_real_sell_count",
     "interval_buy_volume", "interval_sell_volume",
     "clienttype_stale", "clienttype_lag_shares", "last_fresh_real_frac",
+    "real_buy_value", "real_sell_value", "legal_buy_value", "legal_sell_value",
     "buyer_power", "per_capita_buy_real", "per_capita_sell_real",
     "real_money_flow", "real_money_flow_ratio",
     "data_complete", "missing_fields",
@@ -421,6 +428,7 @@ class MarketDataStorage:
         cur.executescript(SCHEMA_AGGREGATE_5MIN)
         cur.executescript(SCHEMA_AGGREGATE_15MIN)
         self._migrate_snapshots()
+        self._migrate_derived_samples()
         self.conn.commit()
 
     def _migrate_snapshots(self):
@@ -450,6 +458,31 @@ class MarketDataStorage:
                     cur.execute(f"ALTER TABLE snapshots ADD COLUMN {col} {typ}")
                 except Exception:
                     pass  # ستون از قبل وجود دارد یا DB فقط‌خواندنی
+
+    def _migrate_derived_samples(self):
+        """افزودن ستون‌های جدید به جدول derived_samples موجود (idempotent).
+
+        ستون‌های ارزش تجمعی حقیقی/حقوقی (real_buy_value و ...) بعداً اضافه شدند؛
+        روی بانک‌های پردازش‌شدهٔ قدیمی با ALTER TABLE مهاجرت می‌شوند.
+        """
+        cur = self.conn.cursor()
+        try:
+            cur.execute("PRAGMA table_info(derived_samples)")
+            existing = {row[1] for row in cur.fetchall()}
+        except Exception:
+            existing = set()
+        new_cols = {
+            "real_buy_value": "REAL",
+            "real_sell_value": "REAL",
+            "legal_buy_value": "REAL",
+            "legal_sell_value": "REAL",
+        }
+        for col, typ in new_cols.items():
+            if col not in existing:
+                try:
+                    cur.execute(f"ALTER TABLE derived_samples ADD COLUMN {col} {typ}")
+                except Exception:
+                    pass
 
     # ----- snapshots -----
     def insert_snapshot(self, snap: MarketSnapshot) -> int:

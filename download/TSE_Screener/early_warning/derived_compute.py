@@ -27,6 +27,7 @@ _DERIVED_FIELDS = [
     "interval_real_buy_count", "interval_real_sell_count",
     "interval_buy_volume", "interval_sell_volume",
     "clienttype_stale", "clienttype_lag_shares", "last_fresh_real_frac",
+    "real_buy_value", "real_sell_value", "legal_buy_value", "legal_sell_value",
     "buyer_power", "per_capita_buy_real", "per_capita_sell_real",
     "real_money_flow", "real_money_flow_ratio",
     "data_complete", "missing_fields",
