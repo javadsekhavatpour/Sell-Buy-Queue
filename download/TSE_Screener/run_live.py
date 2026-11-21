@@ -600,7 +600,17 @@ def main():
             time.sleep(interval)
             continue
 
-        # ۳) ذخیره در SQLite (همه نمونه‌ها ذخیره می‌شوند - داشبورد از همین می‌خواند)
+        # ۲.۶) ردیف error (fetch از TSETMC شکست خورد) هرگز در بانک نوشته
+        # نمی‌شود — فقط در حافظه برای پیوستگی موتورها نگه داشته می‌شود و
+        # در دورهٔ بعد دوباره fetch تلاش می‌شود. (قبلاً این ردیف‌ها با
+        # قیمت‌های صفر وارد بانک می‌شدند و داده را خراب می‌کردند.)
+        if snap.data_status == "error":
+            print(f"  ⚠ fetch ناموفق — نمونه در بانک ذخیره نشد (تلاش مجدد در دورهٔ بعد)")
+            snapshots.append(snap)
+            time.sleep(interval)
+            continue
+
+        # ۳) ذخیره در SQLite (همه نمونه‌های با دادهٔ واقعی ذخیره می‌شوند - داشبورد از همین می‌خواند)
         snap_id = storage.insert_snapshot(snap)
         if trades:
             storage.insert_trades(trades, symbol=args.symbol,

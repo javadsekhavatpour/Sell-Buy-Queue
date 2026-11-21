@@ -346,8 +346,11 @@ class LiveMonitor:
             self.last_error = (snap.fetch_error if snap else "") or ""
             self.last_fetch_time = datetime.now().isoformat(timespec="seconds")
         # ذخیره snapshot در بانک (مثل run_live.py) برای محاسبه تجمعی از ابتدای روز
+        # فقط ردیف‌های با دادهٔ واقعی — ردیف error (fetch شکست خورد) در بانک
+        # نوشته نمی‌شود چون قیمت‌های صفر/carry-forward آن دادهٔ بانک را خراب می‌کند.
         # جلوگیری از درج تکراری با timestamp یکسان (در ری‌استارت داشبورد)
-        if snap is not None and self.storage is not None:
+        if (snap is not None and self.storage is not None
+                and snap.data_status != "error"):
             try:
                 with self._db_lock:
                     cur = self.storage.conn.cursor()

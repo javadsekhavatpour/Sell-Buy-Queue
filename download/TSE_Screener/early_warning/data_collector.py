@@ -718,6 +718,11 @@ class MarketDataCollector:
                 yp = cfg_sym_err.get("base_price", 13000)
                 min_a = yp * 0.95
                 max_a = yp * 1.05
+            # carry-forward: قیمت‌ها/حجم‌ها از snapshot قبلی تکرار می‌شوند تا
+            # ردیف error هرگز صفر نداشته باشد (صفر در بانک = دادهٔ غلط برای
+            # تحلیل و داشبورد). ردیف با data_status="error" علامت خورده و
+            # run_live/داشبورد آن را در بانک نمی‌نویسند؛ فقط در حافظه می‌ماند.
+            cf = prev_snap
             snap = MarketSnapshot(
                 timestamp=now.isoformat(),
                 tehran_time=now.strftime("%H:%M:%S"),
@@ -725,11 +730,39 @@ class MarketDataCollector:
                 symbol=symbol,
                 ins_code=ins_code,
                 market_phase=self._detect_market_phase(),
+                symbol_status=(cf.symbol_status if cf else "") or "",
+                source_update_time=now.isoformat(),
                 data_status="error",
                 fetch_error="داده از TSETMC دریافت نشد - بررسی اتصال یا کد نماد",
+                last_price=cf.last_price if cf else 0.0,
+                close_price=cf.close_price if cf else 0.0,
+                # بدون prev_snap تنها مقدار معقول برای open همان close دیروز است.
+                open_price=(cf.open_price if cf else 0.0) or yp,
                 yesterday_price=yp,
+                daily_high=cf.daily_high if cf else 0.0,
+                daily_low=cf.daily_low if cf else 0.0,
                 min_allowed_price=min_a,
                 max_allowed_price=max_a,
+                base_volume=cf.base_volume if cf else 100000,
+                best_buy_price=cf.best_buy_price if cf else 0.0,
+                best_buy_volume=cf.best_buy_volume if cf else 0,
+                best_sell_price=cf.best_sell_price if cf else 0.0,
+                best_sell_volume=cf.best_sell_volume if cf else 0,
+                buy_rows=list(cf.buy_rows) if cf else [],
+                sell_rows=list(cf.sell_rows) if cf else [],
+                buy_order_count=cf.buy_order_count if cf else 0,
+                sell_order_count=cf.sell_order_count if cf else 0,
+                total_volume=cf.total_volume if cf else 0,
+                total_value=cf.total_value if cf else 0.0,
+                total_trade_count=cf.total_trade_count if cf else 0,
+                real_buy_volume=cf.real_buy_volume if cf else 0,
+                real_sell_volume=cf.real_sell_volume if cf else 0,
+                legal_buy_volume=cf.legal_buy_volume if cf else 0,
+                legal_sell_volume=cf.legal_sell_volume if cf else 0,
+                real_buy_count=cf.real_buy_count if cf else 0,
+                real_sell_count=cf.real_sell_count if cf else 0,
+                legal_buy_count=cf.legal_buy_count if cf else 0,
+                legal_sell_count=cf.legal_sell_count if cf else 0,
             )
             return snap, []
 
