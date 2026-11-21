@@ -421,6 +421,23 @@ def _save_raw_position(symbol: str, last_id: int):
         pass
 
 
+def _raw_pending(symbol: str, last_id: int) -> int:
+    """تعداد ردیف‌های تازهٔ امروزِ بانک خام که هنوز مصرف نشده‌اند."""
+    raw_db = ROOT / "data" / "raw" / f"raw_{symbol}.sqlite"
+    if not raw_db.exists():
+        return 0
+    today = to_jalali(date.today())
+    con = sqlite3.connect(str(raw_db))
+    try:
+        r = con.execute(
+            "SELECT COUNT(*) FROM raw_snapshots WHERE id > ? AND date_jalali = ?",
+            (last_id, today)
+        ).fetchone()
+    finally:
+        con.close()
+    return int(r[0]) if r else 0
+
+
 def _raw_phase(trading_hours: dict) -> str:
     """فاز بازار از ساعت تهران — همان معنای _detect_market_phase قدیم."""
     hm = tehran_now().strftime("%H:%M")
@@ -654,18 +671,6 @@ def main():
     interval = args.interval if args.interval else int(sampling.get("interval_seconds", 60))
     analysis_interval = (args.analysis_interval if args.analysis_interval
                          else int(sampling.get("analysis_interval_seconds", 60)))
-    # پوشش کامل جلسه 08:45 تا 12:30 (۱۳۵۰۰ ثانیه) + حاشیه پیش‌گشایش
-    max_samples = args.max_samples if args.max_samples else int(13500 / interval) + 15
-
-    print()
-    print("=" * 70)
-    print(f"  TSE Early Warning Engine - حالت زنده (نسخه ۱.۲)")
-    print(f"  نماد: {args.symbol}  |  کد: {args.ins_code}")
-    print(f"  فاصله نمونه‌برداری: {interval} ثانیه")
-    print(f"  گام تحلیل موتورها: {analysis_interval} ثانیه")
-    print(f"  حداکثر نمونه: {max_samples}")
-    print(f"  پایگاه داده: {args.db}")
-    print("=" * 70)
 
     db_path = ROOT / args.db
     storage = MarketDataStorage(db_path)
@@ -696,6 +701,32 @@ def main():
                               "continuous": ["09:00", "12:30"]},
         }
         print("=" * 70)
+
+    # پوشش کامل جلسهٔ نماد (از پیش‌گشایش تا پایان پیوسته) + حاشیهٔ تخلیهٔ بانک خام.
+    # قبلاً بودجهٔ ثابت ۱۳۵۰۰ث (جلسهٔ 08:45-12:30 سهام) بود؛ اگر run_multi بعد از
+    # شروع جلسه بالا می‌آمد، این بودجه در میانهٔ جلسهٔ نمادهای با جلسهٔ طولانی‌تر
+    # (مثل ریتون ۱۲:۰۰-۱۸:۰۰) تمام می‌شد و پل وسط راه قطع می‌شد.
+    def _hm_sec(hm: str) -> int:
+        h, m = str(hm).split(":")
+        return int(h) * 3600 + int(m) * 60
+    window_sec = 13500  # پیش‌فرض: جلسهٔ 08:45 تا 12:30
+    th = (sym_entry or {}).get("trading_hours") or {}
+    if th.get("pre_open") and th.get("continuous"):
+        try:
+            window_sec = max(13500, _hm_sec(th["continuous"][1]) - _hm_sec(th["pre_open"][0]))
+        except Exception:
+            pass
+    max_samples = args.max_samples if args.max_samples else int((window_sec / interval) * 2) + 120
+
+    print()
+    print("=" * 70)
+    print(f"  TSE Early Warning Engine - منبع دادهٔ خام (نسخه ۲.۰)")
+    print(f"  نماد: {args.symbol}  |  کد: {args.ins_code}")
+    print(f"  فاصله نمونه‌برداری: {interval} ثانیه")
+    print(f"  گام تحلیل موتورها: {analysis_interval} ثانیه")
+    print(f"  حداکثر نمونه: {max_samples} (پنجرهٔ جلسه: {window_sec//60} دقیقه)")
+    print(f"  پایگاه داده: {args.db}")
+    print("=" * 70)
     # Phase 2: نرمال‌سازی تطبیقی (اگر adaptive.enabled=true در کانفیگ)
     normalizer = AdaptiveNormalizer(storage, config)
 
@@ -752,14 +783,25 @@ def main():
         now = tehran_now()  # زمان تهران (UTC+3:30) — نه زمان سیستم
         print(f"\n[نمونه {i+1}/{max_samples}] {now.strftime('%H:%M:%S')}")
 
-        # ۰) بررسی ساعت معاملات — خارج از جلسه، fetch نکن (صرفه‌جویی در API)
+        # ۰) بررسی ساعت معاملات — خارج از جلسه، ردیف تازهٔ خام مصرف نکن
         if market_info.get("ok"):
             now_hhmm = now.strftime("%H:%M")
             in_session, status = in_trading_window(market_info["trading_hours"], now_hhmm)
             if not in_session:
-                print(f"  ⏸ خارج از جلسه ({status}) — در انتظار باز شدن بازار")
-                time.sleep(interval)
-                continue
+                sess_end = (market_info["trading_hours"].get("continuous") or ["", ""])[1]
+                past_end = bool(sess_end) and now_hhmm > sess_end
+                if past_end and _raw_pending(args.symbol, raw_pos) == 0:
+                    # شانس آخر برای ردیف مرزی raw_collector (چرخهٔ آخر جلسه)
+                    time.sleep(interval)
+                    if _raw_pending(args.symbol, raw_pos) == 0:
+                        print("  ⏹ جلسه پایان یافته و بانک خام تخلیه شد — پایان کار و تولید گزارش")
+                        break
+                if not past_end:
+                    print(f"  ⏸ خارج از جلسه ({status}) — در انتظار باز شدن بازار")
+                    time.sleep(interval)
+                    continue
+                # پایان جلسه ولی ردیف باقی‌مانده → تخلیهٔ پسماند و بعد پایان
+                print(f"  ⏳ پس از پایان جلسه — تخلیهٔ {_raw_pending(args.symbol, raw_pos)} ردیف باقی‌ماندهٔ خام")
             else:
                 print(f"  ✓ {status}")
 
@@ -931,7 +973,7 @@ def main():
             "last_update": last.tehran_time,
             "price_unit": "تومان",
             "volume_unit": "سهم",
-            "data_source": "TSETMC Live",
+            "data_source": "بانک خام raw_collector",
             "market_phase_summary": phase_summary,
             "total_snapshots": len(snapshots),
             "total_trades": len(all_trades),
