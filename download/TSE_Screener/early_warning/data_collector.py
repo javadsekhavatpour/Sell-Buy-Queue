@@ -769,9 +769,16 @@ class MarketDataCollector:
             symbol_status=inst.get("symbol_status") or "allowed",
             source_update_time=now.isoformat(),
             data_status="ok" if inst.get("last_price", 0) > 0 else "partial",
-            last_price=inst.get("last_price", 0),
-            close_price=inst.get("close_price", 0),
-            open_price=inst.get("open_price", yesterday_price),
+            # last_price: اولویت با pDrCotVal؛ اگر صفر بود (pre_open/stale)
+            # به close_price (پایانی = close دیروز) و سپس yesterday_price برگرد.
+            last_price=inst.get("last_price") or inst.get("close_price") or yesterday_price,
+            close_price=inst.get("close_price") or yesterday_price,
+            # open_price: اولین قیمت روز؛ اگر priceFirst صفر بود (pre_open قبل
+            # از اولین معامله، یا پاسخ stale-cache از لحظهٔ pre_open) به
+            # yesterday_price برگرد. قبلاً از inst.get("open_price", yesterday_price)
+            # استفاده می‌شد که چون fetch_intraday همیشه کلید را ست می‌کند (حتی صفر)،
+            # هرگز به yesterday_price نمی‌رسید → open_price=0 ذخیره می‌شد.
+            open_price=inst.get("open_price") or yesterday_price,
             yesterday_price=yesterday_price,
             daily_high=inst.get("daily_high", 0),
             daily_low=inst.get("daily_low", 0),
@@ -798,6 +805,18 @@ class MarketDataCollector:
             legal_buy_count=ct.get("legal_buy_count", 0) if ct else 0,
             legal_sell_count=ct.get("legal_sell_count", 0) if ct else 0,
         )
+        # تشخیص پاسخ stale-cache از CDN: اگر حجم/تعداد معاملات تجمعی و آخرین
+        # قیمت دقیقاً با snapshot قبلی یکسان باشد، یعنی CDN پاسخ cacheشده (تکراری)
+        # برگردانده و دادهٔ جدیدی نیست. این ردیف‌ها علامت‌گذاری می‌شوند تا
+        # داشبورد/آنالیز بتواند آن‌ها را فیلتر کند (WHERE data_status != 'stale').
+        # توجه: فقط در فاز پیوسته معنادار است؛ در pre_open همهٔ نمونه‌ها یکسان‌اند
+        # و stale بودنشان طبیعی است.
+        if prev_snap is not None and snap.market_phase == MarketPhase.CONTINUOUS.value:
+            if (snap.total_volume == prev_snap.total_volume and
+                    snap.total_trade_count == prev_snap.total_trade_count and
+                    snap.last_price == prev_snap.last_price and
+                    snap.total_volume > 0):
+                snap.data_status = "stale"
         # بانک اصلی فقط دادهٔ خام را ذخیره می‌کند (آنچه از TSE دریافت می‌شود).
         # محاسبات مشتق (interval_real_*، per_capita، real_money_flow،
         # data_complete، …) در لایهٔ جداگانهٔ derived_compute و فقط در حافظه
