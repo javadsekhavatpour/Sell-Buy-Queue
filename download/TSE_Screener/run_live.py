@@ -65,13 +65,15 @@ from early_warning.market_detector import detect_market, in_trading_window, tehr
 
 # ---------------------------------------------------------------------------
 # بانک پردازش‌شده: نویسندهٔ derived_samples / aggregate_5min / aggregate_15min
-# و تولید ریپورت Excel (دوره‌ای در مرز ۵د/۱۵د، پایان جلسه، و درخواستی در طول جلسه).
+# و تولید ریپورت Excel (فقط در پایان جلسه).
 #
 #   - هر ۳۰ث (interval): یک ردیف derived_samples از snapshotِ enriched نوشته می‌شود.
-#   - در مرز ۵د/۱۵د: ردیف aggregate_* برای بازهٔ تکمیل‌شده نوشته می‌شود و یک
-#     ریپورت Excel از بانک بازتولید می‌شود.
-#   - پایان جلسه: ریپورت نهایی (پیش‌فرض).
-#   - درخواستی: با ایجاد فایل triggers/report_{نماد} یک ریپورت فوری ساخته می‌شود.
+#   - در مرز ۵د/۱۵د: فقط ردیف aggregate_* برای بازهٔ تکمیل‌شده نوشته می‌شود
+#     (سریع، دستور DB). ساخت اکسل درون‌حلقه‌ای کنسل شد چون باعث تأخیر fetch
+#     می‌شد؛ ریپورت اکسل فقط در پایان جلسه تولید می‌شود.
+#   - پایان جلسه: ریپورت نهایی (پیش‌فرض) — تنها زمان ساخت اکسل.
+#   - درخواستی (triggers/report_{نماد}): فعلاً غیرفعال؛ برای فعال‌سازی بلوک
+#     مربوطه در گام ۳.۸ را از کامنت خارج کنید.
 # ---------------------------------------------------------------------------
 
 # فاصله‌های تجمیعی (ثانیه)
@@ -681,32 +683,32 @@ def main():
             try:
                 _flush_aggregate(storage, snapshots, args.symbol, date_jalali,
                                  AGG_5MIN, "aggregate_5min", prev5)
-                p5 = _report_path(args.symbol, "5min")
-                _generate_excel_from_bank(storage, config, args.symbol, normalizer, p5)
-                print(f"  📊 ریپورت ۵دقیقه‌ای: {p5.name}")
+                # ساخت اکسل ۵دقیقه‌ای درون‌حلقه‌ای کنسل شد — باعث تأخیر در fetch
+                # می‌شد. ریپورت اکسل فقط در پایان جلسه (گام ۸) تولید می‌شود.
             except Exception as e:
-                print(f"  ⚠ خطای aggregate/ریپورت ۵د: {e}")
+                print(f"  ⚠ خطای aggregate ۵د: {e}")
             last_5min_bucket = prev5
         # مرز ۱۵دقیقه‌ای تکمیل شد (بازه قبلی بسته شد)
         if prev15 is not None and cur_15min_bucket != prev15 and last_15min_bucket != prev15:
             try:
                 _flush_aggregate(storage, snapshots, args.symbol, date_jalali,
                                  AGG_15MIN, "aggregate_15min", prev15)
-                p15 = _report_path(args.symbol, "15min")
-                _generate_excel_from_bank(storage, config, args.symbol, normalizer, p15)
-                print(f"  📊 ریپورت ۱۵دقیقه‌ای: {p15.name}")
+                # ساخت اکسل ۱۵دقیقه‌ای درون‌حلقه‌ای کنسل شد — فقط پایان جلسه.
             except Exception as e:
-                print(f"  ⚠ خطای aggregate/ریپورت ۱۵د: {e}")
+                print(f"  ⚠ خطای aggregate ۱۵د: {e}")
             last_15min_bucket = prev15
 
-        # ۳.۸) ریپورت درخواستی در طول جلسه — فایل triggers/report_{نماد}.
-        if _check_report_trigger(args.symbol):
-            try:
-                psnap = _report_path(args.symbol, "snapshot")
-                _generate_excel_from_bank(storage, config, args.symbol, normalizer, psnap)
-                print(f"  📄 ریپورت درخواستی: {psnap.name}")
-            except Exception as e:
-                print(f"  ⚠ خطای ریپورت درخواستی: {e}")
+        # ۳.۸) ریپورت درخواستی در طول جلسه — فعلاً کنسل شد.
+        # ساخت اکسل (حتی درخواستی) درون‌حلقه‌ای باعث تأخیر fetch می‌شد؛
+        # همهٔ ریپورت‌های اکسل فقط در پایان جلسه (گام ۸) تولید می‌شوند.
+        # برای فعال‌سازی دوباره، بلوک زیر را از کامنت خارج کنید:
+        # if _check_report_trigger(args.symbol):
+        #     try:
+        #         psnap = _report_path(args.symbol, "snapshot")
+        #         _generate_excel_from_bank(storage, config, args.symbol, normalizer, psnap)
+        #         print(f"  📄 ریپورت درخواستی: {psnap.name}")
+        #     except Exception as e:
+        #         print(f"  ⚠ خطای ریپورت درخواستی: {e}")
 
         # ۵) انتظار تا نمونه بعدی
         if i < max_samples - 1:
