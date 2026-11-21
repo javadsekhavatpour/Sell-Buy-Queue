@@ -12,8 +12,8 @@ raw_dashboard.py — داشبورد تائید بصری دادهٔ خام
 - فقط خواندن از بانک (mode=ro) — بانک را تغییر نمی‌دهد.
 
 اجرا:
-  python raw_dashboard.py --db data/raw/raw_سرود.sqlite --port 8060
-سپس در مرورگر: http://localhost:8060
+  python raw_dashboard.py --port 8060        (پیش‌فرض: همهٔ بانک‌های data/raw)
+سپس در مرورگر: http://localhost:8060 — انتخاب نماد از نوار بالای صفحه
 """
 
 from __future__ import annotations
@@ -111,12 +111,19 @@ PAGE = r"""<!DOCTYPE html>
   .foot { color:var(--dim); font-size:clamp(10px,2.4vw,12px); margin-top:16px;
           line-height:1.8; }
   .refresh { margin-inline-start:auto; color:var(--dim); font-size:12px; }
+  button.badge { background:var(--card); color:var(--tx); font-family:inherit;
+                 cursor:pointer; }
+  button.badge.active { background:var(--accent); color:#081018;
+                        border-color:var(--accent); font-weight:700; }
+  .badge small { color:inherit; opacity:.75; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>داشبورد دادهٔ خام <span id="sym"></span></h1>
   <div class="sub" id="dbpath"></div>
+
+  <div class="bar" id="symlist"></div>
 
   <div class="bar">
     <span class="badge" id="rows"></span>
@@ -167,7 +174,8 @@ const cell = (k,v) => {
 };
 async function load(){
   try {
-    const d = await (await fetch('/api/data')).json();
+    const sym = decodeURIComponent(location.hash.slice(1) || '');
+    const d = await (await fetch('/api/data' + (sym ? '?symbol='+encodeURIComponent(sym) : ''))).json();
     document.getElementById('sym').textContent = d.symbol || '';
     document.getElementById('dbpath').textContent = 'بانک: ' + d.db;
     document.getElementById('rows').textContent = 'ردیف‌ها: ' + fa(d.total);
@@ -205,10 +213,46 @@ async function load(){
   }
 }
 load(); setInterval(load, 10000);
+
+// نوار نمادها: همهٔ بانک‌های data/raw با تعداد ردیف — کلیک = انتخاب نماد
+async function loadOverview(){
+  try {
+    const d = await (await fetch('/api/overview')).json();
+    const cur = decodeURIComponent(location.hash.slice(1) || '');
+    document.getElementById('symlist').innerHTML = (d.banks||[]).map(b =>
+      `<button class="badge ${b.symbol===cur?'active':''}" onclick="location.hash='${b.symbol}'">` +
+      `${b.symbol} <small>(${fa(b.total)} ردیف — ${b.last_fetch||'—'})</small></button>`).join('');
+  } catch(e) {}
+}
+loadOverview(); setInterval(loadOverview, 30000);
+window.addEventListener('hashchange', () => { load(); loadOverview(); });
 </script>
 </body>
 </html>
 """
+
+
+def scan_banks(data_dir: Path) -> list:
+    """فهرست بانک‌های خام موجود (نماد، تعداد ردیف، آخرین دریافت). فقط خواندن."""
+    out = []
+    for db_path in sorted(data_dir.glob("raw_*.sqlite")):
+        name = db_path.stem[4:]  # raw_{نماد}.sqlite → نماد
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            try:
+                total = conn.execute("SELECT COUNT(*) FROM raw_snapshots").fetchone()[0]
+                last = conn.execute(
+                    "SELECT fetch_hms FROM raw_snapshots ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                out.append({"symbol": name, "total": total,
+                            "last_fetch": last[0] if last else None, "db": str(db_path)})
+            finally:
+                conn.close()
+        except Exception:
+            out.append({"symbol": name, "total": 0, "last_fetch": None, "db": str(db_path)})
+    # آخرین نمادِ فعال اول
+    out.sort(key=lambda x: x["last_fetch"] or "", reverse=True)
+    return out
 
 
 def read_bank(db_path: Path, limit: int = 60) -> dict:
@@ -237,7 +281,7 @@ def read_bank(db_path: Path, limit: int = 60) -> dict:
 
 
 class Handler(BaseHTTPRequestHandler):
-    db_path: Path = None
+    data_dir: Path = None  # پوشهٔ بانک‌های خام (data/raw)
 
     def log_message(self, *a):  # بی‌سروصدا
         pass
@@ -249,13 +293,31 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _resolve_db(self, symbol: str | None) -> Path | None:
+        """بانکِ نماد انتخابی؛ بدون انتخاب → آخرین بانکِ فعال (بیشترین ردیف تازه)."""
+        if symbol:
+            return self.data_dir / f"raw_{symbol}.sqlite"
+        banks = scan_banks(self.data_dir)
+        return Path(banks[0]["db"]) if banks else None
+
     def do_GET(self):
         p = urlparse(self.path)
-        if p.path == "/api/data":
+        if p.path == "/api/overview":
+            body = json.dumps({"banks": scan_banks(self.data_dir)},
+                              ensure_ascii=False, default=str).encode()
+            self._send(200, body, "application/json; charset=utf-8")
+        elif p.path == "/api/data":
             q = parse_qs(p.query)
             limit = int(q.get("limit", ["60"])[0])
+            symbol = q.get("symbol", [None])[0]
+            db_path = self._resolve_db(symbol)
+            if db_path is None:
+                body = json.dumps({"error": "هیچ بانکی در data/raw نیست — ابتدا raw_collector را اجرا کنید"},
+                                  ensure_ascii=False).encode()
+                self._send(500, body, "application/json; charset=utf-8")
+                return
             try:
-                data = read_bank(self.db_path, limit)
+                data = read_bank(db_path, limit)
                 body = json.dumps(data, ensure_ascii=False, default=str).encode()
                 self._send(200, body, "application/json; charset=utf-8")
             except Exception as e:
@@ -272,20 +334,21 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="داشبورد تائید بصری دادهٔ خام")
-    ap.add_argument("--db", default="data/raw/raw_سرود.sqlite")
+    ap = argparse.ArgumentParser(description="داشبورد تائید بصری دادهٔ خام — چندنمادی")
+    ap.add_argument("--data-dir", default="data/raw",
+                    help="پوشهٔ بانک‌های خام (پیش‌فرض data/raw)")
     ap.add_argument("--port", type=int, default=8060)
     args = ap.parse_args()
 
-    db_path = Path(args.db)
-    if not db_path.is_absolute():
-        db_path = ROOT / db_path
-    Handler.db_path = db_path
+    data_dir = Path(args.data_dir)
+    if not data_dir.is_absolute():
+        data_dir = ROOT / data_dir
+    Handler.data_dir = data_dir
 
     print("=" * 70)
-    print("  داشبورد دادهٔ خام — فقط نمایش، بدون محاسبه")
+    print("  داشبورد دادهٔ خام — چندنمادی، فقط نمایش، بدون محاسبه")
     print("=" * 70)
-    print(f"  بانک : {db_path}")
+    print(f"  پوشهٔ بانک‌ها : {data_dir}")
     print(f"  آدرس : http://localhost:{args.port}   (توقف: Ctrl+C)")
     try:
         HTTPServer(("", args.port), Handler).serve_forever()

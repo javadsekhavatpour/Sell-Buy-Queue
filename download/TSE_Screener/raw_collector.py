@@ -46,13 +46,20 @@ raw_collector.py — جمع‌آورِ دادهٔ خام (نسخهٔ ایزول�
   + شناسه‌های ثبت (نه دادهٔ بازار، نه محاسبه): fetch_time، fetch_hms،
     date_jalali، symbol، ins_code
 
-اجرا:
-  python raw_collector.py --symbol سرود --ins-code 11964419322927535
+اجرا (چندنمادی — پیش‌فرض ۱۴ نماد، تایم‌کاری از config/symbols.json):
+  python raw_collector.py                       # همهٔ ۱۴ نماد، هر ۳۰ ثانیه، همیشه اجرا
+  python raw_collector.py --symbols سرود,کپارس  # زیرمجموعه
+  python raw_collector.py --symbol سرود         # تک‌نماد
+
+گیت تایم‌کاری: فقط وقتی ساعت تهران داخل بازه‌های pre_open/continuous همان نماد
+در config/symbols.json باشد رکورد می‌شود (معادل فاز preopen/continuous)؛ بیرون
+آن‌ها هیچ ردیفی نوشته نمی‌شود.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sqlite3
 import sys
 import time
@@ -202,56 +209,118 @@ def fetch_raw(c: MarketDataCollector, ins_code: str) -> dict | None:
     return row
 
 
+# نمادهای پیش‌فرض جمع‌آوری (به‌ازای هر نماد یک بانک جدا در data/raw)
+DEFAULT_SYMBOLS = ["فسوژ", "سیسکو", "کاما", "سرود", "صبا", "پخش", "کپارس",
+                   "ریتون", "رانیز", "دلر", "کلوند", "دبالک", "غدانه", "سفانو"]
+
+
+def load_symbols() -> dict:
+    """بارگذاری نمادها از config/symbols.json (نام → رکورد کامل با تایم‌کاری)."""
+    path = ROOT / "config" / "symbols.json"
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return {s["name"]: s for s in data.get("symbols", [])}
+
+
+def in_trading_window(scfg: dict, now) -> bool:
+    """گیت تایم‌کاری کانفیگ — معادل فازهای preopen/continuous.
+    فقط داخل بازه‌های pre_open و continuous رکورد می‌شود؛ بیرون آن‌ها نه."""
+    hm = now.strftime("%H:%M")
+    for key in ("pre_open", "continuous"):
+        w = (scfg.get("trading_hours") or {}).get(key) or []
+        if len(w) == 2 and w[0] <= hm <= w[1]:
+            return True
+    return False
+
+
 def main():
-    ap = argparse.ArgumentParser(description="جمع‌آوری دادهٔ خام TSETMC — یک جدول، بدون محاسبه")
-    ap.add_argument("--symbol", default="سرود")
-    ap.add_argument("--ins-code", default="11964419322927535")
+    ap = argparse.ArgumentParser(description="جمع‌آوری دادهٔ خام TSETMC — چندنمادی، یک جدول، بدون محاسبه")
+    ap.add_argument("--symbols", default=None,
+                    help="زیرمجموعه با کاما (پیش‌فرض: همهٔ ۱۴ نماد DEFAULT_SYMBOLS)")
+    ap.add_argument("--symbol", default=None, help="تک‌نماد (جایگزین چندنمادی)")
+    ap.add_argument("--ins-code", default=None, help="کد نماد تک‌نمادی (اگر در کانفیگ نیست)")
     ap.add_argument("--interval", type=int, default=30, help="ثانیه (پیش‌فرض ۳۰)")
-    ap.add_argument("--db", default=None, help="مسیر بانک (پیش‌فرض data/raw/raw_{نماد}.sqlite)")
-    ap.add_argument("--max-cycles", type=int, default=0, help="۰ = تا وقتی Ctrl+C")
+    ap.add_argument("--max-cycles", type=int, default=0, help="۰ = همیشه اجرا (تا Ctrl+C)")
     args = ap.parse_args()
 
-    db_path = ROOT / (args.db or f"data/raw/raw_{args.symbol}.sqlite")
-    conn = init_db(db_path)
+    syms = load_symbols()
+
+    if args.symbol:
+        selected = [args.symbol]
+        if args.symbol not in syms:
+            if not args.ins_code:
+                print(f"✗ {args.symbol} در config/symbols.json نیست و --ins-code داده نشد.")
+                sys.exit(1)
+            syms[args.symbol] = {"name": args.symbol, "ins_code": args.ins_code,
+                                 "trading_hours": {"pre_open": ["08:45", "09:00"],
+                                                   "continuous": ["09:00", "12:30"]}}
+    else:
+        names = [s.strip() for s in args.symbols.split(",")] if args.symbols else list(DEFAULT_SYMBOLS)
+        selected = [n for n in names if n in syms]
+        missing = [n for n in names if n not in syms]
+        if missing:
+            print(f"⚠ در config/symbols.json نیستند و رد می‌شوند: {missing}")
+
+    if not selected:
+        print("✗ هیچ نمادی برای جمع‌آوری انتخاب نشد.")
+        sys.exit(1)
+
     c = MarketDataCollector({})
+    conns: dict = {}  # نام نماد → اتصال بانک خودش
 
     print("=" * 70)
-    print("  جمع‌آوری خام — فقط دادهٔ دریافتی از لایو، بدون هیچ محاسبه")
+    print("  جمع‌آوری خام چندنمادی — فقط دادهٔ دریافتی از لایو، بدون هیچ محاسبه")
     print("=" * 70)
-    print(f"  نماد: {args.symbol}   ins_code: {args.ins_code}")
-    print(f"  بانک: {db_path.relative_to(ROOT) if str(db_path).startswith(str(ROOT)) else db_path}")
-    print(f"  بازه: هر {args.interval} ثانیه   (توقف: Ctrl+C)")
+    for n in selected:
+        sc = syms[n]
+        th = sc.get("trading_hours") or {}
+        print(f"  {n:10s} ins_code={sc.get('ins_code')}  "
+              f"pre_open={th.get('pre_open')}  continuous={th.get('continuous')}")
+    print(f"  بازه: هر {args.interval} ثانیه — فقط در pre_open/continuous رکورد می‌شود")
+    print("  توقف: Ctrl+C")
     print()
 
-    n_ok = n_fail = 0
+    n_ok = n_fail = n_skip = 0
     cycle = 0
     try:
         while args.max_cycles == 0 or cycle < args.max_cycles:
             cycle += 1
-            row = fetch_raw(c, args.ins_code)
-            if row is None:
-                n_fail += 1
-                print(f"  [{tehran_now().strftime('%H:%M:%S')}] ✗ قیمت از لایو دریافت نشد — ردیفی در بانک نوشته نشد (دورهٔ {cycle})")
-            else:
-                row["symbol"] = args.symbol
-                ph = ", ".join("?" for _ in COLUMNS)  # VALUES فقط placeholder
+            now = tehran_now()
+            any_window = False
+            for n in selected:
+                scfg = syms[n]
+                if not in_trading_window(scfg, now):
+                    n_skip += 1
+                    continue
+                any_window = True
+                row = fetch_raw(c, str(scfg["ins_code"]))
+                if row is None:
+                    n_fail += 1
+                    print(f"  [{now.strftime('%H:%M:%S')}] ✗ {n}: قیمت از لایو دریافت نشد — ردیفی نوشته نشد")
+                    continue
+                row["symbol"] = n
+                conn = conns.setdefault(n, init_db(ROOT / f"data/raw/raw_{n}.sqlite"))
                 conn.execute(
-                    f"INSERT INTO raw_snapshots ({', '.join(COLUMNS)}) VALUES ({ph})",
+                    f"INSERT INTO raw_snapshots ({', '.join(COLUMNS)}) VALUES ({', '.join('?' for _ in COLUMNS)})",
                     [row[c_] for c_ in COLUMNS],
                 )
                 conn.commit()
                 n_ok += 1
-                print(f"  [{row['fetch_hms']}] ✓ ردیف {n_ok} | last={row['last_price']} open={row['open_price']} "
+                print(f"  [{row['fetch_hms']}] ✓ {n} | last={row['last_price']} open={row['open_price']} "
                       f"close={row['close_price']} | معاملهٔ لایو: {row['api_last_trade_time']} | "
-                      f"bid1={row['buy_price_1']} ask1={row['sell_price_1']} | "
-                      f"حقیقی: خرید {row['ct_real_buy_volume']} فروش {row['ct_real_sell_volume']}")
+                      f"bid1={row['buy_price_1']} ask1={row['sell_price_1']}")
+            if not any_window:
+                print(f"  [{now.strftime('%H:%M:%S')}] … خارج از تایم‌کاری — همهٔ {len(selected)} نماد رد شد "
+                      f"(فقط preopen/continuous رکورد می‌شود)")
             if args.max_cycles == 0 or cycle < args.max_cycles:
                 time.sleep(args.interval)
     except KeyboardInterrupt:
         print("\n  توقف با Ctrl+C")
     finally:
-        conn.close()
-        print(f"  پایان: {n_ok} ردیف نوشته شد، {n_fail} دورهٔ بدون داده. بانک: {db_path}")
+        for conn in conns.values():
+            conn.close()
+        print(f"  پایان: {n_ok} ردیف نوشته شد، {n_fail} دورهٔ بدون داده، {n_skip} ردِ خارج از تایم‌کاری")
 
 
 if __name__ == "__main__":

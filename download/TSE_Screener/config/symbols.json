@@ -1,97 +1,373 @@
 {
-  "description": "لیست ۴ نماد برای جمع‌آوری داده با تشخیص بازار و ساعت معاملات",
-  "symbols": [
-    {
-      "name": "سرود",
-      "ticker": "سرود",
-      "ins_code": "11964419322927535",
-      "isin": "IRO1SROD0008",
-      "flow": 1,
-      "full_name": "سيمان‌شاهرود",
-      "market_type": "stock",
-      "market_label": "سهام عادی",
-      "instrument_type": "سهم",
-      "trading_hours": {
-        "pre_open": [
-          "08:45",
-          "09:00"
-        ],
-        "continuous": [
-          "09:00",
-          "12:30"
-        ]
-      },
-      "session_minutes": 210,
-      "days": "شنبه تا چهارشنبه"
-    },
-    {
-      "name": "دابور",
-      "ticker": "دابور",
-      "ins_code": "61332057061846617",
-      "isin": "IRO1DABO0006",
-      "flow": 1,
-      "full_name": "داروسازي‌ ابوريحان‌",
-      "market_type": "stock",
-      "market_label": "سهام عادی",
-      "instrument_type": "سهم",
-      "trading_hours": {
-        "pre_open": [
-          "08:45",
-          "09:00"
-        ],
-        "continuous": [
-          "09:00",
-          "12:30"
-        ]
-      },
-      "session_minutes": 210,
-      "days": "شنبه تا چهارشنبه"
-    },
-    {
-      "name": "اهرم",
-      "ticker": "اهرم",
-      "ins_code": "17914401175772326",
-      "isin": "IRT1AHRM0005",
-      "flow": 1,
-      "full_name": "صندوق س سهامي كاريزما- اهرمي",
-      "market_type": "equity_etf",
-      "market_label": "صندوق ETF سهامی",
-      "instrument_type": "صندوق سهامی",
-      "trading_hours": {
-        "pre_open": [
-          "08:45",
-          "09:00"
-        ],
-        "continuous": [
-          "09:00",
-          "12:30"
-        ]
-      },
-      "session_minutes": 210,
-      "days": "شنبه تا چهارشنبه"
-    },
-    {
-      "name": "ریتون",
-      "ticker": "ريتون",
-      "ins_code": "14035144070182412",
-      "isin": "IRTKRITO0000",
-      "flow": 7,
-      "full_name": "صندوق س. كالاي پاسارگاد",
-      "market_type": "gold_commodity_fund",
-      "market_label": "صندوق کالای طلا",
-      "instrument_type": "صندوق کالای طلا",
-      "trading_hours": {
-        "pre_open": [
-          "11:30",
-          "12:00"
-        ],
-        "continuous": [
-          "12:00",
-          "18:00"
-        ]
-      },
-      "session_minutes": 360,
-      "days": "شنبه تا چهارشنبه"
-    }
-  ]
+ "description": "لیست ۴ نماد برای جمع‌آوری داده با تشخیص بازار و ساعت معاملات",
+ "symbols": [
+  {
+   "name": "سرود",
+   "ticker": "سرود",
+   "ins_code": "11964419322927535",
+   "isin": "IRO1SROD0008",
+   "flow": 1,
+   "full_name": "سيمان‌شاهرود",
+   "market_type": "stock",
+   "market_label": "سهام عادی",
+   "instrument_type": "سهم",
+   "trading_hours": {
+    "pre_open": [
+     "08:45",
+     "09:00"
+    ],
+    "continuous": [
+     "09:00",
+     "12:30"
+    ]
+   },
+   "session_minutes": 210,
+   "days": "شنبه تا چهارشنبه"
+  },
+  {
+   "name": "دابور",
+   "ticker": "دابور",
+   "ins_code": "61332057061846617",
+   "isin": "IRO1DABO0006",
+   "flow": 1,
+   "full_name": "داروسازي‌ ابوريحان‌",
+   "market_type": "stock",
+   "market_label": "سهام عادی",
+   "instrument_type": "سهم",
+   "trading_hours": {
+    "pre_open": [
+     "08:45",
+     "09:00"
+    ],
+    "continuous": [
+     "09:00",
+     "12:30"
+    ]
+   },
+   "session_minutes": 210,
+   "days": "شنبه تا چهارشنبه"
+  },
+  {
+   "name": "اهرم",
+   "ticker": "اهرم",
+   "ins_code": "17914401175772326",
+   "isin": "IRT1AHRM0005",
+   "flow": 1,
+   "full_name": "صندوق س سهامي كاريزما- اهرمي",
+   "market_type": "equity_etf",
+   "market_label": "صندوق ETF سهامی",
+   "instrument_type": "صندوق سهامی",
+   "trading_hours": {
+    "pre_open": [
+     "08:45",
+     "09:00"
+    ],
+    "continuous": [
+     "09:00",
+     "12:30"
+    ]
+   },
+   "session_minutes": 210,
+   "days": "شنبه تا چهارشنبه"
+  },
+  {
+   "name": "ریتون",
+   "ticker": "ريتون",
+   "ins_code": "14035144070182412",
+   "isin": "IRTKRITO0000",
+   "flow": 7,
+   "full_name": "صندوق س. كالاي پاسارگاد",
+   "market_type": "gold_commodity_fund",
+   "market_label": "صندوق کالای طلا",
+   "instrument_type": "صندوق کالای طلا",
+   "trading_hours": {
+    "pre_open": [
+     "11:30",
+     "12:00"
+    ],
+    "continuous": [
+     "12:00",
+     "18:00"
+    ]
+   },
+   "session_minutes": 360,
+   "days": "شنبه تا چهارشنبه"
+  },
+  {
+   "name": "فسوژ",
+   "ticker": "فسوژ",
+   "ins_code": "56375665074210467",
+   "isin": "IRO3SOJZ0000",
+   "flow": 2,
+   "full_name": "سوژميران",
+   "market_type": "stock",
+   "market_label": "بازار فرابورس",
+   "instrument_type": "سهم",
+   "trading_hours": {
+    "pre_open": [
+     "08:45",
+     "09:00"
+    ],
+    "continuous": [
+     "09:00",
+     "12:30"
+    ]
+   },
+   "session_minutes": 210,
+   "days": "شنبه تا چهارشنبه"
+  },
+  {
+   "name": "سیسکو",
+   "ticker": "سیسکو",
+   "ins_code": "5286237676293152",
+   "isin": "IRO1SSCO0008",
+   "flow": 1,
+   "full_name": "فولاد سيرجان ايرانيان",
+   "market_type": "stock",
+   "market_label": "بازار بورس",
+   "instrument_type": "سهم",
+   "trading_hours": {
+    "pre_open": [
+     "08:45",
+     "09:00"
+    ],
+    "continuous": [
+     "09:00",
+     "12:30"
+    ]
+   },
+   "session_minutes": 210,
+   "days": "شنبه تا چهارشنبه"
+  },
+  {
+   "name": "کاما",
+   "ticker": "کاما",
+   "ins_code": "4942127026063388",
+   "isin": "IRO1BAMA0001",
+   "flow": 1,
+   "full_name": "باما",
+   "market_type": "stock",
+   "market_label": "بازار بورس",
+   "instrument_type": "سهم",
+   "trading_hours": {
+    "pre_open": [
+     "08:45",
+     "09:00"
+    ],
+    "continuous": [
+     "09:00",
+     "12:30"
+    ]
+   },
+   "session_minutes": 210,
+   "days": "شنبه تا چهارشنبه"
+  },
+  {
+   "name": "صبا",
+   "ticker": "صبا",
+   "ins_code": "33938004134399485",
+   "isin": "IRO1STIZ0008",
+   "flow": 1,
+   "full_name": "گروه مالي صبا تامين",
+   "market_type": "stock",
+   "market_label": "بازار بورس",
+   "instrument_type": "سهم",
+   "trading_hours": {
+    "pre_open": [
+     "08:45",
+     "09:00"
+    ],
+    "continuous": [
+     "09:00",
+     "12:30"
+    ]
+   },
+   "session_minutes": 210,
+   "days": "شنبه تا چهارشنبه"
+  },
+  {
+   "name": "پخش",
+   "ticker": "پخش",
+   "ins_code": "12638840758449459",
+   "isin": "IRO3PKSH0008",
+   "flow": 2,
+   "full_name": "پخش البرز",
+   "market_type": "stock",
+   "market_label": "بازار فرابورس",
+   "instrument_type": "سهم",
+   "trading_hours": {
+    "pre_open": [
+     "08:45",
+     "09:00"
+    ],
+    "continuous": [
+     "09:00",
+     "12:30"
+    ]
+   },
+   "session_minutes": 210,
+   "days": "شنبه تا چهارشنبه"
+  },
+  {
+   "name": "کپارس",
+   "ticker": "کپارس",
+   "ins_code": "9698674686691945",
+   "isin": "IRO1KPRS0008",
+   "flow": 1,
+   "full_name": "كاشي‌ پارس‌",
+   "market_type": "stock",
+   "market_label": "بازار بورس",
+   "instrument_type": "سهم",
+   "trading_hours": {
+    "pre_open": [
+     "08:45",
+     "09:00"
+    ],
+    "continuous": [
+     "09:00",
+     "12:30"
+    ]
+   },
+   "session_minutes": 210,
+   "days": "شنبه تا چهارشنبه"
+  },
+  {
+   "name": "رانیز",
+   "ticker": "رانیز",
+   "ins_code": "13386281759834677",
+   "isin": "IRO3NEYZ0008",
+   "flow": 2,
+   "full_name": "كارخانجات رينگ اسپرت نورني ريز",
+   "market_type": "stock",
+   "market_label": "بازار فرابورس",
+   "instrument_type": "سهم",
+   "trading_hours": {
+    "pre_open": [
+     "08:45",
+     "09:00"
+    ],
+    "continuous": [
+     "09:00",
+     "12:30"
+    ]
+   },
+   "session_minutes": 210,
+   "days": "شنبه تا چهارشنبه"
+  },
+  {
+   "name": "دلر",
+   "ticker": "دلر",
+   "ins_code": "4384288570322406",
+   "isin": "IRO1EXIR0008",
+   "flow": 1,
+   "full_name": "داروسازي‌ اكسير",
+   "market_type": "stock",
+   "market_label": "بازار بورس",
+   "instrument_type": "سهم",
+   "trading_hours": {
+    "pre_open": [
+     "08:45",
+     "09:00"
+    ],
+    "continuous": [
+     "09:00",
+     "12:30"
+    ]
+   },
+   "session_minutes": 210,
+   "days": "شنبه تا چهارشنبه"
+  },
+  {
+   "name": "کلوند",
+   "ticker": "کلوند",
+   "ins_code": "32678431934327184",
+   "isin": "IRO1ALVN0003",
+   "flow": 1,
+   "full_name": "كاشي‌ الوند",
+   "market_type": "stock",
+   "market_label": "بازار بورس",
+   "instrument_type": "سهم",
+   "trading_hours": {
+    "pre_open": [
+     "08:45",
+     "09:00"
+    ],
+    "continuous": [
+     "09:00",
+     "12:30"
+    ]
+   },
+   "session_minutes": 210,
+   "days": "شنبه تا چهارشنبه"
+  },
+  {
+   "name": "دبالک",
+   "ticker": "دبالک",
+   "ins_code": "71510396252618330",
+   "isin": "IRO3BLKZ0009",
+   "flow": 2,
+   "full_name": "مواد اوليه دارويي البرز بالك",
+   "market_type": "stock",
+   "market_label": "بازار فرابورس",
+   "instrument_type": "سهم",
+   "trading_hours": {
+    "pre_open": [
+     "08:45",
+     "09:00"
+    ],
+    "continuous": [
+     "09:00",
+     "12:30"
+    ]
+   },
+   "session_minutes": 210,
+   "days": "شنبه تا چهارشنبه"
+  },
+  {
+   "name": "غدانه",
+   "ticker": "غدانه",
+   "ins_code": "8234855558996646",
+   "isin": "IRO3KCOZ0005",
+   "flow": 2,
+   "full_name": "پنبه و دانه هاي روغني خراسان",
+   "market_type": "stock",
+   "market_label": "بازار فرابورس",
+   "instrument_type": "سهم",
+   "trading_hours": {
+    "pre_open": [
+     "08:45",
+     "09:00"
+    ],
+    "continuous": [
+     "09:00",
+     "12:30"
+    ]
+   },
+   "session_minutes": 210,
+   "days": "شنبه تا چهارشنبه"
+  },
+  {
+   "name": "سفانو",
+   "ticker": "سفانو",
+   "ins_code": "4528607775462304",
+   "isin": "IRO1SFNO0000",
+   "flow": 1,
+   "full_name": "سيمان فارس نو",
+   "market_type": "stock",
+   "market_label": "بازار بورس",
+   "instrument_type": "سهم",
+   "trading_hours": {
+    "pre_open": [
+     "08:45",
+     "09:00"
+    ],
+    "continuous": [
+     "09:00",
+     "12:30"
+    ]
+   },
+   "session_minutes": 210,
+   "days": "شنبه تا چهارشنبه"
+  }
+ ]
 }
