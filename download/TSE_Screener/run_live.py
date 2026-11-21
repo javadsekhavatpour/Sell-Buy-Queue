@@ -30,6 +30,7 @@ from __future__ import annotations
 import sys
 import json
 import time
+import sqlite3
 import argparse
 import signal
 from datetime import datetime, date
@@ -39,7 +40,6 @@ ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
 
 from early_warning import (
-    MarketDataCollector,
     DataValidator,
     SellPressureDetector,
     BuyPressureDetector,
@@ -57,10 +57,11 @@ from early_warning import (
     compute_daily_params,
     to_jalali,
 )
+from early_warning.data_collector import BestLimitRow
 from early_warning.derived_compute import (
     enrich_series, enrich_snapshot, aggregate_interval, _bucket_start,
 )
-from early_warning.market_detector import detect_market, in_trading_window, tehran_now
+from early_warning.market_detector import in_trading_window, tehran_now
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +220,10 @@ def parse_args():
                    help="حداکثر تعداد نمونه - پیش‌فرض: پوشش کامل جلسه معاملاتی")
     p.add_argument("--db", default="data/early_warning_live.sqlite", help="مسیر فایل SQLite")
     p.add_argument("--output", default="reports/early_warning_report_live.xlsx")
+    p.add_argument("--source", default="raw", choices=["raw"],
+                   help="منبع داده: raw (پیش‌فرض) — بانک‌های خام raw_collector؛ اتصال لایو TSETMC از این برنامه حذف شده است")
+    p.add_argument("--replay", action="store_true",
+                   help="از اولین ردیف امروز در بانک خام شروع کن (بازسازی بانک قدیمی از خام؛ برای جلوگیری از ردیف تکراری در بانکِ با سابقه، دیتابیس تازه بده)")
     p.add_argument("--prompt", action="store_true",
                    help="از کاربر بپرسد کدام نماد (پیش‌فرض: بدون پرسش از پیکربندی)")
     return p.parse_args()
@@ -240,17 +245,15 @@ def load_config_with_prompt(args) -> dict:
     if args.symbol and args.ins_code:
         return config
 
-    # حالت ۲: فقط symbol داده شده → جستجو
+    # حالت ۲: فقط symbol داده شده → کد از config/symbols.json (منبع خام، بدون API)
     if args.symbol and not args.ins_code:
-        print(f"\n🔍 جستجوی کد نماد '{args.symbol}' در TSETMC...")
-        collector = MarketDataCollector(config)
-        results = collector.search_symbol(args.symbol)
-        if results:
-            args.ins_code = results[0]["code"]
-            print(f"✓ کد پیدا شد: {args.ins_code}")
-            save_symbol_to_config(config, args.symbol, args.ins_code)
+        entry = _symbols_config().get(args.symbol)
+        if entry and entry.get("ins_code"):
+            args.ins_code = str(entry["ins_code"])
+            print(f"✓ کد از config/symbols.json: {args.ins_code}")
         else:
-            print(f"❌ نماد '{args.symbol}' پیدا نشد!")
+            print(f"❌ نماد '{args.symbol}' در config/symbols.json نیست!")
+            print("   منبع داده خام است؛ نماد را با raw_collector به کانفیگ اضافه کنید.")
             sys.exit(1)
         return config
 
@@ -305,37 +308,17 @@ def interactive_symbol_selection(args, config) -> dict:
                 print("⚠ نام نماد خالی است!")
                 continue
 
-            print(f"\n🔍 جستجوی '{new_symbol}' در TSETMC...")
-            collector = MarketDataCollector(config)
-            results = collector.search_symbol(new_symbol)
-
-            if not results:
-                print(f"❌ نماد '{new_symbol}' پیدا نشد!")
-                print("   ممکن است نام اشتباه باشد یا اینترنت قطع باشد.")
+            entry = _symbols_config().get(new_symbol)
+            if not (entry and entry.get("ins_code")):
+                print(f"❌ نماد '{new_symbol}' در config/symbols.json نیست!")
+                print("   منبع داده خام است؛ نماد را با raw_collector به کانفیگ اضافه کنید.")
                 continue
 
-            print(f"\n✓ {len(results)} نتیجه پیدا شد:")
-            for i, r in enumerate(results[:5], 1):
-                print(f"  {i}) کد: {r.get('code', 'N/A')}")
-                print(f"     نام فارسی: {r.get('name_fa', 'N/A')}")
-                print(f"     نام انگلیسی: {r.get('name_en', 'N/A')}")
-                print(f"     ISIN: {r.get('isin', 'N/A')}")
-                print()
-
-            try:
-                sel = input(f"کدام را انتخاب می‌کنید؟ (1-{min(5, len(results))}): ").strip()
-                sel_idx = int(sel) - 1
-                if 0 <= sel_idx < len(results):
-                    selected = results[sel_idx]
-                    args.symbol = new_symbol
-                    args.ins_code = selected["code"]
-                    print(f"\n✓ نماد انتخاب شده: {new_symbol} (کد: {args.ins_code})")
-                    save_symbol_to_config(config, new_symbol, args.ins_code)
-                    break
-                else:
-                    print("⚠ انتخاب نامعتبر!")
-            except (ValueError, EOFError, KeyboardInterrupt):
-                print("⚠ ورودی نامعتبر!")
+            args.symbol = new_symbol
+            args.ins_code = str(entry["ins_code"])
+            print(f"\n✓ نماد انتخاب شده: {new_symbol} (کد از symbols.json: {args.ins_code})")
+            save_symbol_to_config(config, new_symbol, args.ins_code)
+            break
         elif choice == "3":
             print("خروج...")
             sys.exit(0)
@@ -360,14 +343,208 @@ def save_symbol_to_config(config: dict, symbol: str, ins_code: str):
         print(f"⚠ خطا در ذخیره پیکربندی: {e}")
 
 
-def load_price_range(args, config: dict, collector, storage):
+# ---------------------------------------------------------------------------
+# منبع دادهٔ خام — بانک‌های raw_*.sqlite نوشته‌شده توسط raw_collector.py
+# (raw_collector تنها مصرف‌کنندهٔ API لایو است؛ این برنامه دیگر به TSETMC
+# وصل نمی‌شود. نقشهٔ فیلدها ۱:۱ با ساختار MarketSnapshot قدیم است تا
+# اعتبارسنجی، موتورها، ذخیره و وب‌ها بدون تغییر کار کنند.)
+# ---------------------------------------------------------------------------
+
+def _symbols_config() -> dict:
+    """بارگذاری config/symbols.json (نام → رکورد کامل با تایم‌کاری و کد)."""
+    path = ROOT / "config" / "symbols.json"
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return {s["name"]: s for s in data.get("symbols", [])}
+
+
+def _raw_yesterday_price(symbol: str) -> float:
+    """آخرین yesterday_price غیرصفر از بانک خام نماد (برای پارامترهای ثابت روز)."""
+    raw_db = ROOT / "data" / "raw" / f"raw_{symbol}.sqlite"
+    if not raw_db.exists():
+        return 0.0
+    con = sqlite3.connect(str(raw_db))
+    try:
+        r = con.execute(
+            "SELECT yesterday_price FROM raw_snapshots "
+            "WHERE yesterday_price IS NOT NULL AND yesterday_price > 0 "
+            "ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        con.close()
+    return float(r[0]) if r else 0.0
+
+
+def _raw_pos_path(symbol: str) -> Path:
+    return ROOT / "data" / "raw" / f".pos_{symbol}.json"
+
+
+def _init_raw_position(symbol: str, replay: bool = False) -> int:
+    """
+    مقداردهی نشانگرِ خواندن بانک خام.
+    - فایل وضعیت (.pos_{نماد}.json) متعلق به امروز → ادامه از آخرین ردیف
+      مصرف‌شده (ری‌استارت پل، ردیف‌های امروز را دوباره پردازش نمی‌کند).
+    - روز جدید یا بدون وضعیت → از اولین ردیف امروز شروع می‌شود.
+    - --replay → وضعیت نادیده گرفته می‌شود و از اولین ردیف امروز بازسازی می‌کند.
+    """
+    today = to_jalali(date.today())
+    path = _raw_pos_path(symbol)
+    if not replay and path.exists():
+        try:
+            st = json.loads(path.read_text(encoding="utf-8"))
+            if st.get("date") == today:
+                return int(st.get("last_id", 0))
+        except Exception:
+            pass
+    raw_db = ROOT / "data" / "raw" / f"raw_{symbol}.sqlite"
+    if not raw_db.exists():
+        return 0
+    con = sqlite3.connect(str(raw_db))
+    try:
+        r = con.execute(
+            "SELECT COALESCE(MAX(id), 0) FROM raw_snapshots WHERE date_jalali < ?",
+            (today,)
+        ).fetchone()
+    finally:
+        con.close()
+    return int(r[0]) if r else 0
+
+
+def _save_raw_position(symbol: str, last_id: int):
+    try:
+        _raw_pos_path(symbol).write_text(json.dumps({
+            "date": to_jalali(date.today()),
+            "last_id": int(last_id),
+        }, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _raw_phase(trading_hours: dict) -> str:
+    """فاز بازار از ساعت تهران — همان معنای _detect_market_phase قدیم."""
+    hm = tehran_now().strftime("%H:%M")
+    for key, val in (("pre_open", MarketPhase.PRE_OPEN.value),
+                     ("continuous", MarketPhase.CONTINUOUS.value)):
+        w = (trading_hours or {}).get(key) or []
+        if len(w) == 2 and w[0] <= hm <= w[1]:
+            return val
+    return MarketPhase.CLOSED.value
+
+
+def fetch_from_raw(symbol: str, prev_snap, fixed_range: dict,
+                   trading_hours: dict, last_id: int):
+    """
+    منبع دادهٔ خام: خواندن نزدیک‌ترین ردیفِ تازهٔ امروز از بانک خام نماد و
+    تبدیل ۱:۱ به MarketSnapshot — دقیقاً همان نقشی که collector.collect در
+    حالت لایو داشت. بقیهٔ حلقه (اعتبارسنجی، موتورها، ذخیره، لایهٔ derived)
+    دست‌نخورده می‌ماند؛ محاسبات مشتق همان‌طور که قبل بود در derived_compute
+    روی همین snapshot انجام می‌شود.
+
+    - معاملات ریز (trades) در بانک خام نیست → همیشه لیست خالی (تصمیم کاربر).
+    - data_status همان قاعدهٔ قدیم: ok / partial / stale (پاسخ تکراری CDN).
+    - نشانگر خواندن در data/raw/.pos_{نماد}.json ذخیره می‌شود.
+
+    بازگرداندن: (snap یا None، []، آخرین id مصرف‌شده)
+    """
+    raw_db = ROOT / "data" / "raw" / f"raw_{symbol}.sqlite"
+    if not raw_db.exists():
+        return None, [], last_id
+    today = to_jalali(date.today())
+    con = sqlite3.connect(str(raw_db))
+    con.row_factory = sqlite3.Row
+    try:
+        row = con.execute(
+            "SELECT * FROM raw_snapshots WHERE id > ? AND date_jalali = ? "
+            "ORDER BY id LIMIT 1",
+            (last_id, today)
+        ).fetchone()
+        if row is None:
+            return None, [], last_id
+        rid = int(row["id"])
+
+        def g(key, default=0):
+            v = row[key]
+            return default if v is None else v
+
+        yp = float(g("yesterday_price") or 0)
+        last_p = float(g("last_price") or 0)
+        close_p = float(g("close_price") or 0)
+        open_p = float(g("open_price") or 0)
+        buy_rows, sell_rows = [], []
+        for i in range(1, 6):
+            bp = float(g(f"buy_price_{i}") or 0)
+            if bp > 0:
+                buy_rows.append(BestLimitRow(
+                    price=bp, volume=int(g(f"buy_volume_{i}")),
+                    order_count=max(1, int(g(f"buy_orders_{i}")))))
+            sp = float(g(f"sell_price_{i}") or 0)
+            if sp > 0:
+                sell_rows.append(BestLimitRow(
+                    price=sp, volume=int(g(f"sell_volume_{i}")),
+                    order_count=max(1, int(g(f"sell_orders_{i}")))))
+        snap = MarketSnapshot(
+            date_jalali=row["date_jalali"] or "",
+            timestamp=row["fetch_time"] or "",
+            tehran_time=row["fetch_hms"] or "",
+            symbol=symbol,
+            ins_code=str(row["ins_code"] or ""),
+            market_phase=_raw_phase(trading_hours),
+            symbol_status=row["api_symbol_status"] or "allowed",
+            source_update_time=row["fetch_time"] or "",
+            data_status="ok" if last_p > 0 else "partial",
+            # همان زنجیرهٔ fallback حالت لایو (collect): last → close → دیروز
+            last_price=last_p or close_p or yp,
+            close_price=close_p or yp,
+            open_price=open_p or yp,
+            yesterday_price=yp,
+            daily_high=float(g("daily_high") or 0),
+            daily_low=float(g("daily_low") or 0),
+            min_allowed_price=float((fixed_range or {}).get("min_allowed_price", 0) or 0),
+            max_allowed_price=float((fixed_range or {}).get("max_allowed_price", 0) or 0),
+            base_volume=0,  # حجم مبنا در بانک خام نیست (هیچ موتوری از آن استفاده نمی‌کند)
+            best_buy_price=float(g("buy_price_1") or 0),
+            best_buy_volume=int(g("buy_volume_1") or 0),
+            best_sell_price=float(g("sell_price_1") or 0),
+            best_sell_volume=int(g("sell_volume_1") or 0),
+            buy_rows=buy_rows,
+            sell_rows=sell_rows,
+            buy_order_count=sum(r.order_count for r in buy_rows),
+            sell_order_count=sum(r.order_count for r in sell_rows),
+            total_volume=int(g("trade_volume") or 0),
+            total_value=float(g("trade_value") or 0) or (last_p * int(g("trade_volume") or 0)),
+            total_trade_count=int(g("trade_count") or 0),
+            real_buy_volume=int(g("ct_real_buy_volume") or 0),
+            real_sell_volume=int(g("ct_real_sell_volume") or 0),
+            legal_buy_volume=int(g("ct_legal_buy_volume") or 0),
+            legal_sell_volume=int(g("ct_legal_sell_volume") or 0),
+            real_buy_count=int(g("ct_real_buy_count") or 0),
+            real_sell_count=int(g("ct_real_sell_count") or 0),
+            legal_buy_count=int(g("ct_legal_buy_count") or 0),
+            legal_sell_count=int(g("ct_legal_sell_count") or 0),
+        )
+        # تشخیص پاسخ تکراری CDN — همان قاعدهٔ حالت لایو
+        if (prev_snap is not None
+                and snap.market_phase == MarketPhase.CONTINUOUS.value
+                and snap.total_volume == prev_snap.total_volume
+                and snap.total_trade_count == prev_snap.total_trade_count
+                and snap.last_price == prev_snap.last_price
+                and snap.total_volume > 0):
+            snap.data_status = "stale"
+        _save_raw_position(symbol, rid)
+        return snap, [], rid
+    finally:
+        con.close()
+
+
+def load_price_range(args, config: dict, storage):
     """
     محاسبه، ذخیره و بارگذاری پارامترهای ثابت روز — یک بار در ابتدای اجرا.
 
     مراحل:
       ۱. دسته نماد از config/symbol_categories.json (نگاشت دستی) خوانده می‌شود
       ۲. درصد مجاز از config/tse_range_rules.json خوانده می‌شود
-      ۳. yesterday_price از اولین فراخوانی API دریافت می‌شود
+      ۳. yesterday_price از آخرین ردیف بانک خام نماد خوانده می‌شود
       ۴. min/max_allowed_price = yesterday_price × (1 ± pct/100) محاسبه می‌شود
       ۵. مقادیر در جدول daily_params بانک ذخیره می‌شوند (یک ردیف در روز)
       ۶. مقادیر ثابت در config['test_symbol']['fixed_price_range'] تزریق می‌شوند
@@ -412,17 +589,13 @@ def load_price_range(args, config: dict, collector, storage):
     print(f"  ✓ دسته (از symbol_categories.json): {category}")
     print(f"  ✓ درصد مجاز (از tse_range_rules.json): {pct}%")
 
-    # ── ۳. دریافت yesterday_price از TSETMC ──
-    yesterday_price = 0.0
-    if ins_code:
-        inst = collector.fetch_intraday(str(ins_code))
-        if inst:
-            yesterday_price = float(inst.get("yesterday_price", 0) or 0)
+    # ── ۳. yesterday_price از بانک خام (منبع داده = raw_collector، بدون API) ──
+    yesterday_price = _raw_yesterday_price(symbol) if ins_code else 0.0
     if yesterday_price <= 0:
         base = float(config.get("test_symbol", {}).get("base_price", 0) or 0)
         if base > 0:
             yesterday_price = base
-            print(f"  ⚠ yesterday_price از API دریافت نشد — استفاده از base_price: {yesterday_price:,.0f}")
+            print(f"  ⚠ yesterday_price از بانک خام دریافت نشد — استفاده از base_price: {yesterday_price:,.0f}")
         else:
             print("  [!] قیمت دیروز دریافت نشد — محاسبه کف/سقف ممکن نیست.")
             print("─" * 60)
@@ -494,14 +667,20 @@ def main():
     print(f"  پایگاه داده: {args.db}")
     print("=" * 70)
 
-    collector = MarketDataCollector(config)
     db_path = ROOT / args.db
     storage = MarketDataStorage(db_path)
 
-    # ----- تشخیص نوع بازار و ساعت‌های معاملات نماد -----
-    market_info = detect_market(collector, str(args.ins_code))
-    if market_info.get("ok"):
-        mh = market_info["trading_hours"]
+    # ----- نوع بازار و ساعت معاملات از config/symbols.json (بدون API) -----
+    sym_entry = _symbols_config().get(args.symbol) or {}
+    if sym_entry.get("trading_hours"):
+        mh = sym_entry["trading_hours"]
+        market_info = {
+            "ok": True,
+            "market_label": sym_entry.get("market_label", ""),
+            "instrument_type": sym_entry.get("instrument_type", ""),
+            "trading_hours": mh,
+            "days": sym_entry.get("days", ""),
+        }
         print(f"  بازار: {market_info['market_label']}")
         print(f"  نوع سازمت: {market_info['instrument_type']}")
         print(f"  ساعت معاملات: پیش‌گشایش {mh['pre_open'][0]}-{mh['pre_open'][1]} | "
@@ -509,7 +688,13 @@ def main():
         print(f"  روزها: {market_info['days']}")
         print("=" * 70)
     else:
-        print(f"  ⚠ تشخیص بازار ناموفق: {market_info.get('error', 'نامشخص')}")
+        print(f"  ⚠ نماد '{args.symbol}' در config/symbols.json نیست — ساعت پیش‌فرض و بدون گیت جلسه")
+        market_info = {
+            "ok": False,
+            "market_label": "", "instrument_type": "", "days": "",
+            "trading_hours": {"pre_open": ["08:45", "09:00"],
+                              "continuous": ["09:00", "12:30"]},
+        }
         print("=" * 70)
     # Phase 2: نرمال‌سازی تطبیقی (اگر adaptive.enabled=true در کانفیگ)
     normalizer = AdaptiveNormalizer(storage, config)
@@ -520,7 +705,7 @@ def main():
     # استفاده می‌کند. مقادیر محاسبه‌شده در config تزریق می‌شود و چون collector
     # به همان reference نگه‌داری می‌کند، در تمام نمونه‌های بعدی از
     # fixed_price_range ثابت استفاده می‌کند.
-    load_price_range(args, config, collector, storage)
+    load_price_range(args, config, storage)
 
     validator = DataValidator()
     sp_detector = SellPressureDetector(config, normalizer=normalizer)
@@ -538,6 +723,10 @@ def main():
     buy_results = []
     combined_states = []
     all_trades = []
+
+    # ----- منبع دادهٔ خام: نشانگر خواندن (ادامه از ردیف بعدی؛ --replay = بازسازی امروز) -----
+    raw_pos = _init_raw_position(args.symbol, args.replay)
+    print(f"  منبع داده: data/raw/raw_{args.symbol}.sqlite  (شروع از ردیف بعد از id={raw_pos})")
 
     # ردیابی مرزهای تجمیعی برای بانک پردازش‌شده و ریپورت دوره‌ای
     last_5min_bucket: str | None = None     # آخرین بازهٔ ۵دقیقه‌ای تکمیل‌شده
@@ -574,15 +763,16 @@ def main():
             else:
                 print(f"  ✓ {status}")
 
-        # ۱) دریافت داده + معاملات
+        # ۱) دریافت داده از بانک خام (معاملات ریز در بانک خام نیست → لیست خالی)
         prev_snap = snapshots[-1] if snapshots else None
-        snap, trades = collector.collect(
-            args.symbol, args.ins_code,
-            prev_snap=prev_snap,
-            fetch_trades=True,
+        snap, trades, raw_pos = fetch_from_raw(
+            args.symbol, prev_snap,
+            config.get("test_symbol", {}).get("fixed_price_range") or {},
+            market_info.get("trading_hours") or {},
+            raw_pos,
         )
         if snap is None:
-            print("  ⚠ خطا در دریافت داده - تلاش مجدد در دوره بعد")
+            print("  ⚠ ردیف تازه‌ای در بانک خام نیست - در دوره بعد بررسی می‌شود")
             time.sleep(interval)
             continue
 
