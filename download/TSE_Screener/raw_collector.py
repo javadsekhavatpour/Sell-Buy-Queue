@@ -244,27 +244,20 @@ def main():
     ap.add_argument("--max-cycles", type=int, default=0, help="۰ = همیشه اجرا (تا Ctrl+C)")
     args = ap.parse_args()
 
-    syms = load_symbols()
-
+    # overrides برای حالت --symbol وقتی نماد در کانفیگ نیست
+    overrides: dict = {}
     if args.symbol:
-        selected = [args.symbol]
-        if args.symbol not in syms:
-            if not args.ins_code:
-                print(f"✗ {args.symbol} در config/symbols.json نیست و --ins-code داده نشد.")
-                sys.exit(1)
-            syms[args.symbol] = {"name": args.symbol, "ins_code": args.ins_code,
-                                 "trading_hours": {"pre_open": ["08:45", "09:00"],
-                                                   "continuous": ["09:00", "12:30"]}}
+        names = [args.symbol]
+        if args.ins_code:
+            overrides[args.symbol] = {"name": args.symbol, "ins_code": args.ins_code,
+                                      "trading_hours": {"pre_open": ["08:45", "09:00"],
+                                                        "continuous": ["09:00", "12:30"]}}
+        elif args.symbol not in load_symbols():
+            print(f"✗ {args.symbol} در config/symbols.json نیست و --ins-code داده نشد.")
+            sys.exit(1)
     else:
-        names = [s.strip() for s in args.symbols.split(",")] if args.symbols else list(DEFAULT_SYMBOLS)
-        selected = [n for n in names if n in syms]
-        missing = [n for n in names if n not in syms]
-        if missing:
-            print(f"⚠ در config/symbols.json نیستند و رد می‌شوند: {missing}")
-
-    if not selected:
-        print("✗ هیچ نمادی برای جمع‌آوری انتخاب نشد.")
-        sys.exit(1)
+        names = ([s.strip() for s in args.symbols.split(",")] if args.symbols
+                 else list(DEFAULT_SYMBOLS))
 
     c = MarketDataCollector({})
     conns: dict = {}  # نام نماد → اتصال بانک خودش
@@ -272,21 +265,36 @@ def main():
     print("=" * 70)
     print("  جمع‌آوری خام چندنمادی — فقط دادهٔ دریافتی از لایو، بدون هیچ محاسبه")
     print("=" * 70)
-    for n in selected:
-        sc = syms[n]
-        th = sc.get("trading_hours") or {}
-        print(f"  {n:10s} ins_code={sc.get('ins_code')}  "
-              f"pre_open={th.get('pre_open')}  continuous={th.get('continuous')}")
+    print(f"  نمادهای درخواستی ({len(names)}): {', '.join(names)}")
     print(f"  بازه: هر {args.interval} ثانیه — فقط در pre_open/continuous رکورد می‌شود")
+    print("  کانفیگ در هر دوره تازه خوانده می‌شود؛ افزودن نماد به symbols.json بدون")
+    print(f"  راه‌اندازی مجدد، در دورهٔ بعدی فعال می‌شود.")
     print("  توقف: Ctrl+C")
     print()
 
     n_ok = n_fail = n_skip = 0
     cycle = 0
+    last_missing = None
     try:
         while args.max_cycles == 0 or cycle < args.max_cycles:
             cycle += 1
             now = tehran_now()
+            # تازه‌خوانی کانفیگ هر دوره — نمادهای افزوده‌شده بدون ری‌استارت فعال شوند
+            syms = load_symbols()
+            syms.update(overrides)
+            selected = [n for n in names if n in syms]
+            missing = [n for n in names if n not in syms]
+            if missing and missing != last_missing:
+                print(f"  ⚠ {len(missing)} نماد در config/symbols.json نیست و رد می‌شوند: {missing}")
+                print(f"    نمادهای فعال این دوره: {len(selected)}/{len(names)} — کانفیگ را به‌روز کنید")
+                last_missing = missing
+            elif not missing and last_missing:
+                print(f"  ✓ کانفیگ کامل شد — {len(selected)}/{len(names)} نماد فعال")
+                last_missing = None
+            if not selected:
+                if args.max_cycles == 0 or cycle < args.max_cycles:
+                    time.sleep(args.interval)
+                continue
             any_window = False
             for n in selected:
                 scfg = syms[n]
