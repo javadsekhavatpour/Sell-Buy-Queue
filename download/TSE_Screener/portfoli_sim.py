@@ -39,7 +39,10 @@ SIM_COLS = ["date_jalali", "fetch_hms", "symbol"] + [
     c for c in exp.DEFAULT_VISIBLE
     if c not in ("date_jalali", "fetch_hms", "symbol")
 ] + ["min_allowed_price", "max_allowed_price",
-     "flow_ratio_recent_avg", "trend_power_session", "trend_power_recent"]
+     "flow_ratio_recent_avg", "trend_power_session", "trend_power_recent",
+     # مبنای نسبت‌های چندروزهٔ جریان پول — برای ردیابی اشکال در جدول
+     "mf_ratio_30d_pct", "flow5_avg_abs", "flow30_avg_abs",
+     "real_buy_value", "real_sell_value"]
 
 
 def collect_day(root: Path, date: str | None) -> tuple[str, dict, dict]:
@@ -143,12 +146,47 @@ def xlsx_report(frames: list[dict], date: str, per_symbol: dict, out: Path,
     cfont = Font(name="B Nazanin", size=9)
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    def header(ws, titles, widths):
+    def header(ws, titles, ens=None):
+        """سطر ۱: هدر فارسی — سطر ۲: نام فیلد بانک خام (یا «—» برای محاسبه‌ای).
+
+        ens = نام انگلیسی ستون‌ها برای نگاشت به exp.FIELD_SOURCES؛ اگر داده
+        نشود سطر دوم نوشته نمی‌شود (شیت‌های خلاصه/روند ستون‌های ترکیبی دارند).
+        """
         ws.sheet_view.rightToLeft = True
         for j, h in enumerate(titles, 1):
             c = ws.cell(row=1, column=j, value=h)
             c.font, c.fill, c.alignment, c.border = hfont, hfill, center, border
-        for j, w in enumerate(widths, 1):
+        if ens:
+            sfill = PatternFill("solid", fgColor="D9E2F3")
+            sfont = Font(name="B Nazanin", size=8, italic=True, color="1F3864")
+            for j, en in enumerate(ens, 1):
+                src = (exp.FIELD_SOURCES.get(en) or (en, ""))[0]
+                c = ws.cell(row=2, column=j, value=src)
+                c.font, c.fill, c.alignment, c.border = sfont, sfill, center, border
+        for j in range(1, len(titles) + 1):
+            ws.column_dimensions[get_column_letter(j)].width = 13
+        ws.freeze_panes = f"A{3 if ens else 2}"
+
+    def help_sheet(wb):
+        """شیت «راهنما» — منبع بانک/API و فرمول مختصر هر ستون داشبورد."""
+        ws = wb.create_sheet("راهنما")
+        ws.sheet_view.rightToLeft = True
+        hf = Font(name="B Nazanin", size=10, bold=True, color="FFFFFF")
+        hfl = PatternFill("solid", fgColor="4A72C4")
+        bf = Font(name="B Nazanin", size=9)
+        for j, h in enumerate(["هدر فارسی", "نام فیلد بانک/API", "نوع", "توضیح/فرمول"], 1):
+            c = ws.cell(row=1, column=j, value=h)
+            c.font, c.fill, c.alignment, c.border = hf, hfl, center, border
+        fa_map = {en: fa for _, cols in exp.GROUPS for fa, en in cols}
+        r = 2
+        for en, (src, desc) in exp.FIELD_SOURCES.items():
+            kind = "مستقیم از بانک" if src not in ("—", en) else \
+                   ("محاسبه‌ای" if src == "—" else "شناسهٔ ثبت")
+            for j, v in enumerate([fa_map.get(en, en), src, kind, desc], 1):
+                c = ws.cell(row=r, column=j, value=v)
+                c.font, c.alignment, c.border = bf, center, border
+            r += 1
+        for j, w in enumerate([34, 22, 14, 74], 1):
             ws.column_dimensions[get_column_letter(j)].width = w
         ws.freeze_panes = "A2"
 
@@ -161,8 +199,8 @@ def xlsx_report(frames: list[dict], date: str, per_symbol: dict, out: Path,
         for fa, en in cols:
             fa_map[en] = fa
     titles = [fa_map.get(c, c) for c in SIM_COLS]
-    header(ws, titles, [12] * len(SIM_COLS))
-    r = 2
+    header(ws, titles, SIM_COLS)
+    r = 3
     for f in frames:
         for row in f["rows"]:
             for j, en in enumerate(SIM_COLS, 1):
@@ -235,6 +273,7 @@ def xlsx_report(frames: list[dict], date: str, per_symbol: dict, out: Path,
                 c = ws3.cell(row=r, column=j, value=v)
                 c.font, c.alignment, c.border = cfont, center, border
             r += 1
+    help_sheet(wb)
     wb.save(out)
 
 

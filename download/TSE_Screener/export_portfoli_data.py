@@ -98,6 +98,12 @@ GROUPS = [
         # فرمول‌ها مطابق فایل dashboard.xlsx — شیت dashboard
         ("نسبت جریان پول ٪", "money_flow_ratio_pct"),
         ("نسبت ۵ روزه جریان پول ٪", "mf_ratio_5d_pct"),
+        ("نسبت ۳۰ روزه جریان پول ٪", "mf_ratio_30d_pct"),
+        ("میانگین قدرت مطلق جریان پول ۵ روز اخیر (ریال)", "flow5_avg_abs"),
+        ("میانگین قدرت مطلق جریان پول ۳۰ روز اخیر (ریال)", "flow30_avg_abs"),
+        ("جریان پول امروز (ریال)", "real_money_flow"),
+        ("خرید حقیقی × قیمت (ریال)", "real_buy_value"),
+        ("فروش حقیقی × قیمت (ریال)", "real_sell_value"),
         ("نسبت ۵ روزه حجم ٪", "volume_ratio_5d_pct"),
         ("نسبت ۳۰ روزه حجم ٪", "volume_ratio_30d_pct"),
         ("از نظر مبلغ خرید یا فروش", "buy_sell_amount_side"),
@@ -123,6 +129,77 @@ GROUPS = [
 ]
 
 ALL_FIELDS = [en for _, cols in GROUPS for _, en in cols]
+
+# ── منبع هر ستون — برای سطر «نام فیلد بانک» در هدر اکسل و شیت راهنما ──
+# مقدار = (نام فیلد بانک خام raw_snapshots یا API، توضیح/فرمول یک‌خطی)
+# ستون‌های محاسبه‌ای به‌جای نام فیلد، فرمول مختصر دارند؛ ستون‌های مستقیم
+# نام ستون بانک (= همان نام کلید API بعد از مپ raw_collector) را نشان می‌دهند.
+FIELD_SOURCES = {
+    "date_jalali": ("date_jalali", "شناسهٔ ثبت collector — تاریخ شمسی روز دریافت"),
+    "fetch_hms": ("fetch_hms", "شناسهٔ ثبت collector — ساعت دریافت"),
+    "symbol": ("symbol", "شناسهٔ ثبت collector — نماد از config/symbols.json"),
+    "market_phase": ("—", "محاسبه: بازهٔ ساعت تهران در pre_open/continuous از symbols.json"),
+    "symbol_status": ("api_symbol_status", "مستقیم از API — instrumentState.cEtavalTitle"),
+    "data_status": ("—", "محاسبه: کامل/ناقص از شمار فیلدهای مفقود کلیدی"),
+    "fetch_error": ("—", "محاسبه: خطای endpoint در همان نمونه"),
+    "last_price": ("last_price", "مستقیم — pDrCotVal"),
+    "close_price": ("close_price", "مستقیم — pClosing"),
+    "open_price": ("open_price", "مستقیم — priceFirst"),
+    "yesterday_price": ("yesterday_price", "مستقیم — priceYesterday"),
+    "daily_high": ("daily_high", "مستقیم — priceMax"),
+    "daily_low": ("daily_low", "مستقیم — priceMin"),
+    "min_allowed_price": ("—", "محاسبه: کف/سقف مجاز از early_warning/price_range.py"),
+    "max_allowed_price": ("—", "محاسبه: کف/سقف مجاز از early_warning/price_range.py"),
+    "best_bid": ("buy_price_1", "مستقیم — pMeDem ردیف ۱"),
+    "bid_volume": ("buy_volume_1", "مستقیم — qTitMeDem ردیف ۱"),
+    "best_ask": ("sell_price_1", "مستقیم — pMeOf ردیف ۱"),
+    "ask_volume": ("sell_volume_1", "مستقیم — qTitMeOf ردیف ۱"),
+    "buy_order_count": ("buy_orders_1", "مستقیم — zOrdMeDem ردیف ۱"),
+    "sell_order_count": ("sell_orders_1", "مستقیم — zOrdMeOf ردیف ۱"),
+    "total_volume": ("trade_volume", "مستقیم — qTotTran5J"),
+    "total_value": ("trade_value", "مستقیم — qTotCap (ریال)"),
+    "total_count": ("trade_count", "مستقیم — zTotTran"),
+    "real_buy_count": ("ct_real_buy_count", "مستقیم — buy_CountI"),
+    "real_buy_volume": ("ct_real_buy_volume", "مستقیم — buy_I_Volume"),
+    "real_sell_count": ("ct_real_sell_count", "مستقیم — sell_CountI"),
+    "real_sell_volume": ("ct_real_sell_volume", "مستقیم — sell_I_Volume"),
+    "legal_buy_count": ("ct_legal_buy_count", "مستقیم — buy_CountN"),
+    "legal_buy_volume": ("ct_legal_buy_volume", "مستقیم — buy_N_Volume"),
+    "legal_sell_count": ("ct_legal_sell_count", "مستقیم — sell_CountN"),
+    "legal_sell_volume": ("ct_legal_sell_volume", "مستقیم — sell_N_Volume"),
+    "real_buy_value": ("—", "محاسبه: ct_real_buy_volume × قیمت (close یا last)"),
+    "real_sell_value": ("—", "محاسبه: ct_real_sell_volume × قیمت (close یا last)"),
+    "buyer_power": ("—", "محاسبه: (خرید حقیقی÷تعداد خریدار حقیقی) ÷ (فروش حقیقی÷تعداد فروشنده حقیقی)"),
+    "per_capita_buy_real": ("—", "محاسبه: ct_real_buy_volume ÷ ct_real_buy_count (سرانه خرید)"),
+    "per_capita_sell_real": ("—", "محاسبه: ct_real_sell_volume ÷ ct_real_sell_count (سرانه فروش)"),
+    "real_money_flow": ("—", "محاسبه: (ct_real_buy_volume − ct_real_sell_volume) × قیمت"),
+    "real_money_flow_ratio": ("—", "محاسبه: جریان پول ÷ ارزش کل معاملات (قدر مطلق نیست)"),
+    "money_flow_ratio_pct": ("—", "محاسبه: جریان پول ÷ trade_value × ۱۰۰ (درصد)"),
+    "mf_ratio_5d_pct": ("—", "محاسبه: جریان پول امروز ÷ میانگین |جریان پول| ۵ روز قبل × ۱۰۰"),
+    "mf_ratio_30d_pct": ("—", "محاسبه: جریان پول امروز ÷ میانگین |جریان پول| ۳۰ روز قبل × ۱۰۰"),
+    "flow5_avg_abs": ("—", "محاسبه: میانگین |(خرید−فروش حقیقی) × قیمت پایانی| در ۵ روز قبل"),
+    "flow30_avg_abs": ("—", "محاسبه: میانگین |(خرید−فروش حقیقی) × قیمت پایانی| در ۳۰ روز قبل"),
+    "volume_ratio_5d_pct": ("—", "محاسبه: حجم امروز ÷ میانگین حجم ۵ روز قبل × ۱۰۰"),
+    "volume_ratio_30d_pct": ("—", "محاسبه: حجم امروز ÷ میانگین حجم ۳۰ روز قبل × ۱۰۰"),
+    "buy_sell_amount_side": ("—", "محاسبه: خرید/فروش/تعادل از مقایسهٔ ارزش خرید و فروش حقیقی"),
+    "buyer_seller_count_ratio": ("—", "محاسبه: ct_real_buy_count ÷ ct_real_sell_count"),
+    "price_reaction_score": ("—", "محاسبه: جای آخرین قیمت در بازهٔ کف تا سقف مجاز (۰ تا ۱۰۰)"),
+    "pct_last": ("—", "محاسبه: (last_price − yesterday_price) ÷ yesterday_price × ۱۰۰"),
+    "pct_close": ("—", "محاسبه: (close_price − yesterday_price) ÷ yesterday_price × ۱۰۰"),
+    "flow_ratio_recent_avg": ("—", "محاسبه: میانگین نسبت جریان پول ٪ در N نمونهٔ اخیر"),
+    "trend_flow_session": ("—", "محاسبه: شیب رگرسیون سری جریان پول کل جلسه، نرمال به دامنه — آستانه ±۰٫۱۵/±۰٫۵"),
+    "trend_flow_recent": ("—", "محاسبه: همان، فقط روی N نمونهٔ اخیر"),
+    "trend_power_session": ("—", "محاسبه: همان، روی سری قدرت خریدار کل جلسه"),
+    "trend_power_recent": ("—", "محاسبه: همان، روی سری قدرت خریدار N نمونهٔ اخیر"),
+    "trend_divergence": ("—", "محاسبه: جهت روند اخیر مخالف جهت روند جلسه (مبنای هایلایت سطر)"),
+}
+for i in range(1, 6):
+    FIELD_SOURCES[f"bid_price_{i}"] = (f"buy_price_{i}", f"مستقیم — pMeDem ردیف {i}")
+    FIELD_SOURCES[f"bid_vol_{i}"] = (f"buy_volume_{i}", f"مستقیم — qTitMeDem ردیف {i}")
+    FIELD_SOURCES[f"bid_count_{i}"] = (f"buy_orders_{i}", f"مستقیم — zOrdMeDem ردیف {i}")
+    FIELD_SOURCES[f"ask_price_{i}"] = (f"sell_price_{i}", f"مستقیم — pMeOf ردیف {i}")
+    FIELD_SOURCES[f"ask_vol_{i}"] = (f"sell_volume_{i}", f"مستقیم — qTitMeOf ردیف {i}")
+    FIELD_SOURCES[f"ask_count_{i}"] = (f"sell_orders_{i}", f"مستقیم — zOrdMeOf ردیف {i}")
 
 DEFAULT_VISIBLE = [
     "symbol", "date_jalali", "fetch_hms", "market_phase", "symbol_status",
@@ -179,6 +256,7 @@ def _daily_stats(db_path: Path, today: str | None) -> dict:
     f5, v5, v30 = flows[:5], vols[:5], vols[:30]
     return {
         "flow5_avg_abs": sum(f5) / len(f5) if f5 else 0.0,
+        "flow30_avg_abs": sum(flows) / len(flows) if flows else 0.0,
         "vol5_avg": sum(v5) / len(v5) if v5 else 0.0,
         "vol30_avg": sum(v30) / len(v30) if v30 else 0.0,
         "days": len(rows),
@@ -377,8 +455,14 @@ def _compute_row(row: dict, name: str, s: dict, root: Path, raw_db: Path, r) -> 
     ds = _daily_stats(raw_db, str(g("date_jalali") or "") or None)
     if tval:
         row["money_flow_ratio_pct"] = round(flow / tval * 100, 2)
+    if (rbv or rsv) and px:
+        # خود میانگین‌ها هم در سطر می‌نشینند تا مبنای نسبت‌ها قابل بررسی باشد
+        row["flow5_avg_abs"] = int(ds["flow5_avg_abs"]) if ds["flow5_avg_abs"] else None
+        row["flow30_avg_abs"] = int(ds["flow30_avg_abs"]) if ds["flow30_avg_abs"] else None
     if ds["flow5_avg_abs"] > 0 and (rbv or rsv):
         row["mf_ratio_5d_pct"] = round(flow / ds["flow5_avg_abs"] * 100, 2)
+    if ds["flow30_avg_abs"] > 0 and (rbv or rsv):
+        row["mf_ratio_30d_pct"] = round(flow / ds["flow30_avg_abs"] * 100, 2)
     tvol = float(g("trade_volume") or 0)
     if ds["vol5_avg"] > 0 and tvol:
         row["volume_ratio_5d_pct"] = round(tvol / ds["vol5_avg"] * 100, 1)

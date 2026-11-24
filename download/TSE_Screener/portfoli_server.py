@@ -164,27 +164,37 @@ def _replay_export_xlsx(data: dict) -> bytes:
     body = Font(name="Tahoma", size=10)
     al = Alignment(horizontal="center", vertical="center")
 
-    def fill_sheet(ws, head, rows):
+    def fill_sheet(ws, head, srcs, rows):
+        """سطر ۱: هدر فارسی — سطر ۲: نام فیلد بانک خام (یا «—» برای محاسبه‌ای)."""
         ws.sheet_view.rightToLeft = True
         for j, h in enumerate(head, 1):
             c = ws.cell(row=1, column=j, value=h)
             c.fill, c.font, c.alignment = fill, hfont, al
-        for i, r in enumerate(rows, 2):
+        sfill = PatternFill("solid", fgColor="D9E2F3")
+        sfont = Font(name="Tahoma", size=8, italic=True, color="1F3864")
+        for j, s in enumerate(srcs, 1):
+            c = ws.cell(row=2, column=j, value=s)
+            c.fill, c.font, c.alignment = sfill, sfont, al
+        for i, r in enumerate(rows, 3):
             for j, v in enumerate(r, 1):
                 c = ws.cell(row=i, column=j, value=v)
                 c.font, c.alignment = body, al
         for j in range(1, len(head) + 1):
             ws.column_dimensions[get_column_letter(j)].width = 13
-        ws.freeze_panes = "A2"
+        ws.freeze_panes = "A3"
 
+    # نام فیلد بانک هر ستون — از FIELD_SOURCESِ همان موتور محاسبه
+    srcs = [(exp.FIELD_SOURCES.get(c["en"]) or (c["en"], ""))[0] for c in cols]
     wb = Workbook()
     ws1 = wb.active
     ws1.title = "لحظهٔ انتخابی"
     fill_sheet(ws1, ["نماد"] + [c["fa"] for c in cols],
+               ["symbol"] + srcs,
                [[r.get("symbol")] + [r.get(c["en"]) for c in cols]
                 for r in data.get("frame_rows") or []])
     ws2 = wb.create_sheet("سری زمانی تا این لحظه")
     fill_sheet(ws2, ["زمان", "نماد"] + [c["fa"] for c in cols],
+               ["fetch_hms", "symbol"] + srcs,
                [[r.get("fetch_hms"), r.get("symbol")] + [r.get(c["en"]) for c in cols]
                 for r in data.get("series_rows") or []])
     bio = BytesIO()
