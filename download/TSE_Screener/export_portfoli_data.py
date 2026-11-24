@@ -173,7 +173,7 @@ FIELD_SOURCES = {
     "per_capita_buy_real": ("—", "محاسبه: ct_real_buy_volume ÷ ct_real_buy_count (سرانه خرید)"),
     "per_capita_sell_real": ("—", "محاسبه: ct_real_sell_volume ÷ ct_real_sell_count (سرانه فروش)"),
     "real_money_flow": ("—", "محاسبه: (ct_real_buy_volume − ct_real_sell_volume) × قیمت"),
-    "real_money_flow_ratio": ("—", "محاسبه: جریان پول ÷ ارزش کل معاملات (قدر مطلق نیست)"),
+    "real_money_flow_ratio": ("—", "محاسبه: (خرید حقیقی − فروش حقیقی) ÷ (خرید حقیقی + فروش حقیقی) — سهم خالص حقیقی از گردش خودش، بین −۱ تا +۱"),
     "money_flow_ratio_pct": ("—", "محاسبه: جریان پول ÷ trade_value × ۱۰۰ (درصد)"),
     "mf_ratio_5d_pct": ("—", "محاسبه: جریان پول امروز ÷ میانگین |جریان پول| ۵ روز قبل × ۱۰۰"),
     "mf_ratio_30d_pct": ("—", "محاسبه: جریان پول امروز ÷ میانگین |جریان پول| ۳۰ روز قبل × ۱۰۰"),
@@ -434,7 +434,10 @@ def _compute_row(row: dict, name: str, s: dict, root: Path, raw_db: Path, r) -> 
     row["buyer_power"] = round(pc_buy / max(pc_sell, 1e-9), 2) if pc_sell else None
     flow = (rbv - rsv) * px if px else 0
     row["real_money_flow"] = int(flow) if (rbv or rsv) else None
-    row["real_money_flow_ratio"] = round(flow / max(tval, 1.0), 4) if tval else None
+    # مخرج حقیقی (نه کل بازار): سهم خالص حقیقی از گردشِ خود حقیقی‌ها، بین −۱ تا +۱
+    # — چون ClientType ارزش ریالی نمی‌دهد، قیمت واحد (px) از صورت و مخرج حذف می‌شود.
+    real_turnover = rbv + rsv
+    row["real_money_flow_ratio"] = round((rbv - rsv) / real_turnover, 4) if real_turnover else None
     if yest_p > 0:
         if last_p:
             row["pct_last"] = round((last_p - yest_p) / yest_p * 100, 2)
