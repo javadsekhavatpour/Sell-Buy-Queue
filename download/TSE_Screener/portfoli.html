@@ -69,15 +69,20 @@
   .table-wrap{overflow:auto;max-height:calc(100vh - 210px);border-top:2px solid var(--hdr2);
               background:#fff;margin:0 14px 10px;border-radius:0 0 8px 8px}
   table{border-collapse:separate;border-spacing:0;min-width:100%}
-  thead th{position:sticky;top:0;z-index:5;background:var(--hdr);color:#fff;
-           border-left:1px solid #6b8cc9;border-bottom:2px solid var(--hdr2);
-           padding:7px 10px;font-weight:700;font-size:13px;white-space:nowrap;
-           cursor:pointer;min-width:86px}
+  /* ── هدر دو-سه سطری: سطر گروه‌ها + سطر نام ستون‌ها ── */
+  thead th{position:sticky;z-index:5;background:var(--hdr);color:#fff;
+           border-left:1px solid #6b8cc9;border-bottom:1px solid var(--hdr2);
+           padding:4px 6px;font-weight:700;font-size:12px;white-space:nowrap;
+           cursor:pointer;vertical-align:middle}
+  thead tr.g-row th{top:0;height:24px;padding:1px 6px;font-size:11px}
+  thead tr.c-row th{min-width:64px;max-width:120px;white-space:normal;
+                    line-height:1.3;word-break:break-word;font-size:11px;padding:3px 6px}
   thead th:hover{background:var(--hdr2)}
   thead th.sym-col{right:0;z-index:7;min-width:96px;cursor:default}
-  th .caret{font-size:10px;opacity:.85}
+  thead th.row-acts{white-space:nowrap}
+  th .arr{font-size:9px;opacity:.95}
   td{border-left:1px solid #e4e9f2;border-bottom:1px solid #eef2f8;
-     padding:5px 10px;text-align:center;white-space:nowrap;font-size:13.5px;
+     padding:5px 7px;text-align:center;white-space:nowrap;font-size:13px;
      font-variant-numeric:tabular-nums}
   tbody tr:nth-child(even) td{background:#f6f8fc}
   tbody tr:hover td{background:var(--sel)}
@@ -92,6 +97,11 @@
   tbody tr.div-up td.sym-col{background:#c9ecd6}
   tbody tr.div-down td{border-bottom:1px solid #f2c48d}
   tbody tr.div-up td{border-bottom:1px solid #9ed8b2}
+  /* دکمه بازپخش تک‌نماد کنار نام نماد */
+  td.sym-col .sym-line{display:flex;align-items:center;gap:4px;justify-content:center}
+  .mini-replay{border:1px solid #b7c6e6;background:#eef3ff;border-radius:4px;
+               font-size:9.5px;line-height:1;padding:2px 5px;cursor:pointer;color:#2f5597}
+  .mini-replay:hover{background:var(--chip);color:#fff;border-color:var(--chip)}
   .pos{color:var(--green);font-weight:700}
   .neg{color:var(--red);font-weight:700}
   .na{color:var(--mut)}
@@ -137,6 +147,11 @@
   <button class="btn" id="btn-fav" title="فقط نمادهای منتخب (ستاره‌دار)">★ فقط منتخب</button>
   <button class="btn" id="btn-load">📥 بارگذاری داده</button>
   <button class="btn" id="btn-reload" title="دوباره خواندن portfoli_data.json">↻ بازخوانی</button>
+  <button class="btn" id="btn-replay" title="بازپخش شبیه‌سازی جدول از ابتدای جلسه — اگر تاریخ وارد کرده باشید از ابتدای همان روز پخش می‌شود">🎬 بازپخش جدول</button>
+  <input id="rp-date" list="rp-dates" placeholder="۱۴۰۵/۰۸/۳۰" autocomplete="off"
+         title="تاریخ شمسی برای بازپخش — خالی = آخرین جلسه (امروز)"
+         style="width:104px;border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit">
+  <datalist id="rp-dates"></datalist>
   <label class="btn" title="طول پنجرهٔ «نمونه‌های اخیر» برای تشخیص واژگونی روند — تعداد نمونه (۱۰ تا ۳۰)">N روند:
     <input id="w-in" type="number" min="10" max="30" step="1"
            style="width:42px;border:none;background:transparent;font:inherit;text-align:center;padding:0">
@@ -156,11 +171,13 @@
 
 <div class="replaybar" id="replaybar" hidden>
   <span class="title-chip">🎬 شبیه‌سازی</span>
-  <button class="btn" id="rp-start" title="اولین فریم">⏮</button>
+  <span class="src-chip" id="rp-mode" hidden>—</span>
+  <button class="btn" id="rp-start" title="اولین فریم (ابتدای جلسه)">⏮</button>
   <button class="btn primary" id="rp-play">▶ پخش</button>
   <input type="range" id="rp-slider" min="0" max="0" value="0" step="1">
   <span class="src-chip" id="rp-label">—</span>
   <button class="btn" id="rp-end" title="آخرین فریم">⏭</button>
+  <button class="btn" id="rp-export" title="خروجی اکسل: جدول همین لحظه + سری زمانی همهٔ فریم‌ها تا همین لحظه">📊 اکسل</button>
   <button class="btn" id="rp-exit" title="بازگشت به حالت لایو">✕ خروج</button>
 </div>
 
@@ -205,6 +222,16 @@
   طول پنجره با ورودی «N روند» در نوار بالا تنظیم می‌شود (۱۰ تا ۳۰ نمونه؛
   پیش‌فرض ۲۰) و در همین مرورگر ذخیره می‌ماند. ستون «واژگونی روند» عامل
   هایلایت را با ذکر شاخص نشان می‌دهد.</p>
+  <p><b>بازپخش و مرتب‌سازی:</b> هدر جدول دوسطری است (سطر گروه‌ها + سطر نام
+  ستون‌ها) تا ستون‌ها باریک‌تر شوند. <b>کلیک روی سرستون</b> جدول را بر اساس همان
+  ستون مرتب می‌کند — اول نزولی ▼، دوباره صعودی ▲، سومین کلیک بی‌ترتیب؛
+  سلول‌های خالی همیشه آخر می‌ایستند. دکمهٔ ▶ کنار نام هر نماد فقط همان نماد را
+  بازپخش می‌کند و «🎬 بازپخش جدول» کل جدول را از ابتدای جلسه پخش می‌کند — اگر
+  در فیلد تاریخ (کنار آن) روزی مثل ۱۴۰۵/۰۸/۳۰ نوشته باشید، از ابتدای همان روز
+  پخش می‌شود (پیشنهاد تاریخ‌ها از بانک خام می‌آید). در حال بازپخش، دکمهٔ
+  «📊 اکسل» گزارش لحظهٔ انتخابی + سری زمانی تا همان لحظه را با همین ستون‌های
+  نمایان دانلود می‌کند. بازپخش از فایل (خروجی portfoli_sim.py) هم با
+  «📥 بارگذاری داده» یا <code>?replay=نام‌فایل.json</code> سر جایش است.</p>
 </footer>
 
 <script>
@@ -316,31 +343,78 @@ function currentRows(){
   let rows = SYMBOLS.map(s => ({...(dataRows[s.name] || {}), symbol: s.name, _meta: s}));
   if (q) rows = rows.filter(r => norm(r.symbol).includes(q) || norm(r._meta.market_label||"").includes(q));
   if (onlyFav) rows = rows.filter(r => favs.includes(r.symbol));
+  // بازپخش تک‌نماد — فقط همان نماد
+  if (replayMode && replayMode.symbol) rows = rows.filter(r => r.symbol === replayMode.symbol);
   return rows.filter(r => !hidden.includes(r.symbol));
 }
 
+/* مرتب‌سازی جدول با کلیک روی سرستون: نزولی → صعودی → بی‌ترتیب */
+let sortState = {en: null, dir: 0};   // dir: 1=نزولی، -1=صعودی، 0=بی‌ترتیب
+
 function renderHead(){
   const thead = document.getElementById("thead");
-  let h = "<tr>";
-  h += '<th class="sym-col">نماد</th>';
-  for (const en of visible){
-    const g = GROUP_OF[en] || "";
-    h += `<th data-col="${en}" title="گروه: ${g} — برای مدیریت ستون‌ها کلیک کنید">${EN2FA[en]||en} <span class="caret">▾</span></th>`;
+  const groups = GROUPS.filter(g => g.cols.some(c => visible.includes(c.en)));
+  let g1 = '<tr class="g-row"><th class="sym-col" rowspan="2">نماد</th>';
+  let g2 = '<tr class="c-row">';
+  for (const g of groups){
+    const ens = g.cols.filter(c => visible.includes(c.en));
+    g1 += `<th colspan="${ens.length}" class="g-head">${g.title}</th>`;
+    for (const c of ens){
+      const arr = sortState.en === c.en && sortState.dir
+        ? `<span class="arr">${sortState.dir === 1 ? "▼" : "▲"}</span>` : "";
+      g2 += `<th data-col="${c.en}" title="کلیک: مرتب‌سازی بر اساس «${c.fa}»">${c.fa}${arr}</th>`;
+    }
   }
-  h += '<th class="row-acts" title="ستاره = منتخب، سطل = مخفی">★/🗑</th></tr>';
-  thead.innerHTML = h;
+  g1 += '<th class="row-acts" rowspan="2" title="ستاره = منتخب، سطل = مخفی">★/🗑</th></tr>';
+  g2 += '</tr>';
+  thead.innerHTML = g1 + g2;
+  // ردیف نام ستون‌ها باید دقیقاً زیر ردیف گروه‌ها بچسبد — ارتفاع ردیف گروه اندازه‌گیری می‌شود
+  const gh = thead.querySelector("tr.g-row th.g-head");
+  if (gh){
+    const h = gh.offsetHeight + 1;
+    thead.querySelectorAll("tr.c-row th").forEach(th => th.style.top = h + "px");
+  }
   thead.querySelectorAll("th[data-col]").forEach(th =>
-    th.addEventListener("click", () => openChooser(th.dataset.col)));
+    th.addEventListener("click", () => {
+      const en = th.dataset.col;
+      sortState = {en, dir: sortState.en === en
+        ? (sortState.dir === 1 ? -1 : sortState.dir === -1 ? 0 : 1) : 1};
+      renderHead(); renderBody();
+    }));
+}
+
+function sortedRows(rows){
+  const {en, dir} = sortState;
+  if (!en || !dir) return rows;
+  const val = r => (r[en] === null || r[en] === undefined || r[en] === "") ? null : r[en];
+  const num = v => {
+    if (typeof v === "number") return v;
+    const s = String(v).replace(/[,٬\s]/g, "");
+    return s && !isNaN(+s) ? +s : null;
+  };
+  return rows.slice().sort((a, b) => {
+    const va = val(a), vb = val(b);
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1;          // سلول‌های خالی همیشه آخر
+    if (vb === null) return -1;
+    const na = num(va), nb = num(vb);
+    if (na !== null && nb !== null) return (nb - na) * dir;
+    return String(vb).localeCompare(String(va), "fa") * dir;
+  });
 }
 
 function renderBody(){
-  const rows = currentRows();
+  const rows = sortedRows(currentRows());
   const tb = document.getElementById("tbody");
   tb.innerHTML = rows.map(r => {
     // هایلایت کل سطر هنگام واژگونی روند (نزولی = نارنجی، صعودی = سبز)
     const dvk = r.trend_divergence_kind;
     let t = `<tr class="${dvk === "down" ? "div-down" : dvk === "up" ? "div-up" : ""}">`;
-    t += `<td class="sym-col">${r.symbol}<div style="font-weight:400;font-size:10.5px;color:var(--mut)">${r._meta.market_label||""}</div></td>`;
+    const ml = r._meta && r._meta.market_label ? r._meta.market_label : "";
+    t += `<td class="sym-col"><div class="sym-line"><span>${r.symbol}</span>` +
+         `<button class="mini-replay" data-srp="${r.symbol}" ` +
+         `title="بازپخش شبیه‌سازی فقط این نماد — پیش‌فرض از ابتدای جلسه؛ اگر تاریخ در نوار بالا باشد از همان روز">▶</button></div>` +
+         `<div style="font-weight:400;font-size:10.5px;color:var(--mut)">${ml}</div></td>`;
     for (const en of visible) t += `<td>${cellHTML(en, r[en])}</td>`;
     const faved = favs.includes(r.symbol);
     t += `<td class="row-acts">
@@ -349,6 +423,8 @@ function renderBody(){
           </td></tr>`;
     return t;
   }).join("");
+  tb.querySelectorAll("[data-srp]").forEach(b => b.addEventListener("click", () =>
+    startReplay(b.dataset.srp)));
   tb.querySelectorAll("[data-fav]").forEach(b => b.addEventListener("click", () => {
     const s = b.dataset.fav;
     favs = favs.includes(s) ? favs.filter(x => x !== s) : [...favs, s];
@@ -474,6 +550,7 @@ function applyPayload(payload){
 
 /* ───────── بازپخش شبیه‌سازی (/sim) ───────── */
 let replay = null;   // {frames, idx, timer}
+let replayMode = null;   // {symbol: نام نماد در تک‌نماد|null, date: تاریخ}
 function showReplayBar(on){ document.getElementById("replaybar").hidden = !on; }
 function applyFrame(k){
   const f = replay.frames[k];
@@ -481,11 +558,14 @@ function applyFrame(k){
   dataInfo = null;
   replay.idx = k;
   document.getElementById("rp-slider").value = k;
-  document.getElementById("rp-label").textContent = `${f.t}  (${fa(k+1)}/${fa(replay.frames.length)})`;
+  document.getElementById("rp-label").textContent =
+    `${replayMode && replayMode.symbol ? replayMode.symbol + " — " : ""}` +
+    `${f.t}  (${fa(k+1)}/${fa(replay.frames.length)})`;
   renderAll();
   // بعد از renderAll — وگرنه renderStatus بازنویسی‌اش می‌کند
   document.getElementById("src-info").textContent =
-    `شبیه‌سازی روز ${replay.date || ""} — ساعت ${f.t}`;
+    `شبیه‌سازی روز ${replay.date || ""} — ساعت ${f.t}` +
+    (replayMode && replayMode.symbol ? ` — تک‌نماد: ${replayMode.symbol}` : "");
 }
 function stopPlay(){
   if (replay && replay.timer){ clearInterval(replay.timer); replay.timer = null;
@@ -495,11 +575,46 @@ function enterReplay(payload){
   stopPlay();
   replay = {frames: payload.frames, date: payload.date, idx: 0, timer: null};
   document.getElementById("rp-slider").max = payload.frames.length - 1;
+  const mc = document.getElementById("rp-mode");
+  mc.hidden = false;
+  mc.textContent = (replayMode && replayMode.symbol
+                      ? `تک‌نماد: ${replayMode.symbol}` : "جدول کامل")
+                   + ` — ${payload.frames.length} فریم`;
   showReplayBar(true);
   applyFrame(0);
 }
 function exitReplay(){
-  stopPlay(); replay = null; showReplayBar(false); poll();
+  stopPlay(); replay = null; replayMode = null;
+  document.getElementById("rp-mode").hidden = true;
+  showReplayBar(false); poll();
+}
+
+/* ───────── بازپخش از سرور (پیش‌فرض: ابتدای جلسه، یا تاریخِ نوار بالا) ───────── */
+const API_BASE = () => IS_FILE ? "http://localhost:8017" : "";
+async function apiGet(path){
+  let lastErr = null;
+  for (const base of (IS_FILE ? [API_BASE(), "http://127.0.0.1:8017"] : [API_BASE()])){
+    try{
+      const res = await fetch(base + path, {cache: "no-store"});
+      const j = await res.json().catch(() => null);
+      if (res.ok && j) return j;
+      lastErr = new Error((j && j.error) || ("HTTP " + res.status));
+    }catch(e){ lastErr = e; }
+  }
+  throw lastErr || new Error("سرور در دسترس نیست");
+}
+function friendly(e){
+  return /Failed to fetch|NetworkError|Load failed/.test(e.message)
+    ? "سرور در دسترس نیست — «python portfoli_server.py» را اجرا کنید" : e.message;
+}
+async function startReplay(symbol, date){
+  const qs = `symbol=${encodeURIComponent(symbol || "")}` +
+             `&date=${encodeURIComponent(date || "")}&w=${W}`;
+  try{
+    const j = await apiGet(`/api/replay?${qs}`);
+    replayMode = {symbol: j.symbol, date: j.date};
+    enterReplay(j);
+  }catch(e){ alert("بازپخش نشد: " + friendly(e)); }
 }
 /* ───────── لایو: هر POLL_MS یک بار از سرور بانک خام می‌خواند ───────── */
 const POLL_SEC = Math.max(5, parseInt(new URLSearchParams(location.search).get("t") || "30", 10) || 30);
@@ -579,6 +694,50 @@ document.getElementById("rp-end").addEventListener("click", () => {
   stopPlay(); if (replay) applyFrame(replay.frames.length - 1);
 });
 document.getElementById("rp-exit").addEventListener("click", exitReplay);
+// بازپخش جدول کامل — با تاریخِ فیلد نوار بالا (خالی = ابتدای جلسهٔ امروز)
+document.getElementById("btn-replay").addEventListener("click", () =>
+  startReplay(null, document.getElementById("rp-date").value.trim()));
+// لیست تاریخ‌های موجود در بانک‌های خام — پیشنهاد فیلد تاریخ (بدون سرور، فیلد آزاد می‌ماند)
+apiGet("/api/dates").then(j => {
+  document.getElementById("rp-dates").innerHTML =
+    (j.dates || []).map(d => `<option value="${d}">`).join("");
+}).catch(() => {});
+/* خروجی اکسلِ بازپخش: جدول همین لحظه + سری زمانی تا همین لحظه — همان ستون‌های نمایان */
+document.getElementById("rp-export").addEventListener("click", async () => {
+  if (!replay) return;
+  const f = replay.frames[replay.idx];
+  const cols = visible.map(en => ({en, fa: EN2FA[en] || en}));
+  const pack = r => {
+    const o = {symbol: r.symbol, fetch_hms: r.fetch_hms};
+    for (const c of cols) o[c.en] = r[c.en];
+    return o;
+  };
+  const body = {date: replay.date, t: f.t, symbol: replayMode && replayMode.symbol,
+                cols, frame_rows: f.rows.map(pack),
+                series_rows: replay.frames.slice(0, replay.idx + 1)
+                               .flatMap(fr => fr.rows.map(pack))};
+  const btn = document.getElementById("rp-export");
+  btn.disabled = true; btn.textContent = "⏳ در حال ساخت…";
+  try{
+    const res = await fetch(API_BASE() + "/api/export", {
+      method: "POST",
+      headers: {"Content-Type": "text/plain"},   // بدون preflight
+      body: JSON.stringify(body)});
+    if (!res.ok){
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error || ("HTTP " + res.status));
+    }
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `portfoli_replay_${(replay.date || "").replace(/\//g, "-")}` +
+                 `_${f.t.replace(/:/g, "")}` +
+                 `${replayMode && replayMode.symbol ? "_" + replayMode.symbol : ""}.xlsx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(a.href);
+  }catch(e){ alert("خروجی اکسل نشد: " + friendly(e)); }
+  btn.disabled = false; btn.textContent = "📊 اکسل";
+});
 
 /* ───────── رویدادها ───────── */
 document.getElementById("search").addEventListener("input", () => { renderBody(); renderStatus(); });
@@ -625,7 +784,7 @@ document.getElementById("w-in").addEventListener("change", e => {
 document.addEventListener("click", e => {
   const p = document.getElementById("chooser");
   if (p.classList.contains("open") && !p.contains(e.target) &&
-      !e.target.closest("#btn-cols") && !e.target.closest("th[data-col]"))
+      !e.target.closest("#btn-cols"))
     p.classList.remove("open");
 });
 

@@ -29,10 +29,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
-
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import export_portfoli_data as exp  # noqa: E402  (هم‌پوشان با این فایل)
@@ -130,7 +126,15 @@ def _pct_of_session(values: list[float]) -> tuple[float | None, float | None]:
 
 def xlsx_report(frames: list[dict], date: str, per_symbol: dict, out: Path,
                 interval: int) -> None:
-    """گزارش اکسل سه‌شیت: سری زمانی + خلاصهٔ روز + روند ۵ دقیقه‌ای."""
+    """گزارش اکسل سه‌شیت: سری زمانی + خلاصهٔ روز + روند ۵ دقیقه‌ای.
+
+    openpyxl فقط همین‌جا import می‌شود تا build_frames بدون آن هم برای
+    بازپخش وبِ portfoli_server.py کار کند.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
     wb = Workbook()
     thin = Side(style="thin", color="B0BDD4")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
