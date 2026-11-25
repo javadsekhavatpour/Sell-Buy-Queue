@@ -147,6 +147,81 @@ def available_dates(root: Path) -> list[str]:
     return sorted(dates)
 
 
+def _history_export_xlsx(root: Path, symbol: str | None) -> bytes:
+    """اکسل گزارش «سابقهٔ نمادها» — همان ستون‌ها و ترتیب جدول history.html.
+
+    ستون‌های بزرگ‌عددی (جریان پول، میانگین‌ها، حجم روز) مثل جدول به‌صورت خلاصهٔ
+    21.24T / 885.43B / 277.88M درمی‌آیند؛ بقیه (درصدها، قدرت خرید، قیمت) عدد
+    می‌مانند. symbol=* یا خالی یعنی همهٔ نمادها؛ شیت راست‌به‌چپ.
+    """
+    import history_dashboard
+    data = history_dashboard.build_history_data(root)
+    if not data.get("ok"):
+        raise ValueError(data.get("error") or "دادهٔ سابقه در دسترس نیست")
+    HEAD = ["تاریخ", "نماد", "قیمت پایانی", "٪ نوسان پایانی",
+            "جریان پول (ریال)", "میانگین ۵ روزه جریان پول (ریال)",
+            "میانگین ۲۰ روزه جریان پول (ریال)", "میانگین ۳۰ روزه جریان پول (ریال)",
+            "حجم روز", "میانگین ۵ روزه حجم (سهم)", "میانگین ۲۰ روزه حجم (سهم)",
+            "میانگین ۳۰ روزه حجم (سهم)", "قدرت خرید روز", "میانگین قدرت خرید ۵ روز",
+            "میانگین قدرت خرید ۲۰ روز", "میانگین قدرت خرید ۳۰ روز",
+            "تعداد خریدار به فروشنده", "درصد خرید حقیقی از کل معاملات", "واکنش قیمت (٪)"]
+    COMPACT = {"flow_rial", "flow_avg5_rial", "flow_avg20_rial", "flow_avg30_rial",
+               "trade_volume", "vol_avg5", "vol_avg20", "vol_avg30"}
+    FIELDS = ["pct_close", "flow_rial", "flow_avg5_rial", "flow_avg20_rial",
+              "flow_avg30_rial", "trade_volume", "vol_avg5", "vol_avg20", "vol_avg30",
+              "buy_power", "buy_power_avg5", "buy_power_avg20", "buy_power_avg30",
+              "bs_count_ratio", "real_buy_pct", "reaction_pct"]
+
+    def fmt_compact(v: float) -> str:
+        a = abs(v)
+        if a >= 1e12:
+            return f"{v / 1e12:.2f}T"
+        if a >= 1e9:
+            return f"{v / 1e9:.2f}B"
+        if a >= 1e6:
+            return f"{v / 1e6:.2f}M"
+        return f"{v:,.2f}"
+
+    from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "سابقهٔ نمادها"
+    ws.sheet_view.rightToLeft = True
+    fill = PatternFill("solid", fgColor="2F5597")
+    hfont = Font(name="Tahoma", size=10, bold=True, color="FFFFFF")
+    al = Alignment(horizontal="center", vertical="center")
+    for j, h in enumerate(HEAD, 1):
+        c = ws.cell(row=1, column=j, value=h)
+        c.fill, c.font, c.alignment = fill, hfont, al
+    r = 2
+    picked = {s["name"]: s for s in data["symbols"]
+              if not symbol or symbol == "*" or s["name"] == symbol}
+    if not picked:
+        raise ValueError("نماد در بانک سابقه نیست: " + str(symbol))
+    for name in sorted(picked):
+        for row in picked[name]["rows"]:
+            ws.cell(row=r, column=1, value=row["date_jalali"]).alignment = al
+            ws.cell(row=r, column=2, value=name).alignment = al
+            ws.cell(row=r, column=3, value=row["close_price"]).alignment = al
+            j = 4
+            for f in FIELDS:
+                v = row.get(f)
+                val = fmt_compact(v) if (v is not None and f in COMPACT) else v
+                ws.cell(row=r, column=j, value=val).alignment = al
+                j += 1
+            r += 1
+    for j, w in enumerate([12, 10, 12, 12, 13, 15, 15, 15, 12, 14, 14, 14,
+                           12, 14, 14, 14, 14, 18, 12], 1):
+        ws.column_dimensions[get_column_letter(j)].width = w
+    ws.freeze_panes = "A2"
+    bio = BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
+
+
 def _replay_export_xlsx(data: dict) -> bytes:
     """اکسل خروجی بازپخش: شیت «لحظهٔ انتخابی» + شیت «سری زمانی تا این لحظه».
 
@@ -280,6 +355,35 @@ class Handler(BaseHTTPRequestHandler):
                     return
             self._send(404, "history.html کنار portfoli_server.py نیست.".encode("utf-8"),
                        "text/plain; charset=utf-8")
+        elif path == "/api/hexport":  # گزارش اکسل سابقه — همان ستون‌های جدول history.html
+            try:
+                p = urllib.parse.parse_qs(qs)
+                sym = (p.get("symbol", ["*"])[0] or "*").strip()
+                # http.server خط درخواست را latin-1 می‌خواند — اگر مرورگر/ابزار
+                # بایت‌های خام UTF-8 فرستاده باشد همین‌جا باز می‌شود
+                try:
+                    sym = sym.encode("latin-1").decode("utf-8")
+                except (UnicodeDecodeError, UnicodeEncodeError):
+                    pass
+                xls = _history_export_xlsx(self.root, sym)
+                if sym == "*":
+                    fname = "سابقهٔ همهٔ نمادها.xlsx"
+                else:
+                    fname = f"سابقهٔ {sym}.xlsx"
+                self.send_response(200)
+                self.send_header("Content-Type",
+                                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                self.send_header("Content-Length", str(len(xls)))
+                self.send_header(
+                    "Content-Disposition",
+                    f"attachment; filename=\"history_export.xlsx\"; "
+                    f"filename*=UTF-8''{urllib.parse.quote(fname)}")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(xls)
+            except Exception as e:
+                self._send(500, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"),
+                           "application/json; charset=utf-8")
         elif path == "/api/hdata":  # دادهٔ داشبورد سابقه — از بانک خام history.sqlite
             try:
                 import history_dashboard

@@ -30,7 +30,7 @@
   .status{font-size:12px;color:var(--mut);margin:4px 16px}
   .tbl-wrap{overflow-x:auto;margin:6px 14px;border:1px solid var(--line);
             border-radius:10px;background:var(--panel)}
-  table{border-collapse:collapse;min-width:1500px;width:100%}
+  table{border-collapse:collapse;min-width:1900px;width:100%}
   thead th{position:sticky;top:0;background:var(--hdr);color:#fff;z-index:3;
            padding:6px 8px;font-size:12px;font-weight:700;white-space:nowrap;
            border-left:1px solid rgba(255,255,255,.25)}
@@ -59,16 +59,20 @@
   <span class="title-chip">📜 سابقهٔ نمادها <a href="/">← دیده‌بان لایو</a></span>
   <label>نماد: <select id="sym"></select></label>
   <button class="btn" id="btn-collect">⬇ جمع‌آوری سابقه</button>
+  <button class="btn" id="btn-xlsx" title="گزارش اکسل همان چیزی که در جدول نشان داده می‌شود — نماد انتخابی یا همهٔ نمادها">⬇ گزارش اکسل</button>
   <label title="تعداد روزهای بایگانی در portfoli_history — حداقل ۳۰ تا ۹۰ روز">بازهٔ بایگانی (روز):
     <input type="number" id="days" value="30" min="30" max="90" step="5" style="width:64px"></label>
 </div>
 <div class="status" id="st">در حال بارگذاری…</div>
 <div class="panel"><b>ستون‌ها و فرمول‌ها</b> <span style="font-size:11.5px;color:var(--mut)">
   — جریان پول (ریال) = خرید حقیقی − فروش حقیقی [با ارزش واقعی ریالی TSETMC] |
-  میانگین ۵/۲۰/۳۰ روزهٔ جریان پول و حجم = میانگین همان بازه از «روزهای قبل»، بدون روز جاری (مبنا همان مخرج نسبت‌های قبلی export_portfoli_data) |
+  میانگین ۵/۲۰/۳۰ روزهٔ جریان پول، حجم و قدرت خرید = میانگین همان بازه از «روزهای قبل»، بدون روز جاری (مبنا همان مخرج نسبت‌های قبلی export_portfoli_data) |
+  حجم روز = کل حجم معاملات (qTotTran5J) |
+  قدرت خرید روز = (حجم خرید حقیقی ÷ تعداد خریداران) ÷ (حجم فروش حقیقی ÷ تعداد فروشندگان) — همان فرمول buyer_power پروژه |
   تعداد خریدار به فروشنده = تعداد خریداران ÷ فروشندگان حقیقی |
   درصد خرید حقیقی از کل = ارزش خرید حقیقی ÷ ارزش کل × ۱۰۰ |
   واکنش قیمت = جای آخرین قیمت در بازهٔ کف تا سقف مجاز (کف/سقف = دیروز × (۱ ± درصد مجاز) — price_range.py) |
+  اعداد بزرگ به‌صورت خلاصه: T=هزار میلیارد، B=میلیارد، M=میلیون |
   دادهٔ خام فقط-TSE از history.sqlite</span></div>
 <div class="tbl-wrap">
 <table id="tbl">
@@ -76,8 +80,11 @@
     <th>تاریخ</th><th>نماد</th><th>قیمت پایانی</th><th>٪ نوسان پایانی</th>
     <th>جریان پول (ریال)</th><th>میانگین ۵ روزه جریان پول (ریال)</th>
     <th>میانگین ۲۰ روزه جریان پول (ریال)</th><th>میانگین ۳۰ روزه جریان پول (ریال)</th>
+    <th>حجم روز</th>
     <th>میانگین ۵ روزه حجم (سهم)</th><th>میانگین ۲۰ روزه حجم (سهم)</th>
     <th>میانگین ۳۰ روزه حجم (سهم)</th>
+    <th>قدرت خرید روز</th><th>میانگین قدرت خرید ۵ روز</th>
+    <th>میانگین قدرت خرید ۲۰ روز</th><th>میانگین قدرت خرید ۳۰ روز</th>
     <th>تعداد خریدار به فروشنده</th><th>درصد خرید حقیقی از کل معاملات</th>
     <th>واکنش قیمت (٪)</th>
   </tr></thead>
@@ -87,12 +94,23 @@
 <div class="log" id="log"></div>
 <script>
 const COLS = ["pct_close","flow_rial","flow_avg5_rial","flow_avg20_rial","flow_avg30_rial",
-              "vol_avg5","vol_avg20","vol_avg30",
+              "trade_volume","vol_avg5","vol_avg20","vol_avg30",
+              "buy_power","buy_power_avg5","buy_power_avg20","buy_power_avg30",
               "bs_count_ratio","real_buy_pct","reaction_pct"];
+// ستون‌های بزرگ‌عددی — نمایش خلاصهٔ لاتین مثل 21.24T / 885.43B / 277.88M
+const COMPACT = new Set(["flow_rial","flow_avg5_rial","flow_avg20_rial","flow_avg30_rial",
+                         "trade_volume","vol_avg5","vol_avg20","vol_avg30"]);
+const fmtC = v => {
+  const a = Math.abs(v);
+  if (a >= 1e12) return (v / 1e12).toFixed(2) + "T";
+  if (a >= 1e9)  return (v / 1e9).toFixed(2) + "B";
+  if (a >= 1e6)  return (v / 1e6).toFixed(2) + "M";
+  return v.toLocaleString("en-US", {maximumFractionDigits: 2});
+};
 let DATA = null;
 const fa = n => Number(n).toLocaleString("fa-IR", {maximumFractionDigits:2});
-const cell = v => (v === null || v === undefined) ? '<span style="color:var(--mut)">—</span>'
-  : `<span class="${v > 0 ? "pos" : v < 0 ? "neg" : ""}">${fa(v)}</span>`;
+const cell = (v, compact) => (v === null || v === undefined) ? '<span style="color:var(--mut)">—</span>'
+  : `<span class="${v > 0 ? "pos" : v < 0 ? "neg" : ""}">${compact ? fmtC(v) : fa(v)}</span>`;
 const symParam = new URLSearchParams(location.search).get("symbol");
 
 async function loadData(){
@@ -118,12 +136,12 @@ function render(){
   let html = "";
   for (const s of list){
     // سرگروه هر نماد — نام نماد + تعداد روز + آخرین روز جمع‌آوری
-    html += `<tr class="sym-head"><td colspan="14">نماد «${s.name}» — ${fa(s.days)} روز ` +
+    html += `<tr class="sym-head"><td colspan="19">نماد «${s.name}» — ${fa(s.days)} روز ` +
             `| آخرین روز جمع‌آوری: ${s.last_collected || "—"}</td></tr>`;
     html += s.rows.slice().reverse().map(r =>
       `<tr><td class="dt">${r.date_jalali}</td><td class="sym">${s.name}</td>` +
       `<td>${fa(r.close_price)}</td>` +
-      COLS.map(c => `<td>${cell(r[c])}</td>`).join("") + "</tr>").join("");
+      COLS.map(c => `<td>${cell(r[c], COMPACT.has(c))}</td>`).join("") + "</tr>").join("");
   }
   tb.innerHTML = html;
   const total = list.reduce((a, s) => a + s.days, 0);
@@ -133,6 +151,12 @@ function render(){
     `${fa(total)} سطر | آخرین روز جمع‌آوری: ${lc || "—"} | محاسبه: ${DATA.generated_at} | ` +
     `فرمول‌ها: export_portfoli_data.py`;
 }
+// گزارش اکسل — همان نماد انتخابی (یا همهٔ نمادها) با همان ترتیب ستون‌ها و اعداد خلاصه
+document.getElementById("btn-xlsx").onclick = () => {
+  const pick = document.getElementById("sym").value;
+  const q = pick === "*" ? "*" : encodeURIComponent(pick);
+  location.href = "/api/hexport?symbol=" + q;
+};
 document.getElementById("btn-collect").onclick = async () => {
   const b = document.getElementById("btn-collect"), lg = document.getElementById("log");
   b.disabled = true; b.textContent = "⏳ در حال جمع‌آوری…";

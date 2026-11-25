@@ -109,6 +109,19 @@ GROUPS = [
         ("نسبت تعداد خریدار به فروشنده", "buyer_seller_count_ratio"),
         ("امتیاز واکنش قیمت", "price_reaction_score"),
     ]),
+    # گروه «تاریخچه» — همان ستون‌های داشبورد سابقهٔ نمادها؛ حجم روز (حجم کل) و
+    # قدرت خرید روز (قدرت خریدار) از قبل در گروه‌های دیگر هستند و تکرار نمی‌شوند
+    ("تاریخچه", [
+        ("میانگین ۵ روزه جریان پول (ریال)", "flow_avg5_rial"),
+        ("میانگین ۲۰ روزه جریان پول (ریال)", "flow_avg20_rial"),
+        ("میانگین ۳۰ روزه جریان پول (ریال)", "flow_avg30_rial"),
+        ("میانگین ۵ روزه حجم (سهم)", "vol_avg5"),
+        ("میانگین ۲۰ روزه حجم (سهم)", "vol_avg20"),
+        ("میانگین ۳۰ روزه حجم (سهم)", "vol_avg30"),
+        ("میانگین قدرت خرید ۵ روز", "buy_power_avg5"),
+        ("میانگین قدرت خرید ۲۰ روز", "buy_power_avg20"),
+        ("میانگین قدرت خرید ۳۰ روز", "buy_power_avg30"),
+    ]),
     ("روند جلسه", [
         ("میانگین نسبت جریان پول (N نمادهٔ اخیر)", "flow_ratio_recent_avg"),
         ("روند جریان پول از ابتدای جلسه", "trend_flow_session"),
@@ -178,6 +191,15 @@ FIELD_SOURCES = {
     "mf_ratio_30d_pct": ("—", "محاسبه: جریان پول امروز ÷ میانگین |جریان پول| ۳۰ روز قبل × ۱۰۰"),
     "flow5_avg_abs": ("—", "محاسبه: میانگین |(خرید−فروش حقیقی) × قیمت پایانی| در ۵ روز قبل"),
     "flow30_avg_abs": ("—", "محاسبه: میانگین |(خرید−فروش حقیقی) × قیمت پایانی| در ۳۰ روز قبل"),
+    "flow_avg5_rial": ("—", "محاسبه: میانگین علامت‌دار (خرید−فروش حقیقی) × قیمت پایانی در ۵ روز قبل"),
+    "flow_avg20_rial": ("—", "محاسبه: همان با ۲۰ روز قبل"),
+    "flow_avg30_rial": ("—", "محاسبه: همان با ۳۰ روز قبل"),
+    "vol_avg5": ("—", "محاسبه: میانگین حجم معاملات در ۵ روز قبل"),
+    "vol_avg20": ("—", "محاسبه: همان با ۲۰ روز قبل"),
+    "vol_avg30": ("—", "محاسبه: همان با ۳۰ روز قبل"),
+    "buy_power_avg5": ("—", "محاسبه: میانگین قدرت خریدار روزانه در ۵ روز قبل"),
+    "buy_power_avg20": ("—", "محاسبه: همان با ۲۰ روز قبل"),
+    "buy_power_avg30": ("—", "محاسبه: همان با ۳۰ روز قبل"),
     "volume_ratio_5d_pct": ("—", "محاسبه: حجم امروز ÷ میانگین حجم ۵ روز قبل × ۱۰۰"),
     "volume_ratio_30d_pct": ("—", "محاسبه: حجم امروز ÷ میانگین حجم ۳۰ روز قبل × ۱۰۰"),
     "buy_sell_amount_side": ("—", "محاسبه: خرید/فروش/تعادل از مقایسهٔ ارزش خرید و فروش حقیقی"),
@@ -217,6 +239,10 @@ DEFAULT_VISIBLE = [
     "volume_ratio_30d_pct", "buy_sell_amount_side",
     "buyer_seller_count_ratio", "price_reaction_score", "data_status",
     "trend_flow_session", "trend_flow_recent", "trend_divergence",
+    # گروه «تاریخچه» — پیش‌فرض روشن (درخواست کاربر؛ دکمهٔ گروه برای نمایش/حذف سریع)
+    "flow_avg5_rial", "flow_avg20_rial", "flow_avg30_rial",
+    "vol_avg5", "vol_avg20", "vol_avg30",
+    "buy_power_avg5", "buy_power_avg20", "buy_power_avg30",
 ]
 
 TREND_WINDOW_DEFAULT = 20
@@ -233,37 +259,80 @@ def _raw_phase(trading_hours: dict, hm: str) -> str:
     return "بسته"
 
 
+def _daily_rows(db_path: Path, today: str | None,
+                table: str = "raw_snapshots") -> list:
+    """آخرین نمونهٔ هر روز معاملاتی (نزولی) — از بانک لایو یا بانک سابقهٔ TSE.
+
+    raw_snapshots چند نمونه در روز دارد (گروه‌بندی بر id)؛ history_daily
+    یک ردیف در روز (بدون id). امروز حذف می‌شود — «روزهای قبل» مبناست.
+    """
+    con = sqlite3.connect(str(db_path))
+    con.row_factory = sqlite3.Row
+    try:
+        cols = ("date_jalali, ct_real_buy_volume, ct_real_sell_volume, "
+                "ct_real_buy_count, ct_real_sell_count, close_price, trade_volume")
+        if table == "history_daily":
+            q = f"SELECT {cols} FROM {table} ORDER BY date_jalali DESC"
+        else:
+            q = (f"SELECT {cols} FROM {table} WHERE id IN "
+                 f"(SELECT MAX(id) FROM {table} GROUP BY date_jalali) "
+                 "ORDER BY date_jalali DESC")
+        rows = con.execute(q).fetchall()
+    finally:
+        con.close()
+    if today:
+        rows = [r for r in rows if r["date_jalali"] != today]
+    return rows
+
+
 def _daily_stats(db_path: Path, today: str | None) -> dict:
     """آمار روزانه از آخرین نمونهٔ هر روز معاملاتی — برای شاخص‌های چندروزهٔ شیت dashboard.
 
     جریان پول هر روز = (خرید حقیقی − فروش حقیقی) × قیمت پایانیِ آخرین نمونهٔ آن روز.
     روزِ امروز (today) از آمار «روزهای قبل» کنار گذاشته می‌شود.
+    میانگین‌های گروه «تاریخچه» با علامت‌اند (خالص جهت)؛ میانگین‌های نسبت‌ها مطلق‌اند.
+    قدرت خرید هر روز — همان فرمول buyer_power: (حجم خرید÷تعداد خریداران) ÷ (حجم فروش÷تعداد فروشندگان).
+    اگر بانک لایو فقط امروز را داشته باشد (تازه نصب شده)، روزهای قبل از بانک
+    سابقهٔ ۴۰۰ روزهٔ history.sqlite می‌آید — همان ستون‌ها، یک ردیف در روز.
     """
-    con = sqlite3.connect(str(db_path))
-    con.row_factory = sqlite3.Row
-    try:
-        rows = con.execute(
-            "SELECT date_jalali, ct_real_buy_volume, ct_real_sell_volume, "
-            "close_price, trade_volume FROM raw_snapshots WHERE id IN "
-            "(SELECT MAX(id) FROM raw_snapshots GROUP BY date_jalali) "
-            "ORDER BY date_jalali DESC"
-        ).fetchall()
-    finally:
-        con.close()
-    if today:
-        rows = [r for r in rows if r["date_jalali"] != today]
-    flows, vols = [], []
+    rows = _daily_rows(db_path, today)
+    if not rows:
+        hdb = db_path.parent / "history.sqlite"
+        if hdb != db_path and hdb.exists():
+            rows = _daily_rows(hdb, today, table="history_daily")
+    flows, f_abs, vols, powers = [], [], [], []
     for r in rows[:30]:
         px = float(r["close_price"] or 0)
-        flows.append(abs((int(r["ct_real_buy_volume"] or 0) -
-                          int(r["ct_real_sell_volume"] or 0)) * px))
+        f = (int(r["ct_real_buy_volume"] or 0) -
+             int(r["ct_real_sell_volume"] or 0)) * px
+        flows.append(f)
+        f_abs.append(abs(f))
         vols.append(float(r["trade_volume"] or 0))
-    f5, v5, v30 = flows[:5], vols[:5], vols[:30]
+        bc = int(r["ct_real_buy_count"] or 0)
+        sc = int(r["ct_real_sell_count"] or 0)
+        powers.append(((int(r["ct_real_buy_volume"] or 0) / max(bc, 1)) /
+                       max(int(r["ct_real_sell_volume"] or 0) / max(sc, 1), 1e-9))
+                      if (bc and sc and int(r["ct_real_sell_volume"] or 0)) else None)
+
+    def _win(xs, n):
+        xs = [x for x in xs[:n] if x is not None]
+        return sum(xs) / len(xs) if xs else None
+
+    f5, v5, v30 = f_abs[:5], vols[:5], vols[:30]
     return {
         "flow5_avg_abs": sum(f5) / len(f5) if f5 else 0.0,
-        "flow30_avg_abs": sum(flows) / len(flows) if flows else 0.0,
+        "flow30_avg_abs": sum(f_abs) / len(f_abs) if f_abs else 0.0,
         "vol5_avg": sum(v5) / len(v5) if v5 else 0.0,
         "vol30_avg": sum(v30) / len(v30) if v30 else 0.0,
+        "flow_avg5_rial": _win(flows, 5),
+        "flow_avg20_rial": _win(flows, 20),
+        "flow_avg30_rial": _win(flows, 30),
+        "vol_avg5": _win(vols, 5),
+        "vol_avg20": _win(vols, 20),
+        "vol_avg30": _win(vols, 30),
+        "buy_power_avg5": _win(powers, 5),
+        "buy_power_avg20": _win(powers, 20),
+        "buy_power_avg30": _win(powers, 30),
         "days": len(rows),
     }
 
@@ -479,6 +548,15 @@ def _compute_row(row: dict, name: str, s: dict, root: Path, raw_db: Path, r) -> 
         row["volume_ratio_5d_pct"] = round(tvol / ds["vol5_avg"] * 100, 1)
     if ds["vol30_avg"] > 0 and tvol:
         row["volume_ratio_30d_pct"] = round(tvol / ds["vol30_avg"] * 100, 1)
+    # گروه «تاریخچه» — میانگین‌های عددی ۵/۲۰/۳۰ روزه (پنجره فقط روزهای قبل)
+    if ds.get("days"):
+        for k in ("flow_avg5_rial", "flow_avg20_rial", "flow_avg30_rial",
+                  "vol_avg5", "vol_avg20", "vol_avg30"):
+            v = ds.get(k)
+            row[k] = int(v) if v is not None else None
+        for k in ("buy_power_avg5", "buy_power_avg20", "buy_power_avg30"):
+            v = ds.get(k)
+            row[k] = round(v, 2) if v is not None else None
     if rbc or rsc:
         row["buyer_seller_count_ratio"] = round(rbc / max(rsc, 1), 2) if rsc else None
     bv_val, sv_val = row.get("real_buy_value") or 0, row.get("real_sell_value") or 0

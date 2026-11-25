@@ -16,9 +16,15 @@ history_dashboard.py — محاسبهٔ شاخص‌های سابقهٔ روزا�
   flow_avg5_rial   میانگین ۵ روزه جریان پول = میانگین جریانِ ۵ روز قبل (بدون امروز)
   flow_avg20_rial  میانگین ۲۰ روزه جریان پول = همان با ۲۰ روز قبل
   flow_avg30_rial  میانگین ۳۰ روزه جریان پول = همان با ۳۰ روز قبل
+  trade_volume     حجم روز                  = qTotTran5J (کل حجم معاملات روز)
   vol_avg5         میانگین ۵ روزه حجم       = میانگین حجم ۵ روز قبل (بدون امروز)
   vol_avg20        میانگین ۲۰ روزه حجم      = همان با ۲۰ روز قبل
   vol_avg30        میانگین ۳۰ روزه حجم      = همان با ۳۰ روز قبل
+  buy_power        قدرت خرید روز            = (حجم خرید حقیقی ÷ تعداد خریداران) ÷
+                                              (حجم فروش حقیقی ÷ تعداد فروشندگان)
+  buy_power_avg5   میانگین قدرت خرید ۵ روز   = میانگین قدرت خرید ۵ روز قبل (بدون امروز)
+  buy_power_avg20  میانگین قدرت خرید ۲۰ روز  = همان با ۲۰ روز قبل
+  buy_power_avg30  میانگین قدرت خرید ۳۰ روز  = همان با ۳۰ روز قبل
   bs_count_ratio   تعداد خریدار به فروشنده  = buy_CountI ÷ sell_CountI
   real_buy_pct     درصد خرید حقیقی از کل    = ارزش خرید حقیقی ÷ ارزش کل × ۱۰۰
   reaction_pct     واکنش قیمت (٪)           = جای آخرین قیمت در بازهٔ کف تا سقف مجاز
@@ -79,6 +85,17 @@ def build_history_data(root: Path = ROOT, symbols: list[str] | None = None) -> d
         flows = [_flow(r) for r in rows]
         vols = [r.get("trade_volume") for r in rows]
         f_abs = [abs(f) if f is not None else None for f in flows]
+
+        def _power(r: dict) -> float | None:
+            """قدرت خرید روز — همان فرمول buyer_powerِ exporter (حجم‌محور):
+            (حجم خرید حقیقی ÷ تعداد خریداران) ÷ (حجم فروش حقیقی ÷ تعداد فروشندگان)"""
+            bv, sv = r.get("ct_real_buy_volume"), r.get("ct_real_sell_volume")
+            bc, sc = r.get("ct_real_buy_count"), r.get("ct_real_sell_count")
+            if not bv or not sv or not bc or not sc:
+                return None
+            return (bv / max(bc, 1)) / max(sv / max(sc, 1), 1e-9)
+
+        powers = [_power(r) for r in rows]
         computed: list[dict] = []
         for i, r in enumerate(rows):
             close = r.get("close_price")
@@ -108,6 +125,14 @@ def build_history_data(root: Path = ROOT, symbols: list[str] | None = None) -> d
             # میانگین حجم — پنجره بدون امروز
             for n, av in ((5, v5), (20, v20), (30, v30)):
                 row[f"vol_avg{n}"] = round(av) if av is not None else None
+            # حجم روز — همان ستون خام qTotTran5J
+            row["trade_volume"] = vols[i]
+            # قدرت خرید روز + میانگین ۵/۲۰/۳۰ روزهٔ روزهای قبل (پنجره بدون امروز)
+            pw = powers[i]
+            row["buy_power"] = round(pw, 2) if pw is not None else None
+            p5, p20, p30 = (_avg(powers[max(0, i - n):i]) for n in (5, 20, 30))
+            for n, av in ((5, p5), (20, p20), (30, p30)):
+                row[f"buy_power_avg{n}"] = round(av, 2) if av is not None else None
             # تعداد خریدار به فروشنده — فرمول buyer_seller_count_ratio
             bc, sc = r.get("ct_real_buy_count"), r.get("ct_real_sell_count")
             row["bs_count_ratio"] = round(bc / sc, 2) if (bc and sc) else None
