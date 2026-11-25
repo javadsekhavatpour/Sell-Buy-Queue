@@ -323,24 +323,32 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send(500, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"),
                            "application/json; charset=utf-8")
-        elif path == "/api/hcollect":  # اجرای history_collector — جمع‌آوری سابقهٔ نمادها
+        elif path == "/api/hcollect":  # اجرای history_collector + بایگانی سابقه در portfoli_history
             try:
                 import subprocess
-                days = 400
+                days = 30  # حداقل ۳۰ روز دیفالت — تا ۹۰ روز قابل بایگانی
                 n = int(self.headers.get("Content-Length") or 0)
                 if n:
                     body = json.loads(self.rfile.read(n).decode("utf-8") or "{}")
-                    days = min(max(int(body.get("days", 400)), 30), 2000)
+                    days = min(max(int(body.get("days", 30)), 30), 90)
                 script = self.root / "history_collector.py"
                 if not script.exists():
                     script = HERE / "history_collector.py"
+                # ۱) سابقهٔ خام از TSETMC (بانک انباشته است — اجرای دوباره بدون تکرار)
                 proc = subprocess.run(
-                    [sys.executable, str(script), "--days", str(days)],
+                    [sys.executable, str(script), "--days", "400"],
                     capture_output=True, text=True, timeout=600, cwd=str(self.root))
-                log = (proc.stdout or "").strip().splitlines()[-14:]
-                self._send(200, json.dumps(
-                    {"ok": proc.returncode == 0, "log": log},
-                    ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+                log = (proc.stdout or "").strip().splitlines()[-10:]
+                # ۲) بایگانی محاسبه‌ها تا N روز گذشته در portfoli_history.sqlite
+                import history_dashboard
+                bf = history_dashboard.backfill_portfoli_history(self.root, days)
+                self._send(200, json.dumps({
+                    "ok": proc.returncode == 0 and bf.get("ok"),
+                    "log": log,
+                    "backfilled": bf.get("added"),
+                    "archive_days": bf.get("days"),
+                    "last_dates": bf.get("last_dates"),
+                }, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
             except subprocess.TimeoutExpired:
                 self._send(504, json.dumps({"error": "جمع‌آوری بیش از ۱۰ دقیقه طول کشید"},
                                            ensure_ascii=False).encode("utf-8"),

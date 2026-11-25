@@ -433,7 +433,9 @@ function renderBody(){
     const ml = r._meta && r._meta.market_label ? r._meta.market_label : "";
     t += `<td class="sym-col"><div class="sym-line"><span>${r.symbol}</span>` +
          `<button class="mini-replay" data-srp="${r.symbol}" ` +
-         `title="بازپخش شبیه‌سازی فقط این نماد — پیش‌فرض از ابتدای جلسه؛ اگر تاریخ در نوار بالا باشد از همان روز">▶</button></div>` +
+         `title="بازپخش شبیه‌سازی فقط این نماد — پیش‌فرض از ابتدای جلسه؛ اگر تاریخ در نوار بالا باشد از همان روز">▶</button>` +
+         `<button class="mini-replay" data-hist="${r.symbol}" ` +
+         `title="سابقهٔ این نماد — داشبورد تاریخچهٔ روزانه (جریان پول، نسبت‌های ۵/۳۰ روزه، واکنش قیمت)">📜</button></div>` +
          `<div style="font-weight:400;font-size:10.5px;color:var(--mut)">${ml}</div></td>`;
     for (const en of visible) t += `<td>${cellHTML(en, r[en], r)}</td>`;
     const faved = favs.includes(r.symbol);
@@ -445,6 +447,8 @@ function renderBody(){
   }).join("");
   tb.querySelectorAll("[data-srp]").forEach(b => b.addEventListener("click", () =>
     startReplay(b.dataset.srp)));
+  tb.querySelectorAll("[data-hist]").forEach(b => b.addEventListener("click", () =>
+    { location.href = "/history?symbol=" + encodeURIComponent(b.dataset.hist); }));
   tb.querySelectorAll("[data-fav]").forEach(b => b.addEventListener("click", () => {
     const s = b.dataset.fav;
     favs = favs.includes(s) ? favs.filter(x => x !== s) : [...favs, s];

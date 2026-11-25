@@ -24,6 +24,7 @@ history_dashboard.py — محاسبهٔ شاخص‌های سابقهٔ روزا�
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 from datetime import datetime
@@ -112,9 +113,68 @@ def build_history_data(root: Path = ROOT, symbols: list[str] | None = None) -> d
                 row["reaction_pct"] = None
             row["flow_rial"] = round(fl) if fl is not None else None
             computed.append(row)
-        out["symbols"].append({"name": name, "days": len(rows), "rows": computed})
+        out["symbols"].append({"name": name, "days": len(computed),
+                               # تاریخ آخرین روز جمع‌آوری — آخرین تاریخ شمسیِ بانک خام
+                               "last_collected": computed[-1]["date_jalali"],
+                               "rows": computed})
     con.close()
     return out
+
+
+# شِمای بایگانی محاسبات — همان بانکی که portfoli_server.save_history می‌سازد
+# (UNIQUE(symbol, date_jalali, fetch_hms) → ردیف تکراری ممکن نیست)
+PORTFOLI_HISTORY_SQL = """
+CREATE TABLE IF NOT EXISTS computed_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    saved_at TEXT NOT NULL,
+    date_jalali TEXT NOT NULL,
+    fetch_hms TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    UNIQUE(symbol, date_jalali, fetch_hms)
+)
+"""
+
+
+def backfill_portfoli_history(root: Path = ROOT, days: int = 30) -> dict:
+    """پر کردن بایگانی portfoli_history.sqlite تا N روز گذشته (پیش‌فرض ۳۰، بیشینه ۹۰).
+
+    داشبورد لایو این بانک را فقط در طول اجرا پر می‌کند؛ این تابع همان ردیف‌های
+    محاسبه‌شدهٔ سابقه را از بانک خام history.sqlite به آن اضافه می‌کند تا مرور
+    تاریخچه از همان روزِ نصب ممکن باشد. fetch_hms = "hist" نشان می‌دهد ردیف
+    از سابقهٔ TSETMC بایگانی شده نه از نمونهٔ لحظه‌ای لایو.
+    """
+    days = min(max(int(days), 30), 90)  # حداقل ۳۰ روز دیفالت، تا ۹۰ روز
+    data = build_history_data(root)
+    hist = root / "data" / "raw" / "portfoli_history.sqlite"
+    hist.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(str(hist))
+    added = 0
+    last_dates = []
+    try:
+        con.execute(PORTFOLI_HISTORY_SQL)
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for s in data.get("symbols", []):
+            tail = s["rows"][-days:]
+            last_dates.append({"symbol": s["name"],
+                               "last_collected": s.get("last_collected"),
+                               "days": len(tail)})
+            for r in tail:
+                payload = {"symbol": s["name"], "date_jalali": r["date_jalali"],
+                           "fetch_hms": "hist",
+                           "source": "history.sqlite (TSETMC سابقهٔ خام)"}
+                payload.update(r)
+                cur = con.execute(
+                    "INSERT OR IGNORE INTO computed_samples "
+                    "(saved_at, date_jalali, fetch_hms, symbol, payload) "
+                    "VALUES (?,?,?,?,?)",
+                    (now, r["date_jalali"], "hist", s["name"],
+                     json.dumps(payload, ensure_ascii=False)))
+                added += cur.rowcount
+        con.commit()
+    finally:
+        con.close()
+    return {"ok": True, "days": days, "added": added, "last_dates": last_dates}
 
 
 if __name__ == "__main__":

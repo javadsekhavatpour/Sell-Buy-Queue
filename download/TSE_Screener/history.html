@@ -30,24 +30,26 @@
   .status{font-size:12px;color:var(--mut);margin:4px 16px}
   .tbl-wrap{overflow-x:auto;margin:6px 14px;border:1px solid var(--line);
             border-radius:10px;background:var(--panel)}
-  table{border-collapse:collapse;min-width:980px;width:100%}
+  table{border-collapse:collapse;min-width:1060px;width:100%}
   thead th{position:sticky;top:0;background:var(--hdr);color:#fff;z-index:3;
            padding:6px 8px;font-size:12px;font-weight:700;white-space:nowrap;
            border-left:1px solid rgba(255,255,255,.25)}
-  thead th:first-child{right:0;position:sticky;z-index:4}
   tbody td{padding:4px 8px;text-align:center;border-bottom:1px solid #e3e9f4;
            font-size:12.5px;white-space:nowrap}
   tbody td.dt{position:sticky;right:0;background:var(--sel);font-weight:700;z-index:2}
+  tbody td.sym{position:sticky;right:44px;background:var(--panel);font-weight:700;z-index:2;
+               font-size:12px;color:var(--chip)}
   tbody tr:nth-child(even){background:#f5f8fd}
+  tbody tr:nth-child(even) td.sym{background:#f5f8fd}
+  .sym-head td{background:var(--hdr2);color:#fff;font-weight:700;font-size:12.5px;
+               text-align:right;padding:5px 10px;white-space:normal}
   .pos{color:var(--green)} .neg{color:var(--red)}
-  .sym-head td{background:var(--hdr2);color:#fff;font-weight:700;font-size:13px;
-               text-align:right;padding:5px 10px}
   .log{font:11px/1.7 Tahoma,monospace;color:var(--txt);white-space:pre-wrap;
        background:#f5f8fd;border:1px dashed var(--line);border-radius:8px;
-       padding:6px 10px;margin-top:6px;display:none}
+       padding:6px 10px;margin:6px 14px;display:none}
   @media (max-width:640px){
     .toolbar{padding:8px}
-    .panel,.status,.tbl-wrap{margin:6px 8px}
+    .panel,.status,.tbl-wrap,.log{margin:6px 8px}
     body{font-size:13px}
   }
 </style>
@@ -56,23 +58,23 @@
 <div class="toolbar">
   <span class="title-chip">📜 سابقهٔ نمادها <a href="/">← دیده‌بان لایو</a></span>
   <label>نماد: <select id="sym"></select></label>
-  <label>از تاریخ: <select id="from"></select></label>
   <button class="btn" id="btn-collect">⬇ جمع‌آوری سابقه</button>
-  <label>بازه (روز): <input type="number" id="days" value="400" min="30" max="2000" style="width:72px"></label>
+  <label title="تعداد روزهای بایگانی در portfoli_history — حداقل ۳۰ تا ۹۰ روز">بازهٔ بایگانی (روز):
+    <input type="number" id="days" value="30" min="30" max="90" step="5" style="width:64px"></label>
 </div>
 <div class="status" id="st">در حال بارگذاری…</div>
 <div class="panel"><b>ستون‌ها و فرمول‌ها</b> <span style="font-size:11.5px;color:var(--mut)">
   — جریان پول (٪) = (خرید حقیقی − فروش حقیقی) ÷ ارزش کل × ۱۰۰ [با ارزش واقعی ریالی TSETMC] |
-  نسبت ۵/۳۰ روزه جریان پول = جریان ÷ میانگین قدر مطلق جریان ۵/۳۰ روز قبل × ۱۰۰ |
+  نسبت ۵/۳۰ روزه جریان پول = جریان ÷ میانگین قدر مطلق جریان ۵/۳۰ روز قبل × ۱۰۰ [مخرج فقط روزهای قبل] |
   نسبت ۵/۳۰ روزه حجم = حجم ÷ میانگین حجم ۵/۳۰ روز قبل × ۱۰۰ |
   تعداد خریدار به فروشنده = تعداد خریداران ÷ فروشندگان حقیقی |
   درصد خرید حقیقی از کل = ارزش خرید حقیقی ÷ ارزش کل × ۱۰۰ |
-  واکنش قیمت = جای آخرین قیمت در بازهٔ کف تا سقف مجاز (٪) |
-  فرمول‌ها از export_portfoli_data.py — دادهٔ خام از history.sqlite</span></div>
+  واکنش قیمت = جای آخرین قیمت در بازهٔ کف تا سقف مجاز (کف/سقف = دیروز × (۱ ± درصد مجاز) — price_range.py) |
+  فرمول‌ها از export_portfoli_data.py — دادهٔ خام فقط-TSE از history.sqlite</span></div>
 <div class="tbl-wrap">
 <table id="tbl">
   <thead><tr>
-    <th>تاریخ</th><th>قیمت پایانی</th><th>٪ نوسان پایانی</th>
+    <th>تاریخ</th><th>نماد</th><th>قیمت پایانی</th><th>٪ نوسان پایانی</th>
     <th>جریان پول (٪)</th><th>نسبت ۵ روزه جریان پول (٪)</th><th>نسبت ۵ روزه حجم (٪)</th>
     <th>نسبت ۳۰ روزه جریان پول (٪)</th><th>نسبت ۳۰ روزه حجم (٪)</th>
     <th>تعداد خریدار به فروشنده</th><th>درصد خرید حقیقی از کل معاملات</th>
@@ -89,6 +91,7 @@ let DATA = null;
 const fa = n => Number(n).toLocaleString("fa-IR", {maximumFractionDigits:2});
 const cell = v => (v === null || v === undefined) ? '<span style="color:var(--mut)">—</span>'
   : `<span class="${v > 0 ? "pos" : v < 0 ? "neg" : ""}">${fa(v)}</span>`;
+const symParam = new URLSearchParams(location.search).get("symbol");
 
 async function loadData(){
   document.getElementById("st").textContent = "در حال بارگذاری…";
@@ -98,31 +101,51 @@ async function loadData(){
     if (!j.ok){ document.getElementById("st").textContent = j.error || "داده‌ای نیست"; return; }
     DATA = j;
     const sel = document.getElementById("sym");
-    sel.innerHTML = j.symbols.map(s => `<option>${s.name}</option>`).join("");
-    document.getElementById("st").textContent =
-      `منبع: data/raw/history.sqlite (فقط دادهٔ خام TSETMC) — ${fa(j.symbols.length)} نماد | ` +
-      `محاسبه: ${j.generated_at} | فرمول‌ها: export_portfoli_data.py`;
+    sel.innerHTML = `<option value="*">همهٔ نمادها</option>` +
+      j.symbols.map(s => `<option>${s.name}</option>`).join("");
+    // از دکمهٔ 📜 کنار نام نماد در دیده‌بان لایو می‌آید — انتخاب همان نماد
+    if (symParam && j.symbols.some(s => s.name === symParam)) sel.value = symParam;
     sel.onchange = render;
     render();
   }catch(e){ document.getElementById("st").textContent = "خطای ارتباط با سرور: " + e; }
 }
 function render(){
-  const s = DATA.symbols.find(x => x.name === document.getElementById("sym").value);
   const tb = document.getElementById("tb");
-  tb.innerHTML = s.rows.slice().reverse().map(r =>
-    `<tr><td class="dt">${r.date_jalali}</td><td>${fa(r.close_price)}</td>` +
-    COLS.map(c => `<td>${cell(r[c])}</td>`).join("") + "</tr>").join("");
+  const pick = document.getElementById("sym").value;
+  const list = pick === "*" ? DATA.symbols : DATA.symbols.filter(s => s.name === pick);
+  let html = "";
+  for (const s of list){
+    // سرگروه هر نماد — نام نماد + تعداد روز + آخرین روز جمع‌آوری
+    html += `<tr class="sym-head"><td colspan="12">نماد «${s.name}» — ${fa(s.days)} روز ` +
+            `| آخرین روز جمع‌آوری: ${s.last_collected || "—"}</td></tr>`;
+    html += s.rows.slice().reverse().map(r =>
+      `<tr><td class="dt">${r.date_jalali}</td><td class="sym">${s.name}</td>` +
+      `<td>${fa(r.close_price)}</td>` +
+      COLS.map(c => `<td>${cell(r[c])}</td>`).join("") + "</tr>").join("");
+  }
+  tb.innerHTML = html;
+  const total = list.reduce((a, s) => a + s.days, 0);
+  const lc = list.map(s => s.last_collected).filter(Boolean).sort().pop();
+  document.getElementById("st").textContent =
+    `منبع: data/raw/history.sqlite (فقط دادهٔ خام TSETMC) — ${fa(list.length)} نماد، ` +
+    `${fa(total)} سطر | آخرین روز جمع‌آوری: ${lc || "—"} | محاسبه: ${DATA.generated_at} | ` +
+    `فرمول‌ها: export_portfoli_data.py`;
 }
 document.getElementById("btn-collect").onclick = async () => {
   const b = document.getElementById("btn-collect"), lg = document.getElementById("log");
   b.disabled = true; b.textContent = "⏳ در حال جمع‌آوری…";
-  lg.style.display = "block"; lg.textContent = "جمع‌آوری سابقه از TSETMC (تا چند دقیقه)…";
+  lg.style.display = "block"; lg.textContent = "جمع‌آوری سابقه از TSETMC…";
   try{
     const r = await fetch("/api/hcollect", {method:"POST",
       headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({days: Number(document.getElementById("days").value) || 400})});
+      body: JSON.stringify({days: Number(document.getElementById("days").value) || 30})});
     const j = await r.json();
-    lg.textContent = (j.log || []).join("\n") || (j.error || "بدون خروجی");
+    const last = (j.last_dates || []).slice(0, 16)
+      .map(x => `${x.symbol}: ${x.last_collected || "—"}`).join(" | ");
+    lg.textContent = (j.log || []).join("\n") +
+      `\n── بایگانی portfoli_history: ${fa(j.backfilled ?? 0)} ردیف تا ${fa(j.archive_days ?? 0)} روز گذشته ──` +
+      `\nآخرین روز جمع‌آوری هر نماد:\n${last}` +
+      (j.error ? `\nخطا: ${j.error}` : "");
     lg.style.color = j.ok ? "var(--txt)" : "var(--red)";
     b.textContent = j.ok ? "⬇ جمع‌آوری سابقه" : "⚠ خطا — دوباره";
     b.disabled = false;
