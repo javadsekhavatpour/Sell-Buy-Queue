@@ -273,6 +273,24 @@ class Handler(BaseHTTPRequestHandler):
                     return
             self._send(404, "portfoli.html کنار portfoli_server.py نیست.".encode("utf-8"),
                        "text/plain; charset=utf-8")
+        elif path == "/history":  # داشبورد سابقهٔ نمادها
+            for f in (HERE / "history.html", self.root / "history.html"):
+                if f.exists():
+                    self._send(200, f.read_bytes(), "text/html; charset=utf-8")
+                    return
+            self._send(404, "history.html کنار portfoli_server.py نیست.".encode("utf-8"),
+                       "text/plain; charset=utf-8")
+        elif path == "/api/hdata":  # دادهٔ داشبورد سابقه — از بانک خام history.sqlite
+            try:
+                import history_dashboard
+                p = urllib.parse.parse_qs(qs)
+                syms = [s.strip() for s in p.get("symbols", [""])[0].split(",") if s.strip()]
+                out = history_dashboard.build_history_data(self.root, syms or None)
+                self._send(200, json.dumps(out, ensure_ascii=False).encode("utf-8"),
+                           "application/json; charset=utf-8")
+            except Exception as e:
+                self._send(500, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"),
+                           "application/json; charset=utf-8")
         elif path.endswith(".json"):  # فایل‌های replay/دادهٔ کنار پروژه
             for f in (HERE / path.lstrip("/"), self.root / path.lstrip("/")):
                 if f.exists() and f.is_file():
@@ -302,6 +320,31 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 self.wfile.write(xls)
+            except Exception as e:
+                self._send(500, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"),
+                           "application/json; charset=utf-8")
+        elif path == "/api/hcollect":  # اجرای history_collector — جمع‌آوری سابقهٔ نمادها
+            try:
+                import subprocess
+                days = 400
+                n = int(self.headers.get("Content-Length") or 0)
+                if n:
+                    body = json.loads(self.rfile.read(n).decode("utf-8") or "{}")
+                    days = min(max(int(body.get("days", 400)), 30), 2000)
+                script = self.root / "history_collector.py"
+                if not script.exists():
+                    script = HERE / "history_collector.py"
+                proc = subprocess.run(
+                    [sys.executable, str(script), "--days", str(days)],
+                    capture_output=True, text=True, timeout=600, cwd=str(self.root))
+                log = (proc.stdout or "").strip().splitlines()[-14:]
+                self._send(200, json.dumps(
+                    {"ok": proc.returncode == 0, "log": log},
+                    ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+            except subprocess.TimeoutExpired:
+                self._send(504, json.dumps({"error": "جمع‌آوری بیش از ۱۰ دقیقه طول کشید"},
+                                           ensure_ascii=False).encode("utf-8"),
+                           "application/json; charset=utf-8")
             except Exception as e:
                 self._send(500, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"),
                            "application/json; charset=utf-8")

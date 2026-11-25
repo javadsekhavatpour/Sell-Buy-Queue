@@ -149,6 +149,7 @@
   <button class="btn" id="btn-load">📥 بارگذاری داده</button>
   <button class="btn" id="btn-reload" title="دوباره خواندن portfoli_data.json">↻ بازخوانی</button>
   <button class="btn" id="btn-replay" title="بازپخش شبیه‌سازی جدول از ابتدای جلسه — اگر تاریخ وارد کرده باشید از ابتدای همان روز پخش می‌شود">🎬 بازپخش جدول</button>
+  <button class="btn" id="btn-history" title="سابقهٔ نمادها — جمع‌آوری تاریخچهٔ روزانه از TSETMC و داشبورد جریان پول / نسبت‌های ۵ و ۳۰ روزه / واکنش قیمت">📜 سابقهٔ نمادها</button>
   <input id="rp-date" list="rp-dates" placeholder="۱۴۰۵/۰۸/۳۰" autocomplete="off"
          title="تاریخ شمسی برای بازپخش — خالی = آخرین جلسه (امروز)"
          style="width:104px;border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit">
@@ -716,6 +717,10 @@ document.getElementById("rp-exit").addEventListener("click", exitReplay);
 // بازپخش جدول کامل — با تاریخِ فیلد نوار بالا (خالی = ابتدای جلسهٔ امروز)
 document.getElementById("btn-replay").addEventListener("click", () =>
   startReplay(null, document.getElementById("rp-date").value.trim()));
+// داشبورد سابقهٔ نمادها — جمع‌آوری تاریخچهٔ روزانه و شاخص‌های چندروزه
+document.getElementById("btn-history").addEventListener("click", () => {
+  location.href = "/history";
+});
 // لیست تاریخ‌های موجود در بانک‌های خام — پیشنهاد فیلد تاریخ (بدون سرور، فیلد آزاد می‌ماند)
 apiGet("/api/dates").then(j => {
   document.getElementById("rp-dates").innerHTML =
