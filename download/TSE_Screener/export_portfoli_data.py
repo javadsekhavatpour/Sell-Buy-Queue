@@ -96,14 +96,13 @@ GROUPS = [
         ("ورود/خروج پول حقیقی", "real_money_flow"),
         ("نسبت پول حقیقی", "real_money_flow_ratio"),
         # فرمول‌ها مطابق فایل dashboard.xlsx — شیت dashboard
+        # (ورود/خروج پول حقیقی و ارزش خرید/فروش حقیقی همین‌جا تعریف شده‌اند؛
+        #  ستون تکراری برای همان فیلد ممنوع — انتخابگر دوباره نشانشان می‌داد)
         ("نسبت جریان پول ٪", "money_flow_ratio_pct"),
         ("نسبت ۵ روزه جریان پول ٪", "mf_ratio_5d_pct"),
         ("نسبت ۳۰ روزه جریان پول ٪", "mf_ratio_30d_pct"),
         ("میانگین قدرت مطلق جریان پول ۵ روز اخیر (ریال)", "flow5_avg_abs"),
         ("میانگین قدرت مطلق جریان پول ۳۰ روز اخیر (ریال)", "flow30_avg_abs"),
-        ("جریان پول امروز (ریال)", "real_money_flow"),
-        ("خرید حقیقی × قیمت (ریال)", "real_buy_value"),
-        ("فروش حقیقی × قیمت (ریال)", "real_sell_value"),
         ("نسبت ۵ روزه حجم ٪", "volume_ratio_5d_pct"),
         ("نسبت ۳۰ روزه حجم ٪", "volume_ratio_30d_pct"),
         ("از نظر مبلغ خرید یا فروش", "buy_sell_amount_side"),
@@ -201,6 +200,12 @@ for i in range(1, 6):
     FIELD_SOURCES[f"ask_vol_{i}"] = (f"sell_volume_{i}", f"مستقیم — qTitMeOf ردیف {i}")
     FIELD_SOURCES[f"ask_count_{i}"] = (f"sell_orders_{i}", f"مستقیم — zOrdMeOf ردیف {i}")
 
+# ستون‌های محاسبه‌ای «بی‌نام» نمی‌مانند — نام قراردادی calc_<فیلد> می‌گیرند
+# تا در سطر دوم هدر اکسل و شیت راهنما قابل ارجاع باشند.
+for _k, _v in FIELD_SOURCES.items():
+    if _v[0] == "—":
+        FIELD_SOURCES[_k] = (f"calc_{_k}", _v[1])
+
 DEFAULT_VISIBLE = [
     "symbol", "date_jalali", "fetch_hms", "market_phase", "symbol_status",
     "last_price", "close_price", "pct_last", "pct_close",
@@ -273,16 +278,17 @@ def _daily_params(symbol: str, yesterday_price: float, root: Path) -> dict | Non
         return None
 
 
-def _trend_label(values) -> str | None:
+def _trend_label(values) -> tuple[str | None, float | None]:
     """برچسب روند یک سری زمانی — شیب رگرسیون خطی نرمال‌شده به دامنهٔ نوسان سری.
 
+    خروجی: (برچسب، norm) — norm عدد خام همین برچسب است تا کنار توصیف نمایش داده شود.
     norm = کل تغییرِ پیش‌بینی‌شدهٔ روند در طول پنجره ÷ دامنهٔ نوسان؛
     خط صاف = ۱٫۰. آستانه‌ها: |norm|≥۰٫۵ قوی، ≥۰٫۱۵ ملایم، کمتر = خنثی.
     """
     vals = [v for v in values if v is not None]
     n = len(vals)
     if n < 4:
-        return None
+        return None, None
     mx = (n - 1) / 2
     my = sum(vals) / n
     sxx = sum((i - mx) ** 2 for i in range(n))
@@ -290,15 +296,9 @@ def _trend_label(values) -> str | None:
     slope = sxy / sxx if sxx else 0.0
     span = max(vals) - min(vals)
     norm = slope * (n - 1) / span if span > 1e-12 else 0.0
-    if norm >= 0.5:
-        return "قوی صعودی"
-    if norm >= 0.15:
-        return "صعودی"
-    if norm <= -0.5:
-        return "قوی نزولی"
-    if norm <= -0.15:
-        return "نزولی"
-    return "خنثی"
+    lab = ("قوی صعودی" if norm >= 0.5 else "صعودی" if norm >= 0.15
+           else "قوی نزولی" if norm <= -0.5 else "نزولی" if norm <= -0.15 else "خنثی")
+    return lab, round(norm, 2)
 
 
 def _trends_from_series(flow, power, window: int = TREND_WINDOW_DEFAULT) -> dict:
@@ -309,11 +309,19 @@ def _trends_from_series(flow, power, window: int = TREND_WINDOW_DEFAULT) -> dict
     """
     w = max(3, int(window))
     fs, ps = list(flow)[-w:], list(power)[-w:]
+    f_ses, f_ses_n = _trend_label(flow)
+    f_rec, f_rec_n = _trend_label(fs)
+    p_ses, p_ses_n = _trend_label(power)
+    p_rec, p_rec_n = _trend_label(ps)
     out = {
-        "trend_flow_session": _trend_label(flow),
-        "trend_flow_recent": _trend_label(fs),
-        "trend_power_session": _trend_label(power),
-        "trend_power_recent": _trend_label(ps),
+        "trend_flow_session": f_ses,
+        "trend_flow_session_val": f_ses_n,
+        "trend_flow_recent": f_rec,
+        "trend_flow_recent_val": f_rec_n,
+        "trend_power_session": p_ses,
+        "trend_power_session_val": p_ses_n,
+        "trend_power_recent": p_rec,
+        "trend_power_recent_val": p_rec_n,
         "flow_ratio_recent_avg": round(sum(fs) / len(fs), 2) if fs else None,
     }
     names, kind = [], None

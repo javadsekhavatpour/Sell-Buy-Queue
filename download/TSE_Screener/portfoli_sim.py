@@ -41,8 +41,8 @@ SIM_COLS = ["date_jalali", "fetch_hms", "symbol"] + [
 ] + ["min_allowed_price", "max_allowed_price",
      "flow_ratio_recent_avg", "trend_power_session", "trend_power_recent",
      # مبنای نسبت‌های چندروزهٔ جریان پول — برای ردیابی اشکال در جدول
-     "mf_ratio_30d_pct", "flow5_avg_abs", "flow30_avg_abs",
-     "real_buy_value", "real_sell_value"]
+     # (ارزش خرید/فروش حقیقی و ورود/خروج پول در DEFAULT_VISIBLE خودشان هستند)
+     "mf_ratio_30d_pct", "flow5_avg_abs", "flow30_avg_abs"]
 
 
 def collect_day(root: Path, date: str | None) -> tuple[str, dict, dict]:
@@ -180,8 +180,7 @@ def xlsx_report(frames: list[dict], date: str, per_symbol: dict, out: Path,
         fa_map = {en: fa for _, cols in exp.GROUPS for fa, en in cols}
         r = 2
         for en, (src, desc) in exp.FIELD_SOURCES.items():
-            kind = "مستقیم از بانک" if src not in ("—", en) else \
-                   ("محاسبه‌ای" if src == "—" else "شناسهٔ ثبت")
+            kind = "محاسبه‌ای" if src.startswith("calc_") else "مستقیم از بانک"
             for j, v in enumerate([fa_map.get(en, en), src, kind, desc], 1):
                 c = ws.cell(row=r, column=j, value=v)
                 c.font, c.alignment, c.border = bf, center, border
