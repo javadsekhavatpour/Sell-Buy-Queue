@@ -346,6 +346,7 @@ class Handler(BaseHTTPRequestHandler):
                     "ok": proc.returncode == 0 and bf.get("ok"),
                     "log": log,
                     "backfilled": bf.get("added"),
+                    "updated": bf.get("updated"),
                     "archive_days": bf.get("days"),
                     "last_dates": bf.get("last_dates"),
                 }, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")

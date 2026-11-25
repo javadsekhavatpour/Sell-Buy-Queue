@@ -9,18 +9,21 @@ history_dashboard.py — محاسبهٔ شاخص‌های سابقهٔ روزا�
 پس جریان پول با ارزش واقعی حساب می‌شود — نسخهٔ بدون تقریبِ همان فرمول
 (در لایو ارزش نداریم و (حجم × قیمت پایانی) استفاده می‌شود).
 
-ستون‌های داشبورد سابقه:
+ستون‌های داشبورد سابقه (ترتیب درخواست کاربر):
   close_price      قیمت پایانی
   pct_close        ٪ نوسان پایانی          = (پایانی − دیروز) ÷ دیروز × ۱۰۰
-  money_flow_pct   جریان پول (٪)           = (خرید حقیقی − فروش حقیقی) ÷ ارزش کل × ۱۰۰
-  mf5_pct          نسبت ۵ روزه جریان پول ٪  = جریان امروز ÷ میانگین |جریان| ۵ روز قبل × ۱۰۰
-  mf30_pct         نسبت ۳۰ روزه جریان پول ٪ = همان با ۳۰ روز قبل
-  vol5_pct         نسبت ۵ روزه حجم ٪        = حجم امروز ÷ میانگین حجم ۵ روز قبل × ۱۰۰
-  vol30_pct        نسبت ۳۰ روزه حجم ٪       = همان با ۳۰ روز قبل
+  flow_rial        جریان پول (ریال)        = خرید حقیقی − فروش حقیقی (ارزش واقعی TSE)
+  flow_avg5_rial   میانگین ۵ روزه جریان پول = میانگین جریانِ ۵ روز قبل (بدون امروز)
+  flow_avg20_rial  میانگین ۲۰ روزه جریان پول = همان با ۲۰ روز قبل
+  flow_avg30_rial  میانگین ۳۰ روزه جریان پول = همان با ۳۰ روز قبل
+  vol_avg5         میانگین ۵ روزه حجم       = میانگین حجم ۵ روز قبل (بدون امروز)
+  vol_avg20        میانگین ۲۰ روزه حجم      = همان با ۲۰ روز قبل
+  vol_avg30        میانگین ۳۰ روزه حجم      = همان با ۳۰ روز قبل
   bs_count_ratio   تعداد خریدار به فروشنده  = buy_CountI ÷ sell_CountI
   real_buy_pct     درصد خرید حقیقی از کل    = ارزش خرید حقیقی ÷ ارزش کل × ۱۰۰
   reaction_pct     واکنش قیمت (٪)           = جای آخرین قیمت در بازهٔ کف تا سقف مجاز
                                              (کف/سقف = دیروز × (۱ ± pct) — price_range.py)
+  (+ نسبت‌های درصدی قبلی mf5/mf30/vol5/vol30 در payload برای سازگاری حفظ شده‌اند)
 """
 from __future__ import annotations
 
@@ -71,8 +74,8 @@ def build_history_data(root: Path = ROOT, symbols: list[str] | None = None) -> d
             "SELECT * FROM history_daily WHERE symbol=? ORDER BY date_greg", (name,))]
         if not rows:
             continue
-        # پیش‌محاسبهٔ سری‌ها برای پنجره‌های ۵/۳۰ روزه (مطابق _daily_statsِ exporter:
-        # مخرج فقط «روزهای قبل» است، امروز داخل میانگین نمی‌آید)
+        # پیش‌محاسبهٔ سری‌ها برای پنجره‌های ۵/۲۰/۳۰ روزه (مطابق _daily_statsِ exporter:
+        # پنجره فقط «روزهای قبل» است، امروز داخل میانگین نمی‌آید)
         flows = [_flow(r) for r in rows]
         vols = [r.get("trade_volume") for r in rows]
         f_abs = [abs(f) if f is not None else None for f in flows]
@@ -90,13 +93,21 @@ def build_history_data(root: Path = ROOT, symbols: list[str] | None = None) -> d
             else:
                 # جریان پول (٪) — فرمول money_flow_ratio_pct
                 row["money_flow_pct"] = round(fl / tval * 100, 2) if tval else None
-            # نسبت‌های چندروزه — مخرج = میانگین روزهای قبل از امروز
-            f5, f30 = _avg(f_abs[max(0, i - 5):i]), _avg(f_abs[max(0, i - 30):i])
-            v5, v30 = _avg(vols[max(0, i - 5):i]), _avg(vols[max(0, i - 30):i])
+            # نسبت‌های چندروزه — مخرج = میانگین |جریان| روزهای قبل از امروز (سازگاری payload)
+            f5, f20, f30 = (_avg(f_abs[max(0, i - n):i]) for n in (5, 20, 30))
+            v5, v20, v30 = (_avg(vols[max(0, i - n):i]) for n in (5, 20, 30))
             row["mf5_pct"] = round(fl / f5 * 100, 2) if (fl is not None and f5) else None
             row["mf30_pct"] = round(fl / f30 * 100, 2) if (fl is not None and f30) else None
             row["vol5_pct"] = round(vols[i] / v5 * 100, 2) if (vols[i] and v5) else None
             row["vol30_pct"] = round(vols[i] / v30 * 100, 2) if (vols[i] and v30) else None
+            # ── فیلدهای جدید: مقادیر عددی جریان پول و میانگین‌های ۵/۲۰/۳۰ روزه ──
+            # میانگین جریان پول با علامت (خالص جهت در بازه) — پنجره بدون امروز
+            sf5, sf20, sf30 = (_avg(flows[max(0, i - n):i]) for n in (5, 20, 30))
+            for n, av in ((5, sf5), (20, sf20), (30, sf30)):
+                row[f"flow_avg{n}_rial"] = round(av) if av is not None else None
+            # میانگین حجم — پنجره بدون امروز
+            for n, av in ((5, v5), (20, v20), (30, v30)):
+                row[f"vol_avg{n}"] = round(av) if av is not None else None
             # تعداد خریدار به فروشنده — فرمول buyer_seller_count_ratio
             bc, sc = r.get("ct_real_buy_count"), r.get("ct_real_sell_count")
             row["bs_count_ratio"] = round(bc / sc, 2) if (bc and sc) else None
@@ -150,6 +161,7 @@ def backfill_portfoli_history(root: Path = ROOT, days: int = 30) -> dict:
     hist.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(str(hist))
     added = 0
+    updated = 0
     last_dates = []
     try:
         con.execute(PORTFOLI_HISTORY_SQL)
@@ -164,17 +176,32 @@ def backfill_portfoli_history(root: Path = ROOT, days: int = 30) -> dict:
                            "fetch_hms": "hist",
                            "source": "history.sqlite (TSETMC سابقهٔ خام)"}
                 payload.update(r)
-                cur = con.execute(
-                    "INSERT OR IGNORE INTO computed_samples "
-                    "(saved_at, date_jalali, fetch_hms, symbol, payload) "
-                    "VALUES (?,?,?,?,?)",
-                    (now, r["date_jalali"], "hist", s["name"],
-                     json.dumps(payload, ensure_ascii=False)))
-                added += cur.rowcount
+                # اگر ردیف hist قبلاً هست فقط payload تازه می‌شود (فرمول‌های جدید)،
+                # وگرنه اضافه می‌شود — در هر دو حالت یک ردیف، بدون تکرار
+                has = con.execute(
+                    "SELECT 1 FROM computed_samples "
+                    "WHERE symbol=? AND date_jalali=? AND fetch_hms='hist'",
+                    (s["name"], r["date_jalali"])).fetchone()
+                if has:
+                    con.execute(
+                        "UPDATE computed_samples SET payload=?, saved_at=? "
+                        "WHERE symbol=? AND date_jalali=? AND fetch_hms='hist'",
+                        (json.dumps(payload, ensure_ascii=False), now,
+                         s["name"], r["date_jalali"]))
+                    updated += 1
+                else:
+                    con.execute(
+                        "INSERT INTO computed_samples "
+                        "(saved_at, date_jalali, fetch_hms, symbol, payload) "
+                        "VALUES (?,?,?,?,?)",
+                        (now, r["date_jalali"], "hist", s["name"],
+                         json.dumps(payload, ensure_ascii=False)))
+                    added += 1
         con.commit()
     finally:
         con.close()
-    return {"ok": True, "days": days, "added": added, "last_dates": last_dates}
+    return {"ok": True, "days": days, "added": added, "updated": updated,
+            "last_dates": last_dates}
 
 
 if __name__ == "__main__":
