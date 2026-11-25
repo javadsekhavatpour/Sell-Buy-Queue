@@ -147,40 +147,80 @@ def available_dates(root: Path) -> list[str]:
     return sorted(dates)
 
 
+# ستون‌های گزارش سابقه — (برچسب فارسی، فیلد محاسبه‌شدهٔ build_history_data، نام فیلد بانک یا توضیح محاسبه)
+HISTORY_EXPORT_COLS = [
+    ("تاریخ", None, "date_jalali"),
+    ("نماد", None, "symbol"),
+    ("قیمت پایانی", "close_price", "close_price"),
+    ("٪ نوسان پایانی", "pct_close", "محاسبه: (پایانی − دیروز) ÷ دیروز × ۱۰۰"),
+    ("ورود پول (ریال)", "flow_rial", "محاسبه: ارزش خرید حقیقی − ارزش فروش حقیقی"),
+    ("میانگین ۵ روزه ورود پول (ریال)", "flow_avg5_rial", "محاسبه: میانگین کامل ۵ روز قبل (بدون امروز)"),
+    ("میانگین ۱۰ روزه ورود پول (ریال)", "flow_avg10_rial", "محاسبه: میانگین کامل ۱۰ روز قبل"),
+    ("میانگین ۲۰ روزه ورود پول (ریال)", "flow_avg20_rial", "محاسبه: میانگین کامل ۲۰ روز قبل"),
+    ("میانگین ۳۰ روزه ورود پول (ریال)", "flow_avg30_rial", "محاسبه: میانگین کامل ۳۰ روز قبل"),
+    ("حجم روز", "trade_volume", "trade_volume"),
+    ("میانگین ۵ روزه حجم (سهم)", "vol_avg5", "محاسبه: میانگین کامل ۵ روز قبل"),
+    ("میانگین ۱۰ روزه حجم (سهم)", "vol_avg10", "محاسبه: میانگین کامل ۱۰ روز قبل"),
+    ("میانگین ۲۰ روزه حجم (سهم)", "vol_avg20", "محاسبه: میانگین کامل ۲۰ روز قبل"),
+    ("میانگین ۳۰ روزه حجم (سهم)", "vol_avg30", "محاسبه: میانگین کامل ۳۰ روز قبل"),
+    ("قدرت خرید روز", "buy_power", "محاسبه: (ارزش خرید÷تعداد خریداران) ÷ (ارزش فروش÷تعداد فروشندگان)"),
+    ("میانگین قدرت خرید ۵ روز", "buy_power_avg5", "محاسبه: میانگین کامل ۵ روز قبل"),
+    ("میانگین قدرت خرید ۱۰ روز", "buy_power_avg10", "محاسبه: میانگین کامل ۱۰ روز قبل"),
+    ("میانگین قدرت خرید ۲۰ روز", "buy_power_avg20", "محاسبه: میانگین کامل ۲۰ روز قبل"),
+    ("میانگین قدرت خرید ۳۰ روز", "buy_power_avg30", "محاسبه: میانگین کامل ۳۰ روز قبل"),
+    ("تعداد خریدار به فروشنده", "bs_count_ratio", "محاسبه: تعداد خریداران ÷ فروشندگان حقیقی"),
+    ("درصد خرید حقیقی از کل معاملات", "real_buy_pct", "محاسبه: ارزش خرید حقیقی ÷ ارزش کل × ۱۰۰"),
+    ("واکنش قیمت (٪)", "reaction_pct", "محاسبه: جای آخرین قیمت بین کف و سقف مجاز"),
+]
+
+
+def _fmt_compact(v) -> str | None:
+    """همهٔ اعداد به شکل خلاصهٔ لاتین 21.24T / 885.43B / 277.88M — کوچک‌تر از میلیون بدون پسوند."""
+    if v is None:
+        return None
+    if isinstance(v, str):
+        return v
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return v
+    a = abs(x)
+    if a >= 1e12:
+        return f"{x / 1e12:.2f}T"
+    if a >= 1e9:
+        return f"{x / 1e9:.2f}B"
+    if a >= 1e6:
+        return f"{x / 1e6:.2f}M"
+    return f"{x:,.2f}"
+
+
 def _history_export_xlsx(root: Path, symbol: str | None) -> bytes:
     """اکسل گزارش «سابقهٔ نمادها» — همان ستون‌ها و ترتیب جدول history.html.
 
-    ستون‌های بزرگ‌عددی (جریان پول، میانگین‌ها، حجم روز) مثل جدول به‌صورت خلاصهٔ
-    21.24T / 885.43B / 277.88M درمی‌آیند؛ بقیه (درصدها، قدرت خرید، قیمت) عدد
-    می‌مانند. symbol=* یا خالی یعنی همهٔ نمادها؛ شیت راست‌به‌چپ.
+    سطر ۱: برچسب فارسی — سطر ۲: نام فیلد بانک خام (یا توضیح محاسبه). بعد از
+    ستون‌های جدول، همهٔ ستون‌های بلااستفادهٔ بانک هم می‌آیند (درخواست کاربر:
+    ردیف نام فیلد بانک حتی برای فیلدهایی که ستون جدول ندارند). همهٔ اعداد
+    خلاصهٔ T/B/M؛ شیت راست‌به‌چپ؛ symbol=* یا خالی یعنی همهٔ نمادها.
     """
     import history_dashboard
     data = history_dashboard.build_history_data(root)
     if not data.get("ok"):
         raise ValueError(data.get("error") or "دادهٔ سابقه در دسترس نیست")
-    HEAD = ["تاریخ", "نماد", "قیمت پایانی", "٪ نوسان پایانی",
-            "جریان پول (ریال)", "میانگین ۵ روزه جریان پول (ریال)",
-            "میانگین ۲۰ روزه جریان پول (ریال)", "میانگین ۳۰ روزه جریان پول (ریال)",
-            "حجم روز", "میانگین ۵ روزه حجم (سهم)", "میانگین ۲۰ روزه حجم (سهم)",
-            "میانگین ۳۰ روزه حجم (سهم)", "قدرت خرید روز", "میانگین قدرت خرید ۵ روز",
-            "میانگین قدرت خرید ۲۰ روز", "میانگین قدرت خرید ۳۰ روز",
-            "تعداد خریدار به فروشنده", "درصد خرید حقیقی از کل معاملات", "واکنش قیمت (٪)"]
-    COMPACT = {"flow_rial", "flow_avg5_rial", "flow_avg20_rial", "flow_avg30_rial",
-               "trade_volume", "vol_avg5", "vol_avg20", "vol_avg30"}
-    FIELDS = ["pct_close", "flow_rial", "flow_avg5_rial", "flow_avg20_rial",
-              "flow_avg30_rial", "trade_volume", "vol_avg5", "vol_avg20", "vol_avg30",
-              "buy_power", "buy_power_avg5", "buy_power_avg20", "buy_power_avg30",
-              "bs_count_ratio", "real_buy_pct", "reaction_pct"]
-
-    def fmt_compact(v: float) -> str:
-        a = abs(v)
-        if a >= 1e12:
-            return f"{v / 1e12:.2f}T"
-        if a >= 1e9:
-            return f"{v / 1e9:.2f}B"
-        if a >= 1e6:
-            return f"{v / 1e6:.2f}M"
-        return f"{v:,.2f}"
+    con = sqlite3.connect(str(root / "data" / "raw" / "history.sqlite"))
+    con.row_factory = sqlite3.Row
+    try:
+        bank_cols = [r[1] for r in con.execute("PRAGMA table_info(history_daily)")]
+        used_bank = {src for _, _, src in HISTORY_EXPORT_COLS
+                     if not src.startswith("محاسبه")}
+        unused = [c for c in bank_cols if c not in used_bank and c != "id"]
+        if symbol and symbol != "*":
+            rs = con.execute("SELECT * FROM history_daily WHERE symbol=?",
+                             (symbol,)).fetchall()
+        else:
+            rs = con.execute("SELECT * FROM history_daily").fetchall()
+    finally:
+        con.close()
+    raw_rows = {(r["symbol"], r["date_jalali"]): dict(r) for r in rs}
 
     from io import BytesIO
     from openpyxl import Workbook
@@ -192,41 +232,51 @@ def _history_export_xlsx(root: Path, symbol: str | None) -> bytes:
     ws.sheet_view.rightToLeft = True
     fill = PatternFill("solid", fgColor="2F5597")
     hfont = Font(name="Tahoma", size=10, bold=True, color="FFFFFF")
+    sfill = PatternFill("solid", fgColor="D9E2F3")
+    sfont = Font(name="Tahoma", size=8, italic=True, color="1F3864")
+    body = Font(name="Tahoma", size=10)
     al = Alignment(horizontal="center", vertical="center")
-    for j, h in enumerate(HEAD, 1):
+    head1 = [lab for lab, _, _ in HISTORY_EXPORT_COLS] + unused
+    head2 = [src for _, _, src in HISTORY_EXPORT_COLS] + unused
+    for j, h in enumerate(head1, 1):
         c = ws.cell(row=1, column=j, value=h)
         c.fill, c.font, c.alignment = fill, hfont, al
-    r = 2
-    picked = {s["name"]: s for s in data["symbols"]
-              if not symbol or symbol == "*" or s["name"] == symbol}
+    for j, s in enumerate(head2, 1):
+        c = ws.cell(row=2, column=j, value=s)
+        c.fill, c.font, c.alignment = sfill, sfont, al
+    picked = [s for s in data["symbols"]
+              if not symbol or symbol == "*" or s["name"] == symbol]
     if not picked:
         raise ValueError("نماد در بانک سابقه نیست: " + str(symbol))
-    for name in sorted(picked):
-        for row in picked[name]["rows"]:
-            ws.cell(row=r, column=1, value=row["date_jalali"]).alignment = al
-            ws.cell(row=r, column=2, value=name).alignment = al
-            ws.cell(row=r, column=3, value=row["close_price"]).alignment = al
-            j = 4
-            for f in FIELDS:
-                v = row.get(f)
-                val = fmt_compact(v) if (v is not None and f in COMPACT) else v
-                ws.cell(row=r, column=j, value=val).alignment = al
-                j += 1
+    r = 3
+    for s in sorted(picked, key=lambda x: x["name"]):
+        for row in s["rows"]:
+            raw = raw_rows.get((s["name"], row["date_jalali"])) or {}
+            vals = [row.get("date_jalali"), s["name"]]
+            vals += [row.get(f) for _, f, _src in HISTORY_EXPORT_COLS[2:]]
+            vals += [raw.get(c) for c in unused]
+            for j, v in enumerate(vals, 1):
+                c = ws.cell(row=r, column=j, value=_fmt_compact(v))
+                c.font, c.alignment = body, al
             r += 1
-    for j, w in enumerate([12, 10, 12, 12, 13, 15, 15, 15, 12, 14, 14, 14,
-                           12, 14, 14, 14, 14, 18, 12], 1):
+    for j, w in enumerate([12, 10, 12, 12, 13, 15, 15, 15, 15, 12, 14, 14, 14, 14,
+                           12, 14, 14, 14, 14, 14, 18, 12], 1):
         ws.column_dimensions[get_column_letter(j)].width = w
-    ws.freeze_panes = "A2"
+    for j in range(len(HISTORY_EXPORT_COLS) + 1, len(head1) + 1):
+        ws.column_dimensions[get_column_letter(j)].width = 13
+    ws.freeze_panes = "A3"
     bio = BytesIO()
     wb.save(bio)
     return bio.getvalue()
 
 
-def _replay_export_xlsx(data: dict) -> bytes:
+def _replay_export_xlsx(data: dict, root: Path) -> bytes:
     """اکسل خروجی بازپخش: شیت «لحظهٔ انتخابی» + شیت «سری زمانی تا این لحظه».
 
-    سطرها را مرورگر می‌فرستد (فقط ستون‌های نمایان) — هم‌شکل همان جدولی که
-    کاربر در لحظهٔ خروجی می‌بیند.
+    سطرها را مرورگر می‌فرستد (ستون‌های نمایان) — هم‌شکل همان جدولی که کاربر
+    می‌بیند. سطر ۱ برچسب فارسی، سطر ۲ نام فیلد بانک خام؛ بعد از ستون‌های جدول
+    همهٔ ستون‌های بلااستفادهٔ بانک خام هم از نمونهٔ همان لحظه می‌آیند.
+    همهٔ اعداد خلاصهٔ T/B/M.
     """
     from io import BytesIO
     from openpyxl import Workbook
@@ -252,7 +302,7 @@ def _replay_export_xlsx(data: dict) -> bytes:
             c.fill, c.font, c.alignment = sfill, sfont, al
         for i, r in enumerate(rows, 3):
             for j, v in enumerate(r, 1):
-                c = ws.cell(row=i, column=j, value=v)
+                c = ws.cell(row=i, column=j, value=_fmt_compact(v))
                 c.font, c.alignment = body, al
         for j in range(1, len(head) + 1):
             ws.column_dimensions[get_column_letter(j)].width = 13
@@ -260,18 +310,57 @@ def _replay_export_xlsx(data: dict) -> bytes:
 
     # نام فیلد بانک هر ستون — از FIELD_SOURCESِ همان موتور محاسبه
     srcs = [(exp.FIELD_SOURCES.get(c["en"]) or (c["en"], ""))[0] for c in cols]
+
+    # ستون‌های بلااستفادهٔ بانک خام — همهٔ ستون‌های raw_snapshots که ستون جدول
+    # ندارند؛ مقدارشان از نمونهٔ خام همان (نماد، ساعت) می‌آید
+    used_bank = {"symbol", "fetch_hms"} | {s for s in srcs if s not in ("—", "")}
+    unused: list[str] = []
+    bank_by_key: dict = {}
+    bank_first: dict = {}
+    bdate = data.get("date")
+    all_rows = list(data.get("frame_rows") or []) + list(data.get("series_rows") or [])
+    for sym in sorted({r.get("symbol") for r in all_rows if r.get("symbol")}):
+        db = root / "data" / "raw" / f"raw_{sym}.sqlite"
+        if not db.exists():
+            continue
+        con = sqlite3.connect(str(db))
+        con.row_factory = sqlite3.Row
+        try:
+            if not unused:
+                bcols = [x[1] for x in con.execute("PRAGMA table_info(raw_snapshots)")]
+                unused = [c for c in bcols
+                          if c not in used_bank and c not in ("id", "fetch_time")]
+            if bdate:
+                rs = con.execute("SELECT * FROM raw_snapshots WHERE date_jalali=?",
+                                 (bdate,)).fetchall()
+            else:
+                rs = con.execute(
+                    "SELECT * FROM raw_snapshots WHERE date_jalali="
+                    "(SELECT MAX(date_jalali) FROM raw_snapshots)").fetchall()
+        finally:
+            con.close()
+        for rr in rs:
+            d = dict(rr)
+            bank_by_key[(sym, rr["fetch_hms"])] = d
+            bank_first.setdefault(sym, d)
+
+    def _extra(r: dict) -> list:
+        b = (bank_by_key.get((r.get("symbol"), r.get("fetch_hms")))
+             or bank_first.get(r.get("symbol")) or {})
+        return [b.get(c) for c in unused]
+
+    head_tail = [c["fa"] for c in cols] + unused
+    src_tail = srcs + unused
     wb = Workbook()
     ws1 = wb.active
     ws1.title = "لحظهٔ انتخابی"
-    fill_sheet(ws1, ["نماد"] + [c["fa"] for c in cols],
-               ["symbol"] + srcs,
-               [[r.get("symbol")] + [r.get(c["en"]) for c in cols]
+    fill_sheet(ws1, ["نماد"] + head_tail, ["symbol"] + src_tail,
+               [[r.get("symbol")] + [r.get(c["en"]) for c in cols] + _extra(r)
                 for r in data.get("frame_rows") or []])
     ws2 = wb.create_sheet("سری زمانی تا این لحظه")
-    fill_sheet(ws2, ["زمان", "نماد"] + [c["fa"] for c in cols],
-               ["fetch_hms", "symbol"] + srcs,
+    fill_sheet(ws2, ["زمان", "نماد"] + head_tail, ["fetch_hms", "symbol"] + src_tail,
                [[r.get("fetch_hms"), r.get("symbol")] + [r.get(c["en"]) for c in cols]
-                for r in data.get("series_rows") or []])
+                + _extra(r) for r in data.get("series_rows") or []])
     bio = BytesIO()
     wb.save(bio)
     return bio.getvalue()
@@ -412,7 +501,7 @@ class Handler(BaseHTTPRequestHandler):
                 if n <= 0 or n > 30_000_000:
                     raise ValueError("حجم درخواست خروجی نامعتبر است")
                 data = json.loads(self.rfile.read(n).decode("utf-8"))
-                xls = _replay_export_xlsx(data)
+                xls = _replay_export_xlsx(data, self.root)
                 fname = f"portfoli_replay_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
                 self.send_response(200)
                 self.send_header(

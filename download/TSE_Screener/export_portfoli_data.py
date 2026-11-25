@@ -98,11 +98,11 @@ GROUPS = [
         # فرمول‌ها مطابق فایل dashboard.xlsx — شیت dashboard
         # (ورود/خروج پول حقیقی و ارزش خرید/فروش حقیقی همین‌جا تعریف شده‌اند؛
         #  ستون تکراری برای همان فیلد ممنوع — انتخابگر دوباره نشانشان می‌داد)
-        ("نسبت جریان پول ٪", "money_flow_ratio_pct"),
-        ("نسبت ۵ روزه جریان پول ٪", "mf_ratio_5d_pct"),
-        ("نسبت ۳۰ روزه جریان پول ٪", "mf_ratio_30d_pct"),
-        ("میانگین قدرت مطلق جریان پول ۵ روز اخیر (ریال)", "flow5_avg_abs"),
-        ("میانگین قدرت مطلق جریان پول ۳۰ روز اخیر (ریال)", "flow30_avg_abs"),
+        ("نسبت ورود پول ٪", "money_flow_ratio_pct"),
+        ("نسبت ۵ روزه ورود پول ٪", "mf_ratio_5d_pct"),
+        ("نسبت ۳۰ روزه ورود پول ٪", "mf_ratio_30d_pct"),
+        ("میانگین قدرت مطلق ورود پول ۵ روز اخیر (ریال)", "flow5_avg_abs"),
+        ("میانگین قدرت مطلق ورود پول ۳۰ روز اخیر (ریال)", "flow30_avg_abs"),
         ("نسبت ۵ روزه حجم ٪", "volume_ratio_5d_pct"),
         ("نسبت ۳۰ روزه حجم ٪", "volume_ratio_30d_pct"),
         ("از نظر مبلغ خرید یا فروش", "buy_sell_amount_side"),
@@ -112,20 +112,23 @@ GROUPS = [
     # گروه «تاریخچه» — همان ستون‌های داشبورد سابقهٔ نمادها؛ حجم روز (حجم کل) و
     # قدرت خرید روز (قدرت خریدار) از قبل در گروه‌های دیگر هستند و تکرار نمی‌شوند
     ("تاریخچه", [
-        ("میانگین ۵ روزه جریان پول (ریال)", "flow_avg5_rial"),
-        ("میانگین ۲۰ روزه جریان پول (ریال)", "flow_avg20_rial"),
-        ("میانگین ۳۰ روزه جریان پول (ریال)", "flow_avg30_rial"),
+        ("میانگین ۵ روزه ورود پول (ریال)", "flow_avg5_rial"),
+        ("میانگین ۱۰ روزه ورود پول (ریال)", "flow_avg10_rial"),
+        ("میانگین ۲۰ روزه ورود پول (ریال)", "flow_avg20_rial"),
+        ("میانگین ۳۰ روزه ورود پول (ریال)", "flow_avg30_rial"),
         ("میانگین ۵ روزه حجم (سهم)", "vol_avg5"),
+        ("میانگین ۱۰ روزه حجم (سهم)", "vol_avg10"),
         ("میانگین ۲۰ روزه حجم (سهم)", "vol_avg20"),
         ("میانگین ۳۰ روزه حجم (سهم)", "vol_avg30"),
         ("میانگین قدرت خرید ۵ روز", "buy_power_avg5"),
+        ("میانگین قدرت خرید ۱۰ روز", "buy_power_avg10"),
         ("میانگین قدرت خرید ۲۰ روز", "buy_power_avg20"),
         ("میانگین قدرت خرید ۳۰ روز", "buy_power_avg30"),
     ]),
     ("روند جلسه", [
-        ("میانگین نسبت جریان پول (N نمادهٔ اخیر)", "flow_ratio_recent_avg"),
-        ("روند جریان پول از ابتدای جلسه", "trend_flow_session"),
-        ("روند جریان پول (N نمادهٔ اخیر)", "trend_flow_recent"),
+        ("میانگین نسبت ورود پول (N نمادهٔ اخیر)", "flow_ratio_recent_avg"),
+        ("روند ورود پول از ابتدای جلسه", "trend_flow_session"),
+        ("روند ورود پول (N نمادهٔ اخیر)", "trend_flow_recent"),
         ("روند قدرت خریدار از ابتدای جلسه", "trend_power_session"),
         ("روند قدرت خریدار (N نمادهٔ اخیر)", "trend_power_recent"),
         ("واژگونی روند", "trend_divergence"),
@@ -186,18 +189,21 @@ FIELD_SOURCES = {
     "per_capita_sell_real": ("—", "محاسبه: ct_real_sell_volume ÷ ct_real_sell_count (سرانه فروش)"),
     "real_money_flow": ("—", "محاسبه: (ct_real_buy_volume − ct_real_sell_volume) × قیمت"),
     "real_money_flow_ratio": ("—", "محاسبه: (خرید حقیقی − فروش حقیقی) ÷ (خرید حقیقی + فروش حقیقی) — سهم خالص حقیقی از گردش خودش، بین −۱ تا +۱"),
-    "money_flow_ratio_pct": ("—", "محاسبه: جریان پول ÷ trade_value × ۱۰۰ (درصد)"),
-    "mf_ratio_5d_pct": ("—", "محاسبه: جریان پول امروز ÷ میانگین |جریان پول| ۵ روز قبل × ۱۰۰"),
-    "mf_ratio_30d_pct": ("—", "محاسبه: جریان پول امروز ÷ میانگین |جریان پول| ۳۰ روز قبل × ۱۰۰"),
+    "money_flow_ratio_pct": ("—", "محاسبه: ورود پول ÷ trade_value × ۱۰۰ (درصد)"),
+    "mf_ratio_5d_pct": ("—", "محاسبه: ورود پول امروز ÷ میانگین |ورود پول| ۵ روز قبل × ۱۰۰"),
+    "mf_ratio_30d_pct": ("—", "محاسبه: ورود پول امروز ÷ میانگین |ورود پول| ۳۰ روز قبل × ۱۰۰"),
     "flow5_avg_abs": ("—", "محاسبه: میانگین |(خرید−فروش حقیقی) × قیمت پایانی| در ۵ روز قبل"),
     "flow30_avg_abs": ("—", "محاسبه: میانگین |(خرید−فروش حقیقی) × قیمت پایانی| در ۳۰ روز قبل"),
-    "flow_avg5_rial": ("—", "محاسبه: میانگین علامت‌دار (خرید−فروش حقیقی) × قیمت پایانی در ۵ روز قبل"),
+    "flow_avg5_rial": ("—", "محاسبه: میانگین علامت‌دار ارزش خرید−فروش حقیقی سایت در ۵ روز قبل (پنجرهٔ کامل)"),
+    "flow_avg10_rial": ("—", "محاسبه: همان با ۱۰ روز قبل"),
     "flow_avg20_rial": ("—", "محاسبه: همان با ۲۰ روز قبل"),
     "flow_avg30_rial": ("—", "محاسبه: همان با ۳۰ روز قبل"),
-    "vol_avg5": ("—", "محاسبه: میانگین حجم معاملات در ۵ روز قبل"),
+    "vol_avg5": ("—", "محاسبه: میانگین حجم معاملات در ۵ روز قبل (پنجرهٔ کامل)"),
+    "vol_avg10": ("—", "محاسبه: همان با ۱۰ روز قبل"),
     "vol_avg20": ("—", "محاسبه: همان با ۲۰ روز قبل"),
     "vol_avg30": ("—", "محاسبه: همان با ۳۰ روز قبل"),
-    "buy_power_avg5": ("—", "محاسبه: میانگین قدرت خریدار روزانه در ۵ روز قبل"),
+    "buy_power_avg5": ("—", "محاسبه: میانگین قدرت خریدار روزانه (ارزش÷تعداد) در ۵ روز قبل (پنجرهٔ کامل)"),
+    "buy_power_avg10": ("—", "محاسبه: همان با ۱۰ روز قبل"),
     "buy_power_avg20": ("—", "محاسبه: همان با ۲۰ روز قبل"),
     "buy_power_avg30": ("—", "محاسبه: همان با ۳۰ روز قبل"),
     "volume_ratio_5d_pct": ("—", "محاسبه: حجم امروز ÷ میانگین حجم ۵ روز قبل × ۱۰۰"),
@@ -207,8 +213,8 @@ FIELD_SOURCES = {
     "price_reaction_score": ("—", "محاسبه: جای آخرین قیمت در بازهٔ کف تا سقف مجاز (۰ تا ۱۰۰)"),
     "pct_last": ("—", "محاسبه: (last_price − yesterday_price) ÷ yesterday_price × ۱۰۰"),
     "pct_close": ("—", "محاسبه: (close_price − yesterday_price) ÷ yesterday_price × ۱۰۰"),
-    "flow_ratio_recent_avg": ("—", "محاسبه: میانگین نسبت جریان پول ٪ در N نمونهٔ اخیر"),
-    "trend_flow_session": ("—", "محاسبه: شیب رگرسیون سری جریان پول کل جلسه، نرمال به دامنه — آستانه ±۰٫۱۵/±۰٫۵"),
+    "flow_ratio_recent_avg": ("—", "محاسبه: میانگین نسبت ورود پول ٪ در N نمونهٔ اخیر"),
+    "trend_flow_session": ("—", "محاسبه: شیب رگرسیون سری ورود پول کل جلسه، نرمال به دامنه — آستانه ±۰٫۱۵/±۰٫۵"),
     "trend_flow_recent": ("—", "محاسبه: همان، فقط روی N نمونهٔ اخیر"),
     "trend_power_session": ("—", "محاسبه: همان، روی سری قدرت خریدار کل جلسه"),
     "trend_power_recent": ("—", "محاسبه: همان، روی سری قدرت خریدار N نمونهٔ اخیر"),
@@ -240,9 +246,9 @@ DEFAULT_VISIBLE = [
     "buyer_seller_count_ratio", "price_reaction_score", "data_status",
     "trend_flow_session", "trend_flow_recent", "trend_divergence",
     # گروه «تاریخچه» — پیش‌فرض روشن (درخواست کاربر؛ دکمهٔ گروه برای نمایش/حذف سریع)
-    "flow_avg5_rial", "flow_avg20_rial", "flow_avg30_rial",
-    "vol_avg5", "vol_avg20", "vol_avg30",
-    "buy_power_avg5", "buy_power_avg20", "buy_power_avg30",
+    "flow_avg5_rial", "flow_avg10_rial", "flow_avg20_rial", "flow_avg30_rial",
+    "vol_avg5", "vol_avg10", "vol_avg20", "vol_avg30",
+    "buy_power_avg5", "buy_power_avg10", "buy_power_avg20", "buy_power_avg30",
 ]
 
 TREND_WINDOW_DEFAULT = 20
@@ -259,25 +265,34 @@ def _raw_phase(trading_hours: dict, hm: str) -> str:
     return "بسته"
 
 
-def _daily_rows(db_path: Path, today: str | None,
+_DAILY_COLS = ("date_jalali, ct_real_buy_value, ct_real_sell_value, "
+               "ct_real_buy_volume, ct_real_sell_volume, "
+               "ct_real_buy_count, ct_real_sell_count, close_price, trade_volume")
+
+
+def _daily_rows(db_path: Path, today: str | None, symbol: str | None = None,
                 table: str = "raw_snapshots") -> list:
-    """آخرین نمونهٔ هر روز معاملاتی (نزولی) — از بانک لایو یا بانک سابقهٔ TSE.
+    """سری روزانهٔ ورود پول/حجم/تعدادها — نزولی، بدون امروز.
 
     raw_snapshots چند نمونه در روز دارد (گروه‌بندی بر id)؛ history_daily
-    یک ردیف در روز (بدون id). امروز حذف می‌شود — «روزهای قبل» مبناست.
+    یک ردیف در روز برای همهٔ نمادها (بدون id — با فیلتر نماد).
     """
     con = sqlite3.connect(str(db_path))
     con.row_factory = sqlite3.Row
     try:
-        cols = ("date_jalali, ct_real_buy_volume, ct_real_sell_volume, "
-                "ct_real_buy_count, ct_real_sell_count, close_price, trade_volume")
         if table == "history_daily":
-            q = f"SELECT {cols} FROM {table} ORDER BY date_jalali DESC"
+            q = f"SELECT {_DAILY_COLS} FROM history_daily"
+            args: list = []
+            if symbol:
+                q += " WHERE symbol = ?"
+                args.append(symbol)
+            q += " ORDER BY date_jalali DESC"
         else:
-            q = (f"SELECT {cols} FROM {table} WHERE id IN "
+            q = (f"SELECT {_DAILY_COLS} FROM {table} WHERE id IN "
                  f"(SELECT MAX(id) FROM {table} GROUP BY date_jalali) "
                  "ORDER BY date_jalali DESC")
-        rows = con.execute(q).fetchall()
+            args = []
+        rows = con.execute(q, args).fetchall()
     finally:
         con.close()
     if today:
@@ -285,38 +300,39 @@ def _daily_rows(db_path: Path, today: str | None,
     return rows
 
 
-def _daily_stats(db_path: Path, today: str | None) -> dict:
-    """آمار روزانه از آخرین نمونهٔ هر روز معاملاتی — برای شاخص‌های چندروزهٔ شیت dashboard.
+def _daily_stats(db_path: Path, today: str | None, symbol: str | None = None) -> dict:
+    """میانگین‌های ۵/۱۰/۲۰/۳۰ روزه — مطابق روش dashboard.git (از دادهٔ سایت):
 
-    جریان پول هر روز = (خرید حقیقی − فروش حقیقی) × قیمت پایانیِ آخرین نمونهٔ آن روز.
-    روزِ امروز (today) از آمار «روزهای قبل» کنار گذاشته می‌شود.
-    میانگین‌های گروه «تاریخچه» با علامت‌اند (خالص جهت)؛ میانگین‌های نسبت‌ها مطلق‌اند.
-    قدرت خرید هر روز — همان فرمول buyer_power: (حجم خرید÷تعداد خریداران) ÷ (حجم فروش÷تعداد فروشندگان).
-    اگر بانک لایو فقط امروز را داشته باشد (تازه نصب شده)، روزهای قبل از بانک
-    سابقهٔ ۴۰۰ روزهٔ history.sqlite می‌آید — همان ستون‌ها، یک ردیف در روز.
+    ورود پول روز = ارزش خرید حقیقی − ارزش فروش حقیقی (دادهٔ واقعی سایت، ریال).
+    قدرت خرید روز = (ارزش خرید ÷ تعداد خریداران) ÷ (ارزش فروش ÷ تعداد فروشندگان).
+    میانگین N روزه = میانگین N روز «قبل» بدون امروز — فقط با پنجرهٔ کامل؛
+    کمتر از N روز سابقه = None (نه میانگین جزئی) تا ستون‌ها تکراری نشوند.
+    مبنای داده بانک سابقهٔ ۴۰۰ روزهٔ history.sqlite است؛ نبود → بانک لایو همان نماد.
+    میانگین‌های مطلق (مخرج نسبت‌های ٪) مثل قبل جزئی هم می‌پذیرند.
     """
-    rows = _daily_rows(db_path, today)
-    if not rows:
-        hdb = db_path.parent / "history.sqlite"
-        if hdb != db_path and hdb.exists():
-            rows = _daily_rows(hdb, today, table="history_daily")
-    flows, f_abs, vols, powers = [], [], [], []
-    for r in rows[:30]:
-        px = float(r["close_price"] or 0)
-        f = (int(r["ct_real_buy_volume"] or 0) -
-             int(r["ct_real_sell_volume"] or 0)) * px
-        flows.append(f)
-        f_abs.append(abs(f))
+    if symbol is None:
+        symbol = db_path.stem.removeprefix("raw_")
+    rows = None
+    hdb = db_path.parent / "history.sqlite"
+    if hdb != db_path and hdb.exists():
+        rows = _daily_rows(hdb, today, symbol, table="history_daily") or None
+    if rows is None:
+        rows = _daily_rows(db_path, today)
+    me, vols, powers = [], [], []
+    for r in rows[:60]:
+        bv, sv = r["ct_real_buy_value"], r["ct_real_sell_value"]
+        bc, sc = r["ct_real_buy_count"], r["ct_real_sell_count"]
+        me.append((bv - sv) if (bv is not None and sv is not None) else None)
         vols.append(float(r["trade_volume"] or 0))
-        bc = int(r["ct_real_buy_count"] or 0)
-        sc = int(r["ct_real_sell_count"] or 0)
-        powers.append(((int(r["ct_real_buy_volume"] or 0) / max(bc, 1)) /
-                       max(int(r["ct_real_sell_volume"] or 0) / max(sc, 1), 1e-9))
-                      if (bc and sc and int(r["ct_real_sell_volume"] or 0)) else None)
+        powers.append(((bv / bc) / (sv / sc))
+                      if (bv and sv and bc and sc) else None)
+    f_abs = [abs(x) for x in me if x is not None]
 
     def _win(xs, n):
-        xs = [x for x in xs[:n] if x is not None]
-        return sum(xs) / len(xs) if xs else None
+        # میانگین n روزِ دارای داده (روز بدون معامله/داده ناقص رد می‌شود) —
+        # پنجرهٔ ناقص = None تا ستون‌های ۵/۱۰/۲۰/۳۰ تکراری نشوند
+        xs = [x for x in xs[:n * 2] if x is not None][:n]
+        return sum(xs) / n if len(xs) >= n else None
 
     f5, v5, v30 = f_abs[:5], vols[:5], vols[:30]
     return {
@@ -324,13 +340,16 @@ def _daily_stats(db_path: Path, today: str | None) -> dict:
         "flow30_avg_abs": sum(f_abs) / len(f_abs) if f_abs else 0.0,
         "vol5_avg": sum(v5) / len(v5) if v5 else 0.0,
         "vol30_avg": sum(v30) / len(v30) if v30 else 0.0,
-        "flow_avg5_rial": _win(flows, 5),
-        "flow_avg20_rial": _win(flows, 20),
-        "flow_avg30_rial": _win(flows, 30),
+        "flow_avg5_rial": _win(me, 5),
+        "flow_avg10_rial": _win(me, 10),
+        "flow_avg20_rial": _win(me, 20),
+        "flow_avg30_rial": _win(me, 30),
         "vol_avg5": _win(vols, 5),
+        "vol_avg10": _win(vols, 10),
         "vol_avg20": _win(vols, 20),
         "vol_avg30": _win(vols, 30),
         "buy_power_avg5": _win(powers, 5),
+        "buy_power_avg10": _win(powers, 10),
         "buy_power_avg20": _win(powers, 20),
         "buy_power_avg30": _win(powers, 30),
         "days": len(rows),
@@ -371,7 +390,7 @@ def _trend_label(values) -> tuple[str | None, float | None]:
 
 
 def _trends_from_series(flow, power, window: int = TREND_WINDOW_DEFAULT) -> dict:
-    """روند جریان پول و قدرت خریدار از سری‌های نمونه‌ای — بین export و شبیه‌سازی مشترک.
+    """روند ورود پول و قدرت خریدار از سری‌های نمونه‌ای — بین export و شبیه‌سازی مشترک.
 
     واژگونی = جهت روند پنجرهٔ اخیر معکوس جهت روند کل جلسه (مثلاً جلسه صعودی ولی
     N نمادهٔ اخیر نزولی) — مبنای هایلایت کل سطر در داشبورد.
@@ -394,7 +413,7 @@ def _trends_from_series(flow, power, window: int = TREND_WINDOW_DEFAULT) -> dict
         "flow_ratio_recent_avg": round(sum(fs) / len(fs), 2) if fs else None,
     }
     names, kind = [], None
-    for name, ses, rec in (("جریان پول", out["trend_flow_session"], out["trend_flow_recent"]),
+    for name, ses, rec in (("ورود پول", out["trend_flow_session"], out["trend_flow_recent"]),
                            ("قدرت خریدار", out["trend_power_session"], out["trend_power_recent"])):
         s, r = TREND_SCORE.get(ses, 0), TREND_SCORE.get(rec, 0)
         if s and r and (s > 0) != (r > 0):
@@ -414,7 +433,7 @@ def _trends_from_series(flow, power, window: int = TREND_WINDOW_DEFAULT) -> dict
 
 
 def _session_trends(raw_db: Path, window: int = TREND_WINDOW_DEFAULT) -> dict:
-    """سری‌های نسبت جریان پول و قدرت خریدارِ جلسه از بانک خام و روند آن‌ها."""
+    """سری‌های نسبت ورود پول و قدرت خریدارِ جلسه از بانک خام و روند آن‌ها."""
     con = sqlite3.connect(str(raw_db))
     try:
         rows = con.execute(
@@ -532,7 +551,7 @@ def _compute_row(row: dict, name: str, s: dict, root: Path, raw_db: Path, r) -> 
                 row["price_reaction_score"] = round((last_p - lo) / (hi - lo) * 100, 1)
 
     # شاخص‌های چندروزه — فرمول‌های فایل dashboard.xlsx، شیت dashboard
-    ds = _daily_stats(raw_db, str(g("date_jalali") or "") or None)
+    ds = _daily_stats(raw_db, str(g("date_jalali") or "") or None, name)
     if tval:
         row["money_flow_ratio_pct"] = round(flow / tval * 100, 2)
     if (rbv or rsv) and px:
@@ -548,13 +567,15 @@ def _compute_row(row: dict, name: str, s: dict, root: Path, raw_db: Path, r) -> 
         row["volume_ratio_5d_pct"] = round(tvol / ds["vol5_avg"] * 100, 1)
     if ds["vol30_avg"] > 0 and tvol:
         row["volume_ratio_30d_pct"] = round(tvol / ds["vol30_avg"] * 100, 1)
-    # گروه «تاریخچه» — میانگین‌های عددی ۵/۲۰/۳۰ روزه (پنجره فقط روزهای قبل)
+    # گروه «تاریخچه» — میانگین‌های عددی ۵/۱۰/۲۰/۳۰ روزه (پنجرهٔ کامل روزهای قبل)
     if ds.get("days"):
-        for k in ("flow_avg5_rial", "flow_avg20_rial", "flow_avg30_rial",
-                  "vol_avg5", "vol_avg20", "vol_avg30"):
+        for k in ("flow_avg5_rial", "flow_avg10_rial", "flow_avg20_rial",
+                  "flow_avg30_rial", "vol_avg5", "vol_avg10",
+                  "vol_avg20", "vol_avg30"):
             v = ds.get(k)
             row[k] = int(v) if v is not None else None
-        for k in ("buy_power_avg5", "buy_power_avg20", "buy_power_avg30"):
+        for k in ("buy_power_avg5", "buy_power_avg10",
+                  "buy_power_avg20", "buy_power_avg30"):
             v = ds.get(k)
             row[k] = round(v, 2) if v is not None else None
     if rbc or rsc:
@@ -595,7 +616,7 @@ def latest_bank_times(root: Path) -> dict:
 def build_payload(root: Path, trend_window: int = TREND_WINDOW_DEFAULT) -> dict:
     """ساخت payload کامل داشبورد از بانک‌های خام پروژهٔ root.
 
-    trend_window — طول پنجرهٔ «نمونه‌های اخیر» برای روند جریان پول/قدرت خریدار.
+    trend_window — طول پنجرهٔ «نمونه‌های اخیر» برای روند ورود پول/قدرت خریدار.
     """
     root = Path(root)
     sym_path = root / "config" / "symbols.json"
