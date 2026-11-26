@@ -56,6 +56,17 @@
   .log{font:11px/1.7 Tahoma,monospace;color:var(--txt);white-space:pre-wrap;
        background:#f5f8fd;border:1px dashed var(--line);border-radius:8px;
        padding:6px 10px;margin:6px 14px;display:none}
+  /* پنل انتخاب ستون‌ها — مثل دیده‌بان لایو */
+  #hchooser{position:fixed;top:54px;right:14px;background:var(--panel);
+            border:1px solid var(--line);border-radius:10px;padding:10px 12px;
+            z-index:30;max-height:72vh;overflow:auto;min-width:280px;
+            box-shadow:0 6px 24px rgba(0,0,0,.18);display:none}
+  #hchooser h3{display:flex;gap:6px;align-items:center;margin:0 0 8px;
+               font-size:12.5px}
+  #hchooser .mini-b{padding:3px 8px;font-size:11px;border-radius:7px}
+  #hcols-list label{display:flex;gap:7px;align-items:center;padding:3px 2px;
+                    font-size:12px;cursor:pointer;user-select:none}
+  #hcols-list input{accent-color:var(--hdr)}
   @media (max-width:640px){
     .toolbar{padding:8px}
     .panel,.status,.tbl-wrap,.log{margin:6px 8px}
@@ -69,9 +80,18 @@
   <span class="title-chip">📜 سابقهٔ نمادها <a href="/">← دیده‌بان لایو</a></span>
   <label>نماد: <select id="sym"></select></label>
   <button class="btn" id="btn-collect">⬇ جمع‌آوری سابقه</button>
-  <button class="btn" id="btn-xlsx" title="گزارش اکسل همان چیزی که در جدول نشان داده می‌شود — نماد انتخابی یا همهٔ نمادها">⬇ گزارش اکسل</button>
+  <button class="btn" id="btn-xlsx" title="گزارش اکسل با ستون‌های انتخابی — نماد انتخابی یا همهٔ نمادها">⬇ گزارش اکسل</button>
+  <button class="btn" id="btn-hcols" title="افزودن/حذف ستون‌های جدول — انتخاب در همین مرورگر ذخیره می‌شود">ستون‌ها ▾</button>
   <label title="تعداد روزهای بایگانی در portfoli_history — حداقل ۳۰ تا ۹۰ روز">بازهٔ بایگانی (روز):
     <input type="number" id="days" value="30" min="30" max="90" step="5" style="width:64px"></label>
+</div>
+<div id="hchooser">
+  <h3><span>انتخاب ستون‌ها</span>
+    <button class="mini-b btn" id="hcols-all">همه</button>
+    <button class="mini-b btn" id="hcols-none">هیچ</button>
+    <button class="mini-b btn" id="hcols-def">پیش‌فرض</button>
+    <button class="mini-b btn" id="hcols-close">✕</button></h3>
+  <div id="hcols-list"></div>
 </div>
 <div class="status" id="st">در حال بارگذاری…</div>
 <div class="panel"><b>ستون‌ها و فرمول‌ها</b> <span style="font-size:11.5px;color:var(--mut)">
@@ -86,29 +106,44 @@
   دادهٔ خام فقط-TSE از history.sqlite</span></div>
 <div class="tbl-wrap">
 <table id="tbl">
-  <thead><tr>
-    <th>تاریخ</th><th>نماد</th><th>قیمت پایانی</th><th>٪ نوسان پایانی</th>
-    <th>ورود پول (ریال)</th><th>میانگین ۵ روزه ورود پول (ریال)</th>
-    <th>میانگین ۱۰ روزه ورود پول (ریال)</th>
-    <th>میانگین ۲۰ روزه ورود پول (ریال)</th><th>میانگین ۳۰ روزه ورود پول (ریال)</th>
-    <th>حجم روز</th>
-    <th>میانگین ۵ روزه حجم (سهم)</th><th>میانگین ۱۰ روزه حجم (سهم)</th>
-    <th>میانگین ۲۰ روزه حجم (سهم)</th><th>میانگین ۳۰ روزه حجم (سهم)</th>
-    <th>قدرت خرید روز</th><th>میانگین قدرت خرید ۵ روز</th>
-    <th>میانگین قدرت خرید ۱۰ روز</th>
-    <th>میانگین قدرت خرید ۲۰ روز</th><th>میانگین قدرت خرید ۳۰ روز</th>
-    <th>تعداد خریدار به فروشنده</th><th>درصد خرید حقیقی از کل معاملات</th>
-    <th>واکنش قیمت (٪)</th>
-  </tr></thead>
+  <thead><tr id="htr"></tr></thead>
   <tbody id="tb"></tbody>
 </table>
 </div>
 <div class="log" id="log"></div>
 <script>
-const COLS = ["pct_close","flow_rial","flow_avg5_rial","flow_avg10_rial","flow_avg20_rial","flow_avg30_rial",
-              "trade_volume","vol_avg5","vol_avg10","vol_avg20","vol_avg30",
-              "buy_power","buy_power_avg5","buy_power_avg10","buy_power_avg20","buy_power_avg30",
-              "bs_count_ratio","real_buy_pct","reaction_pct"];
+// ستون‌های جدول سابقه — (کلید داده، برچسب)؛ مدیریت افزودن/حذف مثل دیده‌بان لایو
+const HCOLS = [
+  ["close_price", "قیمت پایانی"], ["pct_close", "٪ نوسان پایانی"],
+  ["flow_rial", "ورود پول (ریال)"],
+  ["flow_avg5_rial", "میانگین ۵ روزه ورود پول (ریال)"],
+  ["flow_avg10_rial", "میانگین ۱۰ روزه ورود پول (ریال)"],
+  ["flow_avg20_rial", "میانگین ۲۰ روزه ورود پول (ریال)"],
+  ["flow_avg30_rial", "میانگین ۳۰ روزه ورود پول (ریال)"],
+  ["trade_volume", "حجم روز"],
+  ["vol_avg5", "میانگین ۵ روزه حجم (سهم)"],
+  ["vol_avg10", "میانگین ۱۰ روزه حجم (سهم)"],
+  ["vol_avg20", "میانگین ۲۰ روزه حجم (سهم)"],
+  ["vol_avg30", "میانگین ۳۰ روزه حجم (سهم)"],
+  ["buy_power", "قدرت خرید روز"],
+  ["buy_power_avg5", "میانگین قدرت خرید ۵ روز"],
+  ["buy_power_avg10", "میانگین قدرت خرید ۱۰ روز"],
+  ["buy_power_avg20", "میانگین قدرت خرید ۲۰ روز"],
+  ["buy_power_avg30", "میانگین قدرت خرید ۳۰ روز"],
+  ["bs_count_ratio", "تعداد خریدار به فروشنده"],
+  ["real_buy_pct", "درصد خرید حقیقی از کل معاملات"],
+  ["reaction_pct", "واکنش قیمت (٪)"],
+];
+const HFA = Object.fromEntries(HCOLS);
+const HDEF = HCOLS.map(c => c[0]);
+const LS_HCOLS = "history_cols";
+let visible = (() => {
+  try {
+    const v = JSON.parse(localStorage.getItem(LS_HCOLS));
+    if (Array.isArray(v) && v.length && v.every(c => c in HFA)) return v;
+  } catch (e) { /* localStorage در دسترس نیست */ }
+  return HDEF.slice();
+})();
 // همهٔ اعداد به شکل خلاصهٔ لاتین مثل 21.24T / 885.43B / 277.88M — اعداد کوچک بدون پسوند
 const fmtC = v => {
   const a = Math.abs(v);
@@ -136,8 +171,24 @@ async function loadData(){
     // از دکمهٔ 📜 کنار نام نماد در دیده‌بان لایو می‌آید — انتخاب همان نماد
     if (symParam && j.symbols.some(s => s.name === symParam)) sel.value = symParam;
     sel.onchange = render;
+    buildHHead();
     render();
   }catch(e){ document.getElementById("st").textContent = "خطای ارتباط با سرور: " + e; }
+}
+function buildHHead(){
+  document.getElementById("htr").innerHTML = "<th>تاریخ</th><th>نماد</th>" +
+    visible.map(c => `<th>${HFA[c]}</th>`).join("");
+}
+function buildHChooser(){
+  document.getElementById("hcols-list").innerHTML = HCOLS.map(([en, fa2]) =>
+    `<label><input type="checkbox" value="${en}" ${visible.includes(en) ? "checked" : ""}> ${fa2}</label>`).join("");
+  document.querySelectorAll("#hcols-list input").forEach(cb => cb.onchange = applyHCols);
+}
+function applyHCols(){
+  visible = [...document.querySelectorAll("#hcols-list input:checked")].map(x => x.value);
+  if (!visible.length) visible = HDEF.slice();
+  localStorage.setItem(LS_HCOLS, JSON.stringify(visible));
+  buildHHead(); render();
 }
 function render(){
   const tb = document.getElementById("tb");
@@ -146,12 +197,11 @@ function render(){
   let html = "";
   for (const s of list){
     // سرگروه هر نماد — نام نماد + تعداد روز + آخرین روز جمع‌آوری
-    html += `<tr class="sym-head"><td colspan="22">نماد «${s.name}» — ${fa(s.days)} روز ` +
+    html += `<tr class="sym-head"><td colspan="${visible.length + 2}">نماد «${s.name}» — ${fa(s.days)} روز ` +
             `| آخرین روز جمع‌آوری: ${s.last_collected || "—"}</td></tr>`;
     html += s.rows.slice().reverse().map(r =>
       `<tr><td class="dt">${r.date_jalali}</td><td class="sym">${s.name}</td>` +
-      `<td>${cell(r.close_price)}</td>` +
-      COLS.map(c => `<td>${cell(r[c])}</td>`).join("") + "</tr>").join("");
+      visible.map(c => `<td>${cell(r[c])}</td>`).join("") + "</tr>").join("");
   }
   tb.innerHTML = html;
   const total = list.reduce((a, s) => a + s.days, 0);
@@ -161,12 +211,42 @@ function render(){
     `${fa(total)} سطر | آخرین روز جمع‌آوری: ${lc || "—"} | محاسبه: ${DATA.generated_at} | ` +
     `فرمول‌ها: export_portfoli_data.py`;
 }
-// گزارش اکسل — همان نماد انتخابی (یا همهٔ نمادها) با همان ترتیب ستون‌ها و اعداد خلاصه
-document.getElementById("btn-xlsx").onclick = () => {
+// گزارش اکسل — ستون‌های انتخابی + نماد انتخابی (یا همهٔ نمادها)
+document.getElementById("btn-xlsx").onclick = async () => {
   const pick = document.getElementById("sym").value;
-  const q = pick === "*" ? "*" : encodeURIComponent(pick);
-  location.href = "/api/hexport?symbol=" + q;
+  const b = document.getElementById("btn-xlsx");
+  b.disabled = true; b.textContent = "⏳ در حال ساخت…";
+  try{
+    const res = await fetch("/api/hexport", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({symbol: pick, cols: visible})});
+    if (!res.ok){
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error || ("HTTP " + res.status));
+    }
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = pick === "*" ? "سابقهٔ همهٔ نمادها.xlsx" : `سابقهٔ ${pick}.xlsx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(a.href);
+  }catch(e){ alert("خروجی اکسل نشد: " + e); }
+  b.disabled = false; b.textContent = "⬇ گزارش اکسل";
 };
+/* پنل انتخاب ستون‌ها — باز/بسته + همه/هیچ/پیش‌فرض */
+const hch = document.getElementById("hchooser");
+document.getElementById("btn-hcols").onclick = () => {
+  hch.style.display = hch.style.display === "block" ? "none" : "block";
+  if (hch.style.display === "block") buildHChooser();
+};
+document.getElementById("hcols-all").onclick = () => { visible = HCOLS.map(c => c[0]); applyHCols(); };
+document.getElementById("hcols-none").onclick = () => { visible = []; applyHCols(); };
+document.getElementById("hcols-def").onclick = () => { visible = HDEF.slice(); applyHCols(); };
+document.getElementById("hcols-close").onclick = () => { hch.style.display = "none"; };
+document.addEventListener("click", e => {
+  if (hch.style.display === "block" && !hch.contains(e.target) &&
+      e.target.id !== "btn-hcols") hch.style.display = "none";
+});
 document.getElementById("btn-collect").onclick = async () => {
   const b = document.getElementById("btn-collect"), lg = document.getElementById("log");
   b.disabled = true; b.textContent = "⏳ در حال جمع‌آوری…";

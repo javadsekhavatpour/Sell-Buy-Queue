@@ -40,6 +40,7 @@ import requests
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from early_warning.price_range import to_jalali  # noqa: E402  — همان تبدیل پروژه
+from tse_fields import derived_values  # noqa: E402  — فیلدهای نمایشی TSETMC
 
 API_BASE = "https://cdn.tsetmc.com/api"
 HEADERS = {
@@ -49,36 +50,39 @@ HEADERS = {
     "Origin": "https://old.tsetmc.com",
 }
 
-# فیلدهای خام — مپ ۱:۱ با کلیدهای پاسخ TSETMC (همان نام‌گذاری raw_collector)
+# فیلدهای خام — مپ ۱:۱ با کلیدهای پاسخ TSETMC؛ نام ستون بانک = کد فیلتر
+# TSETMC (مطابق tse_fields.py — فیلترنویسی دیده‌بان بازار)
 PRICE_MAP = {   # GetClosingPriceDailyList → closingPriceDaily[]
-    "pDrCotVal":       "last_price",        # آخرین قیمت معامله
-    "pClosing":        "close_price",       # قیمت پایانی
-    "priceFirst":      "open_price",        # اولین قیمت
-    "priceYesterday":  "yesterday_price",   # قیمت دیروز
-    "priceMax":        "daily_high",        # بیشترین روز
-    "priceMin":        "daily_low",         # کمترین روز
-    "qTotTran5J":      "trade_volume",      # حجم کل معاملات
-    "qTotCap":         "trade_value",       # ارزش کل (ریال)
-    "zTotTran":        "trade_count",       # تعداد معاملات
+    "pDrCotVal":       "pl",        # آخرین قیمت معامله
+    "pClosing":        "pc",        # قیمت پایانی
+    "priceFirst":      "pf",        # اولین قیمت
+    "priceYesterday":  "py",        # قیمت دیروز
+    "priceMax":        "pmax",      # بیشترین روز
+    "priceMin":        "pmin",      # کمترین روز
+    "qTotTran5J":      "tvol",      # حجم کل معاملات
+    "qTotCap":         "tval",      # ارزش کل (ریال)
+    "zTotTran":        "tno",       # تعداد معاملات
 }
-CT_MAP = {      # GetClientTypeHistory → clientType[]
-    "buy_I_Volume":    "ct_real_buy_volume",
-    "buy_I_Value":     "ct_real_buy_value",     # ارزش واقعی خرید حقیقی (ریال)
-    "buy_I_Count":     "ct_real_buy_count",
-    "buy_N_Volume":    "ct_legal_buy_volume",
-    "buy_N_Value":     "ct_legal_buy_value",
-    "buy_N_Count":     "ct_legal_buy_count",
-    "sell_I_Volume":   "ct_real_sell_volume",
-    "sell_I_Value":    "ct_real_sell_value",
-    "sell_I_Count":    "ct_real_sell_count",
-    "sell_N_Volume":   "ct_legal_sell_volume",
-    "sell_N_Value":    "ct_legal_sell_value",
-    "sell_N_Count":    "ct_legal_sell_count",
+CT_MAP = {      # GetClientTypeHistory → clientType[] — فرم فیلتر (ct).* 
+    "buy_I_Volume":    "buy_i_volume",    # (ct).Buy_I_Volume — حجم خرید حقیقی
+    "buy_I_Value":     "buy_i_value",     # (ct).Buy_I_Value — ارزش واقعی خرید حقیقی (ریال)
+    "buy_I_Count":     "buy_counti",      # (ct).Buy_CountI — تعداد خریداران حقیقی
+    "buy_N_Volume":    "buy_n_volume",    # (ct).Buy_N_Volume — حجم خرید حقوقی
+    "buy_N_Value":     "buy_n_value",     # (ct).Buy_N_Value — ارزش خرید حقوقی
+    "buy_N_Count":     "buy_countn",      # (ct).Buy_CountN — تعداد خریداران حقوقی
+    "sell_I_Volume":   "sell_i_volume",
+    "sell_I_Value":    "sell_i_value",
+    "sell_I_Count":    "sell_counti",
+    "sell_N_Volume":   "sell_n_volume",
+    "sell_N_Value":    "sell_n_value",
+    "sell_N_Count":    "sell_countn",
 }
 
 ID_COLS = ["symbol", "ins_code", "date_greg", "date_jalali"]
 VALUE_COLS = list(PRICE_MAP.values()) + list(CT_MAP.values())
-ALL_COLS = ID_COLS + VALUE_COLS
+# فیلدهای نمایشی TSETMC — از pl/pc/py در لحظهٔ جمع‌آوری ساخته می‌شوند
+DERIVED_COLS = ["plc", "plp", "pcc", "pcp"]
+ALL_COLS = ID_COLS + VALUE_COLS + DERIVED_COLS
 
 
 def api_get(session: requests.Session, path: str, tries: int = 3) -> dict:
@@ -155,6 +159,8 @@ def collect_symbol(session: requests.Session, conn: sqlite3.Connection,
         rec = {"symbol": name, "ins_code": str(ins_code), "date_greg": str(d),
                "date_jalali": jal}
         rec.update({k: vals.get(k) for k in VALUE_COLS})
+        # فیلدهای نمایشی TSETMC (plc/plp/pcc/pcp) — از pl/pc/py همان روز
+        rec.update(derived_values(rec.get("pl"), rec.get("pc"), rec.get("py")))
         # فقط روزهایی که قیمت دارند (پاسخ حقیقی/حقوقی گاهی روز بدون معامله دارد)
         if rec["close_price"] is None:
             continue

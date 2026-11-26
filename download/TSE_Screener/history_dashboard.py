@@ -69,9 +69,9 @@ CREATE TABLE IF NOT EXISTS computed_daily (
     symbol TEXT NOT NULL,
     date_jalali TEXT NOT NULL,
     date_greg TEXT NOT NULL,
-    close_price REAL, pct_close REAL, flow_rial REAL,
+    pc REAL, pcp REAL, flow_rial REAL,
     flow_avg5_rial REAL, flow_avg10_rial REAL, flow_avg20_rial REAL, flow_avg30_rial REAL,
-    trade_volume REAL, vol_avg5 REAL, vol_avg10 REAL, vol_avg20 REAL, vol_avg30 REAL,
+    tvol REAL, vol_avg5 REAL, vol_avg10 REAL, vol_avg20 REAL, vol_avg30 REAL,
     buy_power REAL, buy_power_avg5 REAL, buy_power_avg10 REAL,
     buy_power_avg20 REAL, buy_power_avg30 REAL,
     bs_count_ratio REAL, real_buy_pct REAL, reaction_pct REAL, money_flow_pct REAL,
@@ -81,9 +81,12 @@ CREATE TABLE IF NOT EXISTS computed_daily (
 ) WITHOUT ROWID
 """
 COMPUTED_META_SQL = "CREATE TABLE IF NOT EXISTS computed_meta (k TEXT PRIMARY KEY, v TEXT)"
-COMPUTED_COLS = ["symbol", "date_jalali", "date_greg", "close_price", "pct_close",
+# ستون‌های عبوری از بانک خام با نام TSE — ترجمهٔ UI ↔ بانک
+_UI_TO_BANK = {"close_price": "pc", "pct_close": "pcp", "trade_volume": "tvol"}
+_BANK_TO_UI = {v: k for k, v in _UI_TO_BANK.items()}  # pc→close_price و…
+COMPUTED_COLS = ["symbol", "date_jalali", "date_greg", "pc", "pcp",
                  "flow_rial", "flow_avg5_rial", "flow_avg10_rial", "flow_avg20_rial",
-                 "flow_avg30_rial", "trade_volume", "vol_avg5", "vol_avg10",
+                 "flow_avg30_rial", "tvol", "vol_avg5", "vol_avg10",
                  "vol_avg20", "vol_avg30", "buy_power", "buy_power_avg5",
                  "buy_power_avg10", "buy_power_avg20", "buy_power_avg30",
                  "bs_count_ratio", "real_buy_pct", "reaction_pct", "money_flow_pct",
@@ -92,7 +95,7 @@ COMPUTED_COLS = ["symbol", "date_jalali", "date_greg", "close_price", "pct_close
 
 def _flow(r: dict) -> float | None:
     """ورود پول ریالی روز — ارزش واقعی خرید حقیقی منهای فروش حقیقی (خام TSE)."""
-    b, s = r.get("ct_real_buy_value"), r.get("ct_real_sell_value")
+    b, s = r.get("buy_i_value"), r.get("sell_i_value")
     if b is None and s is None:
         return None
     return (b or 0.0) - (s or 0.0)
@@ -132,14 +135,14 @@ def build_history_data(root: Path = ROOT, symbols: list[str] | None = None,
         # پیش‌محاسبهٔ سری‌ها برای پنجره‌های ۵/۲۰/۳۰ روزه (مطابق _daily_statsِ exporter:
         # پنجره فقط «روزهای قبل» است، امروز داخل میانگین نمی‌آید)
         flows = [_flow(r) for r in rows]
-        vols = [r.get("trade_volume") for r in rows]
+        vols = [r.get("tvol") for r in rows]
         f_abs = [abs(f) if f is not None else None for f in flows]
 
         def _power_raw(r: dict) -> float | None:
             """نسبت خام قدرت خرید روز (همیشه مثبت) — فرمول dashboard.git:
             (ارزش خرید حقیقی ÷ تعداد خریداران) ÷ (ارزش فروش حقیقی ÷ تعداد فروشندگان)"""
-            bv, sv = r.get("ct_real_buy_value"), r.get("ct_real_sell_value")
-            bc, sc = r.get("ct_real_buy_count"), r.get("ct_real_sell_count")
+            bv, sv = r.get("buy_i_value"), r.get("sell_i_value")
+            bc, sc = r.get("buy_counti"), r.get("sell_counti")
             if not bv or not sv or not bc or not sc:
                 return None
             return (bv / bc) / (sv / sc)
@@ -159,9 +162,9 @@ def build_history_data(root: Path = ROOT, symbols: list[str] | None = None,
 
         computed: list[dict] = []
         for i, r in enumerate(rows):
-            close = r.get("close_price")
-            yest = r.get("yesterday_price")
-            tval = r.get("trade_value")
+            close = r.get("pc")
+            yest = r.get("py")
+            tval = r.get("tval")
             row = {"date_jalali": r.get("date_jalali"), "date_greg": r.get("date_greg"),
                    "close_price": close}
             # ٪ نوسان پایانی — فرمول pct_close (export_portfoli_data)
@@ -198,16 +201,16 @@ def build_history_data(root: Path = ROOT, symbols: list[str] | None = None,
                 av = _signed_power(_win(powers_raw, n, i))
                 row[f"buy_power_avg{n}"] = round(av, 2) if av is not None else None
             # تعداد خریدار به فروشنده — فرمول buyer_seller_count_ratio
-            bc, sc = r.get("ct_real_buy_count"), r.get("ct_real_sell_count")
+            bc, sc = r.get("buy_counti"), r.get("sell_counti")
             row["bs_count_ratio"] = round(bc / sc, 2) if (bc and sc) else None
             # درصد خرید حقیقی از کل معاملات — ارزش واقعی ÷ ارزش کل × ۱۰۰
-            rbv = r.get("ct_real_buy_value")
+            rbv = r.get("buy_i_value")
             row["real_buy_pct"] = round(rbv / tval * 100, 2) if (rbv is not None and tval) else None
             # واکنش قیمت — فرمول price_reaction_score با کف/سقف price_range.py
             dp = compute_daily_params(name, float(yest), cfg_dir) if yest else None
             if dp and dp["max_allowed_price"] > dp["min_allowed_price"] and r.get("last_price"):
                 row["reaction_pct"] = round(
-                    (r["last_price"] - dp["min_allowed_price"])
+                    (r["pl"] - dp["min_allowed_price"])
                     / (dp["max_allowed_price"] - dp["min_allowed_price"]) * 100, 1)
             else:
                 row["reaction_pct"] = None
@@ -258,6 +261,10 @@ def load_computed(root: Path = ROOT, symbols: list[str] | None = None) -> dict |
             rows = [dict(r) for r in con.execute(
                 "SELECT * FROM computed_daily WHERE symbol=? ORDER BY date_greg",
                 (name,))]
+            for row in rows:  # نام بانک (pc/pcp/tvol) → کلید UI
+                for ui, bk in _UI_TO_BANK.items():
+                    if bk in row:
+                        row[ui] = row.pop(bk)
             if not rows:
                 continue
             out["symbols"].append({"name": name, "days": len(rows),
@@ -303,7 +310,9 @@ def save_computed(root: Path, data: dict) -> dict:
                     continue
                 for r in s["rows"]:
                     rec = {"computed_at": now, "symbol": s["name"]}
-                    rec.update({k: r.get(k) for k in COMPUTED_COLS
+                    # کلید ردیف = نام بانک؛ مقدار از کلید UI همان فیلد
+                    rec.update({k: r.get(_BANK_TO_UI.get(k, k))
+                                for k in COMPUTED_COLS
                                 if k not in ("computed_at", "symbol")})
                     con.execute(f"INSERT INTO computed_daily ({cols}) VALUES ({ph})",
                                 [rec[c] for c in COMPUTED_COLS])

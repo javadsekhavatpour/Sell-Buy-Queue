@@ -103,10 +103,10 @@ def build_frames(per_symbol: dict, per_cfg: dict, root: Path, date: str,
             # نمونه‌های جدیدِ رسیده از فریم قبل → به سری‌های روند اضافه شود
             for k in range(last_used[name] + 1, i + 1):
                 r = rows[k]
-                rbv, rsv = r["ct_real_buy_volume"] or 0, r["ct_real_sell_volume"] or 0
-                rbc, rsc = r["ct_real_buy_count"] or 0, r["ct_real_sell_count"] or 0
+                rbv, rsv = r["buy_i_volume"] or 0, r["sell_i_volume"] or 0
+                rbc, rsc = r["buy_counti"] or 0, r["sell_counti"] or 0
                 tval = r["trade_value"] or 0
-                px = float(r["close_price"] or 0) or float(r["last_price"] or 0)
+                px = float(r["pc"] or 0) or float(r["pl"] or 0)
                 if tval and px:
                     run_flow[name].append((rbv - rsv) * px / tval * 100)
                 if rbc and rsc:

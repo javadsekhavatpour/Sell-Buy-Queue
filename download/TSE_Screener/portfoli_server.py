@@ -151,14 +151,14 @@ def available_dates(root: Path) -> list[str]:
 HISTORY_EXPORT_COLS = [
     ("تاریخ", None, "date_jalali"),
     ("نماد", None, "symbol"),
-    ("قیمت پایانی", "close_price", "close_price"),
-    ("٪ نوسان پایانی", "pct_close", "محاسبه: (پایانی − دیروز) ÷ دیروز × ۱۰۰"),
+    ("قیمت پایانی", "close_price", "pc"),
+    ("٪ نوسان پایانی", "pct_close", "pcp (بانک) یا محاسبه: (پایانی − دیروز) ÷ دیروز × ۱۰۰"),
     ("ورود پول (ریال)", "flow_rial", "محاسبه: ارزش خرید حقیقی − ارزش فروش حقیقی"),
     ("میانگین ۵ روزه ورود پول (ریال)", "flow_avg5_rial", "محاسبه: میانگین کامل ۵ روز قبل (بدون امروز)"),
     ("میانگین ۱۰ روزه ورود پول (ریال)", "flow_avg10_rial", "محاسبه: میانگین کامل ۱۰ روز قبل"),
     ("میانگین ۲۰ روزه ورود پول (ریال)", "flow_avg20_rial", "محاسبه: میانگین کامل ۲۰ روز قبل"),
     ("میانگین ۳۰ روزه ورود پول (ریال)", "flow_avg30_rial", "محاسبه: میانگین کامل ۳۰ روز قبل"),
-    ("حجم روز", "trade_volume", "trade_volume"),
+    ("حجم روز", "trade_volume", "tvol"),
     ("میانگین ۵ روزه حجم (سهم)", "vol_avg5", "محاسبه: میانگین کامل ۵ روز قبل"),
     ("میانگین ۱۰ روزه حجم (سهم)", "vol_avg10", "محاسبه: میانگین کامل ۱۰ روز قبل"),
     ("میانگین ۲۰ روزه حجم (سهم)", "vol_avg20", "محاسبه: میانگین کامل ۲۰ روز قبل"),
@@ -194,24 +194,31 @@ def _fmt_compact(v) -> str | None:
     return f"{x:,.2f}"
 
 
-def _history_export_xlsx(root: Path, symbol: str | None) -> bytes:
-    """اکسل گزارش «سابقهٔ نمادها» — همان ستون‌ها و ترتیب جدول history.html.
+def _history_export_xlsx(root: Path, symbol: str | None,
+                         cols: list[str] | None = None) -> bytes:
+    """اکسل گزارش «سابقهٔ نمادها» — ستون‌های انتخابی جدول history.html.
 
     سطر ۱: برچسب فارسی — سطر ۲: نام فیلد بانک خام (یا توضیح محاسبه). بعد از
     ستون‌های جدول، همهٔ ستون‌های بلااستفادهٔ بانک هم می‌آیند (درخواست کاربر:
     ردیف نام فیلد بانک حتی برای فیلدهایی که ستون جدول ندارند). همهٔ اعداد
     خلاصهٔ T/B/M؛ شیت راست‌به‌چپ؛ symbol=* یا خالی یعنی همهٔ نمادها.
+    cols = کلیدهای انتخاب‌شده در داشبورد سابقه — به همان ترتیب نمایش جدول.
     """
     import history_dashboard
     data = history_dashboard.build_history_data(root)
     if not data.get("ok"):
         raise ValueError(data.get("error") or "دادهٔ سابقه در دسترس نیست")
+    # ستون‌های انتخاب‌شده — تاریخ/نماد همیشه؛ بقیه به ترتیب انتخاب کاربر
+    sel_cols = HISTORY_EXPORT_COLS
+    if cols:
+        want = [c for c in cols if any(e[1] == c for e in HISTORY_EXPORT_COLS)]
+        sel_cols = ([e for e in HISTORY_EXPORT_COLS if e[1] is None]
+                    + [e for c in want for e in HISTORY_EXPORT_COLS if e[1] == c])
     con = sqlite3.connect(str(root / "data" / "raw" / "history.sqlite"))
     con.row_factory = sqlite3.Row
     try:
         bank_cols = [r[1] for r in con.execute("PRAGMA table_info(history_daily)")]
-        used_bank = {src for _, _, src in HISTORY_EXPORT_COLS
-                     if not src.startswith("محاسبه")}
+        used_bank = {src for _, _, src in sel_cols if src in bank_cols}
         unused = [c for c in bank_cols if c not in used_bank and c != "id"]
         if symbol and symbol != "*":
             rs = con.execute("SELECT * FROM history_daily WHERE symbol=?",
@@ -236,8 +243,8 @@ def _history_export_xlsx(root: Path, symbol: str | None) -> bytes:
     sfont = Font(name="Tahoma", size=8, italic=True, color="1F3864")
     body = Font(name="Tahoma", size=10)
     al = Alignment(horizontal="center", vertical="center")
-    head1 = [lab for lab, _, _ in HISTORY_EXPORT_COLS] + unused
-    head2 = [src for _, _, src in HISTORY_EXPORT_COLS] + unused
+    head1 = [lab for lab, _, _ in sel_cols] + unused
+    head2 = [src for _, _, src in sel_cols] + unused
     for j, h in enumerate(head1, 1):
         c = ws.cell(row=1, column=j, value=h)
         c.fill, c.font, c.alignment = fill, hfont, al
@@ -253,7 +260,7 @@ def _history_export_xlsx(root: Path, symbol: str | None) -> bytes:
         for row in s["rows"]:
             raw = raw_rows.get((s["name"], row["date_jalali"])) or {}
             vals = [row.get("date_jalali"), s["name"]]
-            vals += [row.get(f) for _, f, _src in HISTORY_EXPORT_COLS[2:]]
+            vals += [row.get(f) for _, f, _src in sel_cols[2:]]
             vals += [raw.get(c) for c in unused]
             for j, v in enumerate(vals, 1):
                 c = ws.cell(row=r, column=j, value=_fmt_compact(v))
@@ -262,7 +269,7 @@ def _history_export_xlsx(root: Path, symbol: str | None) -> bytes:
     for j, w in enumerate([12, 10, 12, 12, 13, 15, 15, 15, 15, 12, 14, 14, 14, 14,
                            12, 14, 14, 14, 14, 14, 18, 12], 1):
         ws.column_dimensions[get_column_letter(j)].width = w
-    for j in range(len(HISTORY_EXPORT_COLS) + 1, len(head1) + 1):
+    for j in range(len(sel_cols) + 1, len(head1) + 1):
         ws.column_dimensions[get_column_letter(j)].width = 13
     ws.freeze_panes = "A3"
     bio = BytesIO()
@@ -510,7 +517,36 @@ class Handler(BaseHTTPRequestHandler):
                     "Content-Type",
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 self.send_header("Content-Length", str(len(xls)))
-                self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+                self.send_header(
+                    "Content-Disposition",
+                    "attachment; filename=\"portfoli_export.xlsx\"; filename*=UTF-8''"
+                    + urllib.parse.quote(fname))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(xls)
+            except Exception as e:
+                self._send(500, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"),
+                           "application/json; charset=utf-8")
+        elif path == "/api/hexport":  # اکسل سابقه با ستون‌های انتخابی داشبورد
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                if n <= 0 or n > 5_000_000:
+                    raise ValueError("درخواست خروجی نامعتبر است")
+                body = json.loads(self.rfile.read(n).decode("utf-8") or "{}")
+                sym = str(body.get("symbol") or "*")
+                xls = _history_export_xlsx(self.root, sym, body.get("cols"))
+                fname = ("سابقهٔ همهٔ نمادها.xlsx" if sym == "*"
+                         else f"سابقهٔ {sym}.xlsx")
+                self.send_response(200)
+                self.send_header(
+                    "Content-Type",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                self.send_header("Content-Length", str(len(xls)))
+                self.send_header(
+                    "Content-Disposition",
+                    "attachment; filename=\"portfoli_export.xlsx\"; filename*=UTF-8''"
+                    + urllib.parse.quote(fname))
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()

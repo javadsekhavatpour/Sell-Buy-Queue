@@ -157,37 +157,37 @@ FIELD_SOURCES = {
     "symbol_status": ("api_symbol_status", "مستقیم از API — instrumentState.cEtavalTitle"),
     "data_status": ("—", "محاسبه: کامل/ناقص از شمار فیلدهای مفقود کلیدی"),
     "fetch_error": ("—", "محاسبه: خطای endpoint در همان نمونه"),
-    "last_price": ("last_price", "مستقیم — pDrCotVal"),
-    "close_price": ("close_price", "مستقیم — pClosing"),
-    "open_price": ("open_price", "مستقیم — priceFirst"),
-    "yesterday_price": ("yesterday_price", "مستقیم — priceYesterday"),
-    "daily_high": ("daily_high", "مستقیم — priceMax"),
-    "daily_low": ("daily_low", "مستقیم — priceMin"),
+    "last_price": ("pl", "مستقیم — pDrCotVal"),
+    "close_price": ("pc", "مستقیم — pClosing"),
+    "open_price": ("pf", "مستقیم — priceFirst"),
+    "yesterday_price": ("py", "مستقیم — priceYesterday"),
+    "daily_high": ("pmax", "مستقیم — priceMax"),
+    "daily_low": ("pmin", "مستقیم — priceMin"),
     "min_allowed_price": ("—", "محاسبه: کف/سقف مجاز از early_warning/price_range.py"),
     "max_allowed_price": ("—", "محاسبه: کف/سقف مجاز از early_warning/price_range.py"),
-    "best_bid": ("buy_price_1", "مستقیم — pMeDem ردیف ۱"),
-    "bid_volume": ("buy_volume_1", "مستقیم — qTitMeDem ردیف ۱"),
-    "best_ask": ("sell_price_1", "مستقیم — pMeOf ردیف ۱"),
-    "ask_volume": ("sell_volume_1", "مستقیم — qTitMeOf ردیف ۱"),
-    "buy_order_count": ("buy_orders_1", "مستقیم — zOrdMeDem ردیف ۱"),
-    "sell_order_count": ("sell_orders_1", "مستقیم — zOrdMeOf ردیف ۱"),
-    "total_volume": ("trade_volume", "مستقیم — qTotTran5J"),
-    "total_value": ("trade_value", "مستقیم — qTotCap (ریال)"),
-    "total_count": ("trade_count", "مستقیم — zTotTran"),
-    "real_buy_count": ("ct_real_buy_count", "مستقیم — buy_CountI"),
-    "real_buy_volume": ("ct_real_buy_volume", "مستقیم — buy_I_Volume"),
-    "real_sell_count": ("ct_real_sell_count", "مستقیم — sell_CountI"),
-    "real_sell_volume": ("ct_real_sell_volume", "مستقیم — sell_I_Volume"),
-    "legal_buy_count": ("ct_legal_buy_count", "مستقیم — buy_CountN"),
-    "legal_buy_volume": ("ct_legal_buy_volume", "مستقیم — buy_N_Volume"),
-    "legal_sell_count": ("ct_legal_sell_count", "مستقیم — sell_CountN"),
-    "legal_sell_volume": ("ct_legal_sell_volume", "مستقیم — sell_N_Volume"),
-    "real_buy_value": ("—", "محاسبه: ct_real_buy_volume × قیمت (close یا last)"),
-    "real_sell_value": ("—", "محاسبه: ct_real_sell_volume × قیمت (close یا last)"),
+    "best_bid": ("pd1", "مستقیم — pMeDem ردیف ۱"),
+    "bid_volume": ("qd1", "مستقیم — qTitMeDem ردیف ۱"),
+    "best_ask": ("po1", "مستقیم — pMeOf ردیف ۱"),
+    "ask_volume": ("qo1", "مستقیم — qTitMeOf ردیف ۱"),
+    "buy_order_count": ("zd1", "مستقیم — zOrdMeDem ردیف ۱"),
+    "sell_order_count": ("zo1", "مستقیم — zOrdMeOf ردیف ۱"),
+    "total_volume": ("tvol", "مستقیم — qTotTran5J"),
+    "total_value": ("tval", "مستقیم — qTotCap (ریال)"),
+    "total_count": ("tno", "مستقیم — zTotTran"),
+    "real_buy_count": ("buy_counti", "مستقیم — (ct).Buy_CountI"),
+    "real_buy_volume": ("buy_i_volume", "مستقیم — (ct).Buy_I_Volume"),
+    "real_sell_count": ("sell_counti", "مستقیم — (ct).Sell_CountI"),
+    "real_sell_volume": ("sell_i_volume", "مستقیم — (ct).Sell_I_Volume"),
+    "legal_buy_count": ("buy_countn", "مستقیم — (ct).Buy_CountN"),
+    "legal_buy_volume": ("buy_n_volume", "مستقیم — (ct).Buy_N_Volume"),
+    "legal_sell_count": ("sell_countn", "مستقیم — (ct).Sell_CountN"),
+    "legal_sell_volume": ("sell_n_volume", "مستقیم — (ct).Sell_N_Volume"),
+    "real_buy_value": ("—", "محاسبه: buy_i_volume × قیمت (pc یا pl)"),
+    "real_sell_value": ("—", "محاسبه: sell_i_volume × قیمت (pc یا pl)"),
     "buyer_power": ("—", "محاسبه: (خرید حقیقی÷تعداد خریدار حقیقی) ÷ (فروش حقیقی÷تعداد فروشنده حقیقی)"),
-    "per_capita_buy_real": ("—", "محاسبه: ct_real_buy_volume ÷ ct_real_buy_count (سرانه خرید)"),
-    "per_capita_sell_real": ("—", "محاسبه: ct_real_sell_volume ÷ ct_real_sell_count (سرانه فروش)"),
-    "real_money_flow": ("—", "محاسبه: (ct_real_buy_volume − ct_real_sell_volume) × قیمت"),
+    "per_capita_buy_real": ("—", "محاسبه: buy_i_volume ÷ buy_counti (سرانه خرید)"),
+    "per_capita_sell_real": ("—", "محاسبه: sell_i_volume ÷ sell_counti (سرانه فروش)"),
+    "real_money_flow": ("—", "محاسبه: (buy_i_volume − sell_i_volume) × قیمت"),
     "real_money_flow_ratio": ("—", "محاسبه: (خرید حقیقی − فروش حقیقی) ÷ (خرید حقیقی + فروش حقیقی) — سهم خالص حقیقی از گردش خودش، بین −۱ تا +۱"),
     "money_flow_ratio_pct": ("—", "محاسبه: ورود پول ÷ trade_value × ۱۰۰ (درصد)"),
     "mf_ratio_5d_pct": ("—", "محاسبه: ورود پول امروز ÷ میانگین |ورود پول| ۵ روز قبل × ۱۰۰"),
@@ -209,10 +209,10 @@ FIELD_SOURCES = {
     "volume_ratio_5d_pct": ("—", "محاسبه: حجم امروز ÷ میانگین حجم ۵ روز قبل × ۱۰۰"),
     "volume_ratio_30d_pct": ("—", "محاسبه: حجم امروز ÷ میانگین حجم ۳۰ روز قبل × ۱۰۰"),
     "buy_sell_amount_side": ("—", "محاسبه: خرید/فروش/تعادل از مقایسهٔ ارزش خرید و فروش حقیقی"),
-    "buyer_seller_count_ratio": ("—", "محاسبه: ct_real_buy_count ÷ ct_real_sell_count"),
+    "buyer_seller_count_ratio": ("—", "محاسبه: buy_counti ÷ sell_counti"),
     "price_reaction_score": ("—", "محاسبه: جای آخرین قیمت در بازهٔ کف تا سقف مجاز (۰ تا ۱۰۰)"),
-    "pct_last": ("—", "محاسبه: (last_price − yesterday_price) ÷ yesterday_price × ۱۰۰"),
-    "pct_close": ("—", "محاسبه: (close_price − yesterday_price) ÷ yesterday_price × ۱۰۰"),
+    "pct_last": ("plp", "مستقیم — plp (بانک)؛ نبود → محاسبه از pl/py"),
+    "pct_close": ("pcp", "مستقیم — pcp (بانک)؛ نبود → محاسبه از pc/py"),
     "flow_ratio_recent_avg": ("—", "محاسبه: میانگین نسبت ورود پول ٪ در N نمونهٔ اخیر"),
     "trend_flow_session": ("—", "محاسبه: شیب رگرسیون سری ورود پول کل جلسه، نرمال به دامنه — آستانه ±۰٫۱۵/±۰٫۵"),
     "trend_flow_recent": ("—", "محاسبه: همان، فقط روی N نمونهٔ اخیر"),
@@ -221,12 +221,12 @@ FIELD_SOURCES = {
     "trend_divergence": ("—", "محاسبه: جهت روند اخیر مخالف جهت روند جلسه (مبنای هایلایت سطر)"),
 }
 for i in range(1, 6):
-    FIELD_SOURCES[f"bid_price_{i}"] = (f"buy_price_{i}", f"مستقیم — pMeDem ردیف {i}")
-    FIELD_SOURCES[f"bid_vol_{i}"] = (f"buy_volume_{i}", f"مستقیم — qTitMeDem ردیف {i}")
-    FIELD_SOURCES[f"bid_count_{i}"] = (f"buy_orders_{i}", f"مستقیم — zOrdMeDem ردیف {i}")
-    FIELD_SOURCES[f"ask_price_{i}"] = (f"sell_price_{i}", f"مستقیم — pMeOf ردیف {i}")
-    FIELD_SOURCES[f"ask_vol_{i}"] = (f"sell_volume_{i}", f"مستقیم — qTitMeOf ردیف {i}")
-    FIELD_SOURCES[f"ask_count_{i}"] = (f"sell_orders_{i}", f"مستقیم — zOrdMeOf ردیف {i}")
+    FIELD_SOURCES[f"bid_price_{i}"] = (f"pd{i}", f"مستقیم — pMeDem ردیف {i}")
+    FIELD_SOURCES[f"bid_vol_{i}"] = (f"qd{i}", f"مستقیم — qTitMeDem ردیف {i}")
+    FIELD_SOURCES[f"bid_count_{i}"] = (f"zd{i}", f"مستقیم — zOrdMeDem ردیف {i}")
+    FIELD_SOURCES[f"ask_price_{i}"] = (f"po{i}", f"مستقیم — pMeOf ردیف {i}")
+    FIELD_SOURCES[f"ask_vol_{i}"] = (f"qo{i}", f"مستقیم — qTitMeOf ردیف {i}")
+    FIELD_SOURCES[f"ask_count_{i}"] = (f"zo{i}", f"مستقیم — zOrdMeOf ردیف {i}")
 
 # ستون‌های محاسبه‌ای «بی‌نام» نمی‌مانند — نام قراردادی calc_<فیلد> می‌گیرند
 # تا در سطر دوم هدر اکسل و شیت راهنما قابل ارجاع باشند.
@@ -265,9 +265,9 @@ def _raw_phase(trading_hours: dict, hm: str) -> str:
     return "بسته"
 
 
-_DAILY_COLS = ("date_jalali, ct_real_buy_value, ct_real_sell_value, "
-               "ct_real_buy_volume, ct_real_sell_volume, "
-               "ct_real_buy_count, ct_real_sell_count, close_price, trade_volume")
+_DAILY_COLS = ("date_jalali, buy_i_value, sell_i_value, "
+               "buy_i_volume, sell_i_volume, "
+               "buy_counti, sell_counti, pc, tvol")
 
 
 def _signed_power(ratio: float | None) -> float | None:
@@ -332,10 +332,10 @@ def _daily_stats(db_path: Path, today: str | None, symbol: str | None = None) ->
         rows = _daily_rows(db_path, today)
     me, vols, powers = [], [], []
     for r in rows[:60]:
-        bv, sv = r["ct_real_buy_value"], r["ct_real_sell_value"]
-        bc, sc = r["ct_real_buy_count"], r["ct_real_sell_count"]
+        bv, sv = r["buy_i_value"], r["sell_i_value"]
+        bc, sc = r["buy_counti"], r["sell_counti"]
         me.append((bv - sv) if (bv is not None and sv is not None) else None)
-        vols.append(float(r["trade_volume"] or 0))
+        vols.append(float(r["tvol"] or 0))
         # نسبت خام روز (همیشه مثبت) — علامت‌دار کردن فقط در نمایش/خروجی
         powers.append(((bv / bc) / (sv / sc))
                       if (bv and sv and bc and sc) else None)
@@ -451,8 +451,8 @@ def _session_trends(raw_db: Path, window: int = TREND_WINDOW_DEFAULT) -> dict:
     con = sqlite3.connect(str(raw_db))
     try:
         rows = con.execute(
-            "SELECT ct_real_buy_volume, ct_real_sell_volume, ct_real_buy_count, "
-            "ct_real_sell_count, trade_value, close_price, last_price "
+            "SELECT buy_i_volume, sell_i_volume, buy_counti, "
+            "sell_counti, tval, pc, pl "
             "FROM raw_snapshots WHERE date_jalali = (SELECT MAX(date_jalali) "
             "FROM raw_snapshots) ORDER BY id"
         ).fetchall()
@@ -474,24 +474,27 @@ def _compute_row(row: dict, name: str, s: dict, root: Path, raw_db: Path, r) -> 
 
     row باید از قبل کلیدهای ALL_FIELDS را داشته باشد؛ این تابع مقادیر را پر می‌کند.
     """
+    if not isinstance(r, dict):
+        r = dict(r)  # sqlite3.Row → dict — خوانش .get امن می‌شود
+
     def g(key, default=None):
         v = r[key]
         return default if v is None else v
 
-    last_p = float(g("last_price") or 0)
-    close_p = float(g("close_price") or 0)
-    yest_p = float(g("yesterday_price") or 0)
+    last_p = float(g("pl") or 0)
+    close_p = float(g("pc") or 0)
+    yest_p = float(g("py") or 0)
     px = close_p if close_p > 0 else last_p
 
-    rbv = int(g("ct_real_buy_volume") or 0)
-    rsv = int(g("ct_real_sell_volume") or 0)
-    rbc = int(g("ct_real_buy_count") or 0)
-    rsc = int(g("ct_real_sell_count") or 0)
-    lbv = int(g("ct_legal_buy_volume") or 0)
-    lsv = int(g("ct_legal_sell_volume") or 0)
-    lbc = int(g("ct_legal_buy_count") or 0)
-    lsc = int(g("ct_legal_sell_count") or 0)
-    tval = float(g("trade_value") or 0)
+    rbv = int(g("buy_i_volume") or 0)
+    rsv = int(g("sell_i_volume") or 0)
+    rbc = int(g("buy_counti") or 0)
+    rsc = int(g("sell_counti") or 0)
+    lbv = int(g("buy_n_volume") or 0)
+    lsv = int(g("sell_n_volume") or 0)
+    lbc = int(g("buy_countn") or 0)
+    lsc = int(g("sell_countn") or 0)
+    tval = float(g("tval") or 0)
 
     row.update({
         "date_jalali": g("date_jalali"),
@@ -502,19 +505,19 @@ def _compute_row(row: dict, name: str, s: dict, root: Path, raw_db: Path, r) -> 
         "symbol_status": g("api_symbol_status"),
         "last_price": int(last_p) if last_p else None,
         "close_price": int(close_p) if close_p else None,
-        "open_price": int(float(g("open_price") or 0)) or None,
+        "open_price": int(float(g("pf") or 0)) or None,
         "yesterday_price": int(yest_p) if yest_p else None,
-        "daily_high": int(float(g("daily_high") or 0)) or None,
-        "daily_low": int(float(g("daily_low") or 0)) or None,
-        "best_bid": int(float(g("buy_price_1") or 0)) or None,
-        "bid_volume": int(g("buy_volume_1") or 0) or None,
-        "best_ask": int(float(g("sell_price_1") or 0)) or None,
-        "ask_volume": int(g("sell_volume_1") or 0) or None,
-        "buy_order_count": int(g("buy_orders_1") or 0) or None,
-        "sell_order_count": int(g("sell_orders_1") or 0) or None,
-        "total_volume": int(g("trade_volume") or 0) or None,
+        "daily_high": int(float(g("pmax") or 0)) or None,
+        "daily_low": int(float(g("pmin") or 0)) or None,
+        "best_bid": int(float(g("pd1") or 0)) or None,
+        "bid_volume": int(g("qd1") or 0) or None,
+        "best_ask": int(float(g("po1") or 0)) or None,
+        "ask_volume": int(g("qo1") or 0) or None,
+        "buy_order_count": int(g("zd1") or 0) or None,
+        "sell_order_count": int(g("zo1") or 0) or None,
+        "total_volume": int(g("tvol") or 0) or None,
         "total_value": int(tval) if tval else None,
-        "total_count": int(g("trade_count") or 0) or None,
+        "total_count": int(g("tno") or 0) or None,
         "real_buy_count": rbc or None,
         "real_buy_volume": rbv or None,
         "real_buy_value": int(rbv * px) if (rbv and px) else None,
@@ -529,12 +532,12 @@ def _compute_row(row: dict, name: str, s: dict, root: Path, raw_db: Path, r) -> 
         "legal_sell_value": int(lsv * px) if (lsv and px) else None,
     })
     for i in range(1, 6):
-        row[f"bid_price_{i}"] = int(float(g(f"buy_price_{i}") or 0)) or None
-        row[f"bid_vol_{i}"] = int(g(f"buy_volume_{i}") or 0) or None
-        row[f"bid_count_{i}"] = int(g(f"buy_orders_{i}") or 0) or None
-        row[f"ask_price_{i}"] = int(float(g(f"sell_price_{i}") or 0)) or None
-        row[f"ask_vol_{i}"] = int(g(f"sell_volume_{i}") or 0) or None
-        row[f"ask_count_{i}"] = int(g(f"sell_orders_{i}") or 0) or None
+        row[f"bid_price_{i}"] = int(float(g(f"pd{i}") or 0)) or None
+        row[f"bid_vol_{i}"] = int(g(f"qd{i}") or 0) or None
+        row[f"bid_count_{i}"] = int(g(f"zd{i}") or 0) or None
+        row[f"ask_price_{i}"] = int(float(g(f"po{i}") or 0)) or None
+        row[f"ask_vol_{i}"] = int(g(f"qo{i}") or 0) or None
+        row[f"ask_count_{i}"] = int(g(f"zo{i}") or 0) or None
 
     # شاخص‌های مشتق — همان فرمول‌های data_collector.py
     pc_buy = rbv / max(rbc, 1)
@@ -550,11 +553,15 @@ def _compute_row(row: dict, name: str, s: dict, root: Path, raw_db: Path, r) -> 
     # — چون ClientType ارزش ریالی نمی‌دهد، قیمت واحد (px) از صورت و مخرج حذف می‌شود.
     real_turnover = rbv + rsv
     row["real_money_flow_ratio"] = round((rbv - rsv) / real_turnover, 4) if real_turnover else None
-    if yest_p > 0:
-        if last_p:
-            row["pct_last"] = round((last_p - yest_p) / yest_p * 100, 2)
-        if close_p:
-            row["pct_close"] = round((close_p - yest_p) / yest_p * 100, 2)
+    # درصد تغییر — اول فیلد نمایشی بانک (plp/pcp)، نبود → محاسبه از pl/pc/py
+    if r.get("plp") is not None:
+        row["pct_last"] = float(r["plp"])
+    elif yest_p > 0 and last_p:
+        row["pct_last"] = round((last_p - yest_p) / yest_p * 100, 2)
+    if r.get("pcp") is not None:
+        row["pct_close"] = float(r["pcp"])
+    elif yest_p > 0 and close_p:
+        row["pct_close"] = round((close_p - yest_p) / yest_p * 100, 2)
 
     # کف/سقف مجاز از ماژول پروژه
     if yest_p > 0:
@@ -578,7 +585,7 @@ def _compute_row(row: dict, name: str, s: dict, root: Path, raw_db: Path, r) -> 
         row["mf_ratio_5d_pct"] = round(flow / ds["flow5_avg_abs"] * 100, 2)
     if ds["flow30_avg_abs"] > 0 and (rbv or rsv):
         row["mf_ratio_30d_pct"] = round(flow / ds["flow30_avg_abs"] * 100, 2)
-    tvol = float(g("trade_volume") or 0)
+    tvol = float(g("tvol") or 0)
     if ds["vol5_avg"] > 0 and tvol:
         row["volume_ratio_5d_pct"] = round(tvol / ds["vol5_avg"] * 100, 1)
     if ds["vol30_avg"] > 0 and tvol:

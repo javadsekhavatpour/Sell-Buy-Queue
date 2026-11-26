@@ -29,10 +29,9 @@ ROOT = Path(__file__).resolve().parent
 
 # فیلدهای قیمتی — صفر/NULL در آن‌ها هنگام نمایش قرمز می‌شود
 PRICE_FIELDS = {
-    "last_price", "close_price", "open_price", "yesterday_price",
-    "daily_high", "daily_low",
-    "buy_price_1", "buy_price_2", "buy_price_3", "buy_price_4", "buy_price_5",
-    "sell_price_1", "sell_price_2", "sell_price_3", "sell_price_4", "sell_price_5",
+    "pl", "pc", "pf", "py", "pmax", "pmin",
+    "pd1", "pd2", "pd3", "pd4", "pd5",
+    "po1", "po2", "po3", "po4", "po5",
 }
 
 LABELS = {
@@ -40,26 +39,26 @@ LABELS = {
     "api_last_trade_time": "آخرین معاملهٔ لایو (TSETMC)",
     "api_symbol_status": "وضعیت نماد",
     "api_date": "تاریخ API",
-    "last_price": "آخرین قیمت",
-    "close_price": "قیمت پایانی",
-    "open_price": "اولین قیمت",
-    "yesterday_price": "قیمت دیروز",
-    "daily_high": "بیشترین امروز",
-    "daily_low": "کمترین امروز",
-    "trade_volume": "حجم کل",
-    "trade_value": "ارزش کل (ریال)",
-    "trade_count": "تعداد معاملات",
+    "pl": "آخرین قیمت",
+    "pc": "قیمت پایانی",
+    "pf": "اولین قیمت",
+    "py": "قیمت دیروز",
+    "pmax": "بیشترین امروز",
+    "pmin": "کمترین امروز",
+    "tvol": "حجم کل",
+    "tval": "ارزش کل (ریال)",
+    "tno": "تعداد معاملات",
 }
 
 CT_FIELDS = [
-    ("ct_real_buy_volume", "حجم خرید حقیقی"),
-    ("ct_real_sell_volume", "حجم فروش حقیقی"),
-    ("ct_legal_buy_volume", "حجم خرید حقوقی"),
-    ("ct_legal_sell_volume", "حجم فروش حقوقی"),
-    ("ct_real_buy_count", "تعداد خریداران حقیقی"),
-    ("ct_real_sell_count", "تعداد فروشندگان حقیقی"),
-    ("ct_legal_buy_count", "تعداد خریداران حقوقی"),
-    ("ct_legal_sell_count", "تعداد فروشندگان حقوقی"),
+    ("buy_i_volume", "حجم خرید حقیقی"),
+    ("sell_i_volume", "حجم فروش حقیقی"),
+    ("buy_n_volume", "حجم خرید حقوقی"),
+    ("sell_n_volume", "حجم فروش حقوقی"),
+    ("buy_counti", "تعداد خریداران حقیقی"),
+    ("sell_counti", "تعداد فروشندگان حقیقی"),
+    ("buy_countn", "تعداد خریداران حقوقی"),
+    ("sell_countn", "تعداد فروشندگان حقوقی"),
 ]
 
 PAGE = r"""<!DOCTYPE html>
@@ -191,8 +190,9 @@ async function load(){
     }).join('');
     document.getElementById('cards').innerHTML = cards;
     // سفارش‌ها
+    const OB_P = {buy:'pd', sell:'po'}, OB_V = {buy:'qd', sell:'qo'}, OB_C = {buy:'zd', sell:'zo'};
     const ob = (side) => [1,2,3,4,5].map(i =>
-      `<tr><td>${fa(i)}</td>${cell(side+'_price_'+i, L[side+'_price_'+i])}${cell(side+'_volume_'+i, L[side+'_volume_'+i])}${cell(side+'_orders_'+i, L[side+'_orders_'+i])}</tr>`).join('');
+      `<tr><td>${fa(i)}</td>${cell(OB_P[side]+i, L[OB_P[side]+i])}${cell(OB_V[side]+i, L[OB_V[side]+i])}${cell(OB_C[side]+i, L[OB_C[side]+i])}</tr>`).join('');
     document.getElementById('buys').innerHTML =
       '<tr><th>ردیف</th><th>قیمت</th><th>حجم</th><th>تعداد سفارش</th></tr>' + ob('buy');
     document.getElementById('sells').innerHTML =
@@ -201,12 +201,12 @@ async function load(){
       '<tr><th>شرح</th><th>مقدار (خام)</th></tr>' +
       %CT_FIELDS%.map(([k,t]) => `<tr><td style="text-align:right">${t}</td>${cell(k,L[k])}</tr>`).join('');
     // تاریخچه
-    const H = ['fetch_hms','api_last_trade_time','last_price','close_price','open_price',
-               'yesterday_price','trade_volume','buy_price_1','sell_price_1'];
+    const H = ['fetch_hms','api_last_trade_time','pl','pc','pf',
+               'py','tvol','pd1','po1'];
     document.getElementById('hist').innerHTML =
       '<tr><th>دریافت</th><th>معاملهٔ لایو</th><th>آخرین</th><th>پایانی</th><th>اولین</th><th>دیروز</th><th>حجم</th><th>bid1</th><th>ask1</th></tr>' +
       (d.rows||[]).map(r => `<tr><td>${r.fetch_hms||'—'}</td><td>${r.api_last_trade_time||'—'}</td>` +
-        ['last_price','close_price','open_price','yesterday_price','trade_volume','buy_price_1','sell_price_1']
+        ['pl','pc','pf','py','tvol','pd1','po1']
         .map(k => cell(k,r[k])).join('') + '</tr>').join('');
   } catch(e) {
     document.getElementById('fresh').textContent = 'خطای خواندن بانک: ' + e.message;

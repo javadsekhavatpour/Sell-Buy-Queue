@@ -367,8 +367,8 @@ def _raw_yesterday_price(symbol: str) -> float:
     con = sqlite3.connect(str(raw_db))
     try:
         r = con.execute(
-            "SELECT yesterday_price FROM raw_snapshots "
-            "WHERE yesterday_price IS NOT NULL AND yesterday_price > 0 "
+            "SELECT py FROM raw_snapshots "
+            "WHERE py IS NOT NULL AND py > 0 "
             "ORDER BY id DESC LIMIT 1"
         ).fetchone()
     finally:
@@ -484,22 +484,22 @@ def fetch_from_raw(symbol: str, prev_snap, fixed_range: dict,
             v = row[key]
             return default if v is None else v
 
-        yp = float(g("yesterday_price") or 0)
-        last_p = float(g("last_price") or 0)
-        close_p = float(g("close_price") or 0)
-        open_p = float(g("open_price") or 0)
+        yp = float(g("py") or 0)
+        last_p = float(g("pl") or 0)
+        close_p = float(g("pc") or 0)
+        open_p = float(g("pf") or 0)
         buy_rows, sell_rows = [], []
         for i in range(1, 6):
-            bp = float(g(f"buy_price_{i}") or 0)
+            bp = float(g(f"pd{i}") or 0)
             if bp > 0:
                 buy_rows.append(BestLimitRow(
-                    price=bp, volume=int(g(f"buy_volume_{i}")),
-                    order_count=max(1, int(g(f"buy_orders_{i}")))))
-            sp = float(g(f"sell_price_{i}") or 0)
+                    price=bp, volume=int(g(f"qd{i}")),
+                    order_count=max(1, int(g(f"zd{i}")))))
+            sp = float(g(f"po{i}") or 0)
             if sp > 0:
                 sell_rows.append(BestLimitRow(
-                    price=sp, volume=int(g(f"sell_volume_{i}")),
-                    order_count=max(1, int(g(f"sell_orders_{i}")))))
+                    price=sp, volume=int(g(f"qo{i}")),
+                    order_count=max(1, int(g(f"zo{i}")))))
         snap = MarketSnapshot(
             date_jalali=row["date_jalali"] or "",
             timestamp=row["fetch_time"] or "",
@@ -515,29 +515,29 @@ def fetch_from_raw(symbol: str, prev_snap, fixed_range: dict,
             close_price=close_p or yp,
             open_price=open_p or yp,
             yesterday_price=yp,
-            daily_high=float(g("daily_high") or 0),
-            daily_low=float(g("daily_low") or 0),
+            daily_high=float(g("pmax") or 0),
+            daily_low=float(g("pmin") or 0),
             min_allowed_price=float((fixed_range or {}).get("min_allowed_price", 0) or 0),
             max_allowed_price=float((fixed_range or {}).get("max_allowed_price", 0) or 0),
             base_volume=0,  # حجم مبنا در بانک خام نیست (هیچ موتوری از آن استفاده نمی‌کند)
-            best_buy_price=float(g("buy_price_1") or 0),
-            best_buy_volume=int(g("buy_volume_1") or 0),
-            best_sell_price=float(g("sell_price_1") or 0),
-            best_sell_volume=int(g("sell_volume_1") or 0),
+            best_buy_price=float(g("pd1") or 0),
+            best_buy_volume=int(g("qd1") or 0),
+            best_sell_price=float(g("po1") or 0),
+            best_sell_volume=int(g("qo1") or 0),
             buy_rows=buy_rows,
             sell_rows=sell_rows,
             buy_order_count=sum(r.order_count for r in buy_rows),
             sell_order_count=sum(r.order_count for r in sell_rows),
-            total_volume=int(g("trade_volume") or 0),
-            total_value=float(g("trade_value") or 0) or (last_p * int(g("trade_volume") or 0)),
-            total_trade_count=int(g("trade_count") or 0),
-            real_buy_volume=int(g("ct_real_buy_volume") or 0),
-            real_sell_volume=int(g("ct_real_sell_volume") or 0),
-            legal_buy_volume=int(g("ct_legal_buy_volume") or 0),
-            legal_sell_volume=int(g("ct_legal_sell_volume") or 0),
-            real_buy_count=int(g("ct_real_buy_count") or 0),
-            real_sell_count=int(g("ct_real_sell_count") or 0),
-            legal_buy_count=int(g("ct_legal_buy_count") or 0),
+            total_volume=int(g("tvol") or 0),
+            total_value=float(g("tval") or 0) or (last_p * int(g("tvol") or 0)),
+            total_trade_count=int(g("tno") or 0),
+            real_buy_volume=int(g("buy_i_volume") or 0),
+            real_sell_volume=int(g("sell_i_volume") or 0),
+            legal_buy_volume=int(g("buy_n_volume") or 0),
+            legal_sell_volume=int(g("sell_n_volume") or 0),
+            real_buy_count=int(g("buy_counti") or 0),
+            real_sell_count=int(g("sell_counti") or 0),
+            legal_buy_count=int(g("buy_countn") or 0),
             legal_sell_count=int(g("ct_legal_sell_count") or 0),
         )
         # تشخیص پاسخ تکراری CDN — همان قاعدهٔ حالت لایو

@@ -13,18 +13,19 @@ raw_collector.py — جمع‌آورِ دادهٔ خام (نسخهٔ ایزول�
     (NULL = «دریافت نشد»، به‌صورت «—» در داشبورد) — نه صفر ساختگی.
   - پیش‌فرض هر ۳۰ ثانیه (با --interval قابل تغییر برای تست).
 
-فیلدهای دریافت‌شده از لایو (مپ ۱:۱ با کلیدهای API):
+فیلدهای دریافت‌شده از لایو (مپ ۱:۱ با کلیدهای API — نام ستون بانک = کد فیلتر
+TSETMC، مطابق tse_fields.py):
 
   ClosingPrice/GetClosingPriceInfo/{insCode}
-    pDrCotVal      → last_price        (آخرین قیمت معامله)
-    pClosing       → close_price       (قیمت پایانی)
-    priceFirst     → open_price        (اولین قیمت روز)
-    priceYesterday → yesterday_price   (قیمت دیروز)
-    priceMax       → daily_high        (بیشترین قیمت روز)
-    priceMin       → daily_low         (کمترین قیمت روز)
-    qTotTran5J     → trade_volume      (حجم کل معاملات)
-    qTotCap        → trade_value       (ارزش کل - ریال)
-    zTotTran       → trade_count       (تعداد معاملات)
+    pDrCotVal      → pl           (آخرین قیمت معامله)
+    pClosing       → pc           (قیمت پایانی)
+    priceFirst     → pf           (اولین قیمت روز)
+    priceYesterday → py           (قیمت دیروز)
+    priceMax       → pmax         (بیشترین قیمت روز)
+    priceMin       → pmin         (کمترین قیمت روز)
+    qTotTran5J     → tvol         (حجم کل معاملات)
+    qTotCap        → tval         (ارزش کل - ریال)
+    zTotTran       → tno          (تعداد معاملات)
     hEven          → api_last_trade_time (ساعت آخرین معامله طبق TSETMC)
     dEven          → api_date          (تاریخ پاسخ API - میلادی yyyymmdd)
     instrumentState.cEtavalTitle → api_symbol_status (مجاز/مسدود/...)
@@ -72,36 +73,35 @@ sys.path.insert(0, str(ROOT))
 from early_warning.data_collector import MarketDataCollector
 from early_warning.market_detector import tehran_now
 from early_warning.price_range import to_jalali
+from tse_fields import derived_values as tse_derived  # فیلدهای نمایشی TSETMC
 
 # ترتیب ستون‌های جدول خام — هر ستون یا مستقیم از API است یا شناسهٔ ثبت
 COLUMNS = [
     "fetch_time", "fetch_hms", "date_jalali", "symbol", "ins_code",
     "api_date", "api_last_trade_time", "api_symbol_status",
-    "last_price", "close_price", "open_price", "yesterday_price",
-    "daily_high", "daily_low",
-    "trade_volume", "trade_value", "trade_count",
-    "buy_price_1", "buy_volume_1", "buy_orders_1",
-    "buy_price_2", "buy_volume_2", "buy_orders_2",
-    "buy_price_3", "buy_volume_3", "buy_orders_3",
-    "buy_price_4", "buy_volume_4", "buy_orders_4",
-    "buy_price_5", "buy_volume_5", "buy_orders_5",
-    "sell_price_1", "sell_volume_1", "sell_orders_1",
-    "sell_price_2", "sell_volume_2", "sell_orders_2",
-    "sell_price_3", "sell_volume_3", "sell_orders_3",
-    "sell_price_4", "sell_volume_4", "sell_orders_4",
-    "sell_price_5", "sell_volume_5", "sell_orders_5",
-    "ct_real_buy_volume", "ct_real_sell_volume",
-    "ct_legal_buy_volume", "ct_legal_sell_volume",
-    "ct_real_buy_count", "ct_real_sell_count",
-    "ct_legal_buy_count", "ct_legal_sell_count",
+    # قیمت‌ها و معاملات — کدهای فیلترنویسی TSETMC (تغییر نام از نسخهٔ قبل)
+    "pl", "pc", "pf", "py", "pmax", "pmin",
+    "plc", "plp", "pcc", "pcp",   # نمایشی — از pl/pc/py در لحظهٔ دریافت
+    "tvol", "tval", "tno",
+    # صف سفارش‌ها — pd/qd/zd خرید، po/qo/zo فروش (۱ تا ۵)
+    "pd1", "qd1", "zd1", "pd2", "qd2", "zd2", "pd3", "qd3", "zd3",
+    "pd4", "qd4", "zd4", "pd5", "qd5", "zd5",
+    "po1", "qo1", "zo1", "po2", "qo2", "zo2", "po3", "qo3", "zo3",
+    "po4", "qo4", "zo4", "po5", "qo5", "zo5",
+    # حقیقی/حقوقی — فرم فیلتر (ct).Buy_I_Volume و …
+    "buy_i_volume", "sell_i_volume", "buy_n_volume", "sell_n_volume",
+    "buy_counti", "sell_counti", "buy_countn", "sell_countn",
 ]
 
 
 def init_db(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
+    real = {"pl", "pc", "pf", "py", "pmax", "pmin", "tval",
+            "plc", "plp", "pcc", "pcp",
+            "pd1", "pd2", "pd3", "pd4", "pd5", "po1", "po2", "po3", "po4", "po5"}
     cols = ",\n    ".join(
-        f"{c} {'TEXT' if c in ('fetch_time', 'fetch_hms', 'date_jalali', 'symbol', 'ins_code', 'api_date', 'api_last_trade_time', 'api_symbol_status') else 'REAL' if c in ('last_price', 'close_price', 'open_price', 'yesterday_price', 'daily_high', 'daily_low', 'trade_value') else 'INTEGER'}"
+        f"{c} {'TEXT' if c in ('fetch_time', 'fetch_hms', 'date_jalali', 'symbol', 'ins_code', 'api_date', 'api_last_trade_time', 'api_symbol_status') else 'REAL' if c in real else 'INTEGER'}"
         for c in COLUMNS
     )
     conn.execute(
@@ -160,15 +160,17 @@ def fetch_raw(c: MarketDataCollector, ins_code: str) -> dict | None:
     row["api_last_trade_time"] = _fmt_heven(info.get("hEven"))
     st = info.get("instrumentState") or {}
     row["api_symbol_status"] = str(st.get("cEtavalTitle") or "") or None
-    row["last_price"] = _num(info.get("pDrCotVal"))
-    row["close_price"] = _num(info.get("pClosing"))
-    row["open_price"] = _num(info.get("priceFirst"))
-    row["yesterday_price"] = _num(info.get("priceYesterday"))
-    row["daily_high"] = _num(info.get("priceMax"))
-    row["daily_low"] = _num(info.get("priceMin"))
-    row["trade_volume"] = _int(info.get("qTotTran5J"))
-    row["trade_value"] = _num(info.get("qTotCap"))
-    row["trade_count"] = _int(info.get("zTotTran"))
+    row["pl"] = _num(info.get("pDrCotVal"))         # pl — آخرین قیمت معامله
+    row["pc"] = _num(info.get("pClosing"))          # قیمت پایانی
+    row["pf"] = _num(info.get("priceFirst"))        # اولین قیمت
+    row["py"] = _num(info.get("priceYesterday"))    # قیمت دیروز
+    row["pmax"] = _num(info.get("priceMax"))        # بیشترین روز
+    row["pmin"] = _num(info.get("priceMin"))        # کمترین روز
+    row["tvol"] = _int(info.get("qTotTran5J"))      # حجم معاملات
+    row["tval"] = _num(info.get("qTotCap"))         # ارزش معاملات (ریال)
+    row["tno"] = _int(info.get("zTotTran"))         # تعداد معاملات
+    # فیلدهای نمایشی TSETMC — همان اعدادی که دیده‌بان سایت نشان می‌دهد
+    row.update(tse_derived(row["pl"], row["pc"], row["py"]))
 
     # ── ۵ ردیف سفارش خرید/فروش (به ترتیب پاسخ API؛ خالی → NULL) ──
     lim = c._api_get(f"BestLimits/{ins_code}")
@@ -184,28 +186,28 @@ def fetch_raw(c: MarketDataCollector, ins_code: str) -> dict | None:
         sp, sv, sc = r.get("pMeOf"), r.get("qTitMeOf"), r.get("zOrdMeOf")
         if bp and b < 5:
             b += 1
-            row[f"buy_price_{b}"] = _num(bp)
-            row[f"buy_volume_{b}"] = _num(bv)
-            row[f"buy_orders_{b}"] = _int(bc)
+            row[f"pd{b}"] = _num(bp)     # قیمت خرید ردیف b
+            row[f"qd{b}"] = _num(bv)     # حجم خرید ردیف b
+            row[f"zd{b}"] = _int(bc)     # تعداد خریدار ردیف b
         if sp and s < 5:
             s += 1
-            row[f"sell_price_{s}"] = _num(sp)
-            row[f"sell_volume_{s}"] = _num(sv)
-            row[f"sell_orders_{s}"] = _int(sc)
+            row[f"po{s}"] = _num(sp)     # قیمت فروش ردیف s
+            row[f"qo{s}"] = _num(sv)     # حجم فروش ردیف s
+            row[f"zo{s}"] = _int(sc)     # تعداد فروشنده ردیف s
 
     # ── حقیقی/حقوقی — کلیدهای mapped خروجی fetch_clienttype؛ خطا → همه NULL ──
     try:
         ct = c.fetch_clienttype(ins_code) or {}
     except Exception:
         ct = {}
-    row["ct_real_buy_volume"] = _num(ct.get("real_buy_volume"))
-    row["ct_legal_buy_volume"] = _num(ct.get("legal_buy_volume"))
-    row["ct_real_sell_volume"] = _num(ct.get("real_sell_volume"))
-    row["ct_legal_sell_volume"] = _num(ct.get("legal_sell_volume"))
-    row["ct_real_buy_count"] = _int(ct.get("real_buy_count"))
-    row["ct_legal_buy_count"] = _int(ct.get("legal_buy_count"))
-    row["ct_real_sell_count"] = _int(ct.get("real_sell_count"))
-    row["ct_legal_sell_count"] = _int(ct.get("legal_sell_count"))
+    row["buy_i_volume"] = _num(ct.get("real_buy_volume"))    # (ct).Buy_I_Volume
+    row["buy_n_volume"] = _num(ct.get("legal_buy_volume"))   # (ct).Buy_N_Volume
+    row["sell_i_volume"] = _num(ct.get("real_sell_volume"))  # (ct).Sell_I_Volume
+    row["sell_n_volume"] = _num(ct.get("legal_sell_volume"))  # (ct).Sell_N_Volume
+    row["buy_counti"] = _int(ct.get("real_buy_count"))       # (ct).Buy_CountI
+    row["buy_countn"] = _int(ct.get("legal_buy_count"))      # (ct).Buy_CountN
+    row["sell_counti"] = _int(ct.get("real_sell_count"))     # (ct).Sell_CountI
+    row["sell_countn"] = _int(ct.get("legal_sell_count"))    # (ct).Sell_CountN
     return row
 
 
@@ -315,9 +317,9 @@ def main():
                 )
                 conn.commit()
                 n_ok += 1
-                print(f"  [{row['fetch_hms']}] ✓ {n} | last={row['last_price']} open={row['open_price']} "
-                      f"close={row['close_price']} | معاملهٔ لایو: {row['api_last_trade_time']} | "
-                      f"bid1={row['buy_price_1']} ask1={row['sell_price_1']}")
+                print(f"  [{row['fetch_hms']}] ✓ {n} | pl={row['pl']} pf={row['pf']} "
+                      f"pc={row['pc']} | معاملهٔ لایو: {row['api_last_trade_time']} | "
+                      f"bid1={row['pd1']} ask1={row['po1']}")
             if not any_window:
                 print(f"  [{now.strftime('%H:%M:%S')}] … خارج از تایم‌کاری — همهٔ {len(selected)} نماد رد شد "
                       f"(فقط preopen/continuous رکورد می‌شود)")
