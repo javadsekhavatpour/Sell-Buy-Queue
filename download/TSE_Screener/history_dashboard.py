@@ -9,25 +9,28 @@ history_dashboard.py — محاسبهٔ شاخص‌های سابقهٔ روزا�
 پس ورود پول با ارزش واقعی حساب می‌شود — نسخهٔ بدون تقریبِ همان فرمول
 (در لایو ارزش نداریم و (حجم × قیمت پایانی) استفاده می‌شود).
 
-ستون‌های داشبورد سابقه (ترتیب درخواست کاربر):
+ستون‌های داشبورد سابقه (ترتیب درخواست کاربر) — همهٔ میانگین‌ها «وزنی»:
+جمع تجمیعی اجزا روی پنجرهٔ روزهای قبل، نه میانگین سادهٔ مقادیر روزانه:
+
   close_price      قیمت پایانی
   pct_close        ٪ نوسان پایانی          = (پایانی − دیروز) ÷ دیروز × ۱۰۰
   flow_rial        ورود پول (ریال)        = خرید حقیقی − فروش حقیقی (ارزش واقعی TSE)
-  flow_avg5_rial   میانگین ۵ روزه ورود پول = میانگین جریانِ ۵ روز قبل (بدون امروز)
-  flow_avg20_rial  میانگین ۲۰ روزه ورود پول = همان با ۲۰ روز قبل
-  flow_avg30_rial  میانگین ۳۰ روزه ورود پول = همان با ۳۰ روز قبل
+  flow_avg5_rial   میانگین وزنی ۵ روزه ورود پول = (Σ ارزش خرید − Σ ارزش فروش) ÷ تعداد روز
+  flow_avg20_rial  میانگین وزنی ۲۰ روزه ورود پول = همان با ۲۰ روز قبل
+  flow_avg30_rial  میانگین وزنی ۳۰ روزه ورود پول = همان با ۳۰ روز قبل
   trade_volume     حجم روز                  = qTotTran5J (کل حجم معاملات روز)
-  vol_avg5         میانگین ۵ روزه حجم       = میانگین حجم ۵ روز قبل (پنجرهٔ کامل)
-  vol_avg10        میانگین ۱۰ روزه حجم      = همان با ۱۰ روز قبل
-  vol_avg20        میانگین ۲۰ روزه حجم      = همان با ۲۰ روز قبل
-  vol_avg30        میانگین ۳۰ روزه حجم      = همان با ۳۰ روز قبل
+  vol_avg5         میانگین وزنی ۵ روزه حجم  = Σ حجم ÷ تعداد روز (پنجرهٔ کامل)
+  vol_avg10        میانگین وزنی ۱۰ روزه حجم = همان با ۱۰ روز قبل
+  vol_avg20        میانگین وزنی ۲۰ روزه حجم = همان با ۲۰ روز قبل
+  vol_avg30        میانگین وزنی ۳۰ روزه حجم = همان با ۳۰ روز قبل
   buy_power        قدرت خرید روز            = علامت‌دار: (ارزش خرید ÷ تعداد خریداران) ÷
                                               (ارزش فروش ÷ تعداد فروشندگان)؛ نسبت < ۱ ← معکوس
                                               با علامت منفی (مثلاً ۰٫۸۴ ← ‎−۱٫۱۹)؛ مطلق همیشه ≥ ۱
-  buy_power_avg5   میانگین قدرت خرید ۵ روز   = میانگین نسبت خام ۵ روز قبل، بعد علامت‌دار
-  buy_power_avg10  میانگین قدرت خرید ۱۰ روز  = همان با ۱۰ روز قبل
-  buy_power_avg20  میانگین قدرت خرید ۲۰ روز  = همان با ۲۰ روز قبل
-  buy_power_avg30  میانگین قدرت خرید ۳۰ روز  = همان با ۳۰ روز قبل
+  buy_power_avg5   میانگین وزنی قدرت خرید ۵ روز = (Σ ارزش خرید ÷ Σ خریداران) ÷
+                                              (Σ ارزش فروش ÷ Σ فروشندگان) — بعد علامت‌دار
+  buy_power_avg10  میانگین وزنی قدرت خرید ۱۰ روز = همان با ۱۰ روز قبل
+  buy_power_avg20  میانگین وزنی قدرت خرید ۲۰ روز = همان با ۲۰ روز قبل
+  buy_power_avg30  میانگین وزنی قدرت خرید ۳۰ روز = همان با ۳۰ روز قبل
   bs_count_ratio   تعداد خریدار به فروشنده  = buy_CountI ÷ sell_CountI
   real_buy_pct     درصد خرید حقیقی از کل    = ارزش خرید حقیقی ÷ ارزش کل × ۱۰۰
   reaction_pct     واکنش قیمت (٪)           = جای آخرین قیمت در بازهٔ کف تا سقف مجاز
@@ -151,6 +154,38 @@ def build_history_data(root: Path = ROOT, symbols: list[str] | None = None,
         # علامت‌دار فقط در نمایش: نسبت ≥ ۱ ← +نسبت، نسبت < ۱ ← −معکوس (۰٫۸۴ ← ‎−۱٫۱۹)
         powers = [_signed_power(x) for x in powers_raw]
 
+        # ── اجزای خام هر روز برای «میانگین وزنی» ──
+        # روز معتبر هر متریک = روزی که همهٔ اجزای فرمولش موجود باشد
+        def _fday(r):   # ورود پول — خرید/فروش حقیقی
+            if r.get("buy_i_value") is None and r.get("sell_i_value") is None:
+                return None
+            return {"bv": r.get("buy_i_value") or 0, "sv": r.get("sell_i_value") or 0}
+
+        def _vday(r):   # حجم روز
+            return {"t": r["tvol"]} if r.get("tvol") is not None else None
+
+        def _pday(r):   # اجزای قدرت خرید
+            bv, sv = r.get("buy_i_value"), r.get("sell_i_value")
+            bc, sc = r.get("buy_counti"), r.get("sell_counti")
+            if not bv or not sv or not bc or not sc:
+                return None
+            return {"bv": bv, "sv": sv, "bc": bc, "sc": sc}
+
+        def _win_agg(getter, n, i):
+            """پنجرهٔ وزنی n روزه — جمعِ تجمیعیِ اجزای روزهای «نزدیک‌ترین به روز i»
+            بدون امروز؛ پنجرهٔ ناقص = None. قاعدهٔ انتخاب روز همان _win است
+            (روز نامعتبر رد می‌شود و نزدیک‌ترین روزِ معتبرِ قبل جایگزین می‌شود).
+            خروجی: (جمع اجزا روی پنجره، تعداد روز) یا None."""
+            if i < n:
+                return None
+            chunk = [g for g in (getter(r) for r in rows[max(0, i - n * 2):i])
+                     if g is not None][-n:]
+            if len(chunk) < n:
+                return None
+            keys = chunk[0].keys()
+            sums = {k: sum(c[k] or 0 for c in chunk) for k in keys}
+            return sums, len(chunk)
+
         def _win(xs, n, i):
             """میانگین n روزِ دارای دادهٔ «نزدیک‌ترین به روز i» — بدون امروز؛
             پنجرهٔ ناقص = None. روز بدون معامله/داده ناقص رد می‌شود و جای آن
@@ -182,23 +217,32 @@ def build_history_data(root: Path = ROOT, symbols: list[str] | None = None,
             row["mf30_pct"] = round(fl / f30 * 100, 2) if (fl is not None and f30) else None
             row["vol5_pct"] = round(vols[i] / v5 * 100, 2) if (vols[i] and v5) else None
             row["vol30_pct"] = round(vols[i] / v30 * 100, 2) if (vols[i] and v30) else None
-            # ── فیلدهای میانگین ۵/۱۰/۲۰/۳۰ روزه — پنجرهٔ کامل روزهای قبل ──
-            # میانگین ورود پول با علامت (خالص جهت در بازه)
+            # ── میانگین‌های وزنی ۵/۱۰/۲۰/۳۰ روزه — از جمع تجمیعی پنجرهٔ کامل
+            # روزهای قبل (نه میانگین سادهٔ نسبت‌های روزانه) ──
+            # ورود پول وزنی = (Σ ارزش خرید − Σ ارزش فروش) ÷ تعداد روز
             for n in (5, 10, 20, 30):
-                av = _win(flows, n, i)
-                row[f"flow_avg{n}_rial"] = round(av) if av is not None else None
-            # میانگین حجم
+                aggf = _win_agg(_fday, n, i)
+                row[f"flow_avg{n}_rial"] = (
+                    round((aggf[0]["bv"] - aggf[0]["sv"]) / aggf[1]) if aggf else None)
+            # حجم وزنی = Σ حجم ÷ تعداد روز
             for n in (5, 10, 20, 30):
-                av = _win(vols, n, i)
-                row[f"vol_avg{n}"] = round(av) if av is not None else None
+                aggv = _win_agg(_vday, n, i)
+                row[f"vol_avg{n}"] = round(aggv[0]["t"] / aggv[1]) if aggv else None
             # حجم روز — همان ستون خام qTotTran5J
             row["trade_volume"] = vols[i]
-            # قدرت خرید روز (علامت‌دار) + میانگین ۵/۱۰/۲۰/۳۰ — میانگین نسبت خام
-            # روزهای قبل، بعد علامت‌دار؛ نتیجه همیشه خارج ‎(−۱، +۱)‎
+            # قدرت خرید روز (علامت‌دار) + میانگین وزنی ۵/۱۰/۲۰/۳۰ روزه:
+            # (Σ ارزش خرید ÷ Σ خریداران) ÷ (Σ ارزش فروش ÷ Σ فروشندگان) — بعد علامت‌دار
             pw = powers[i]
             row["buy_power"] = round(pw, 2) if pw is not None else None
             for n in (5, 10, 20, 30):
-                av = _signed_power(_win(powers_raw, n, i))
+                av = None
+                aggp = _win_agg(_pday, n, i)
+                if aggp:
+                    s = aggp[0]
+                    if s["bc"] and s["sc"]:
+                        per_buy = s["bv"] / s["bc"]      # میانگین وزنی خرید هر خریدار
+                        per_sell = s["sv"] / s["sc"]     # میانگین وزنی فروش هر فروشنده
+                        av = _signed_power(per_buy / per_sell if per_sell else None)
                 row[f"buy_power_avg{n}"] = round(av, 2) if av is not None else None
             # تعداد خریدار به فروشنده — فرمول buyer_seller_count_ratio
             bc, sc = r.get("buy_counti"), r.get("sell_counti")

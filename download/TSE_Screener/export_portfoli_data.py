@@ -194,15 +194,15 @@ FIELD_SOURCES = {
     "mf_ratio_30d_pct": ("—", "محاسبه: ورود پول امروز ÷ میانگین |ورود پول| ۳۰ روز قبل × ۱۰۰"),
     "flow5_avg_abs": ("—", "محاسبه: میانگین |(خرید−فروش حقیقی) × قیمت پایانی| در ۵ روز قبل"),
     "flow30_avg_abs": ("—", "محاسبه: میانگین |(خرید−فروش حقیقی) × قیمت پایانی| در ۳۰ روز قبل"),
-    "flow_avg5_rial": ("—", "محاسبه: میانگین علامت‌دار ارزش خرید−فروش حقیقی سایت در ۵ روز قبل (پنجرهٔ کامل)"),
+    "flow_avg5_rial": ("—", "محاسبهٔ وزنی: (Σ ارزش خرید − Σ ارزش فروش حقیقی سایت) ÷ تعداد روز، در ۵ روز قبل (پنجرهٔ کامل)"),
     "flow_avg10_rial": ("—", "محاسبه: همان با ۱۰ روز قبل"),
     "flow_avg20_rial": ("—", "محاسبه: همان با ۲۰ روز قبل"),
     "flow_avg30_rial": ("—", "محاسبه: همان با ۳۰ روز قبل"),
-    "vol_avg5": ("—", "محاسبه: میانگین حجم معاملات در ۵ روز قبل (پنجرهٔ کامل)"),
+    "vol_avg5": ("—", "محاسبهٔ وزنی: Σ حجم معاملات ÷ تعداد روز، در ۵ روز قبل (پنجرهٔ کامل)"),
     "vol_avg10": ("—", "محاسبه: همان با ۱۰ روز قبل"),
     "vol_avg20": ("—", "محاسبه: همان با ۲۰ روز قبل"),
     "vol_avg30": ("—", "محاسبه: همان با ۳۰ روز قبل"),
-    "buy_power_avg5": ("—", "محاسبه: میانگین قدرت خریدار روزانه (ارزش÷تعداد) در ۵ روز قبل (پنجرهٔ کامل)"),
+    "buy_power_avg5": ("—", "محاسبهٔ وزنی: (Σ ارزش خرید ÷ Σ خریداران) ÷ (Σ ارزش فروش ÷ Σ فروشندگان) در ۵ روز قبل (پنجرهٔ کامل)"),
     "buy_power_avg10": ("—", "محاسبه: همان با ۱۰ روز قبل"),
     "buy_power_avg20": ("—", "محاسبه: همان با ۲۰ روز قبل"),
     "buy_power_avg30": ("—", "محاسبه: همان با ۳۰ روز قبل"),
@@ -313,14 +313,17 @@ def _daily_rows(db_path: Path, today: str | None, symbol: str | None = None,
 
 
 def _daily_stats(db_path: Path, today: str | None, symbol: str | None = None) -> dict:
-    """میانگین‌های ۵/۱۰/۲۰/۳۰ روزه — مطابق روش dashboard.git (از دادهٔ سایت):
+    """میانگین‌های وزنی ۵/۱۰/۲۰/۳۰ روزه — جمع تجمیعی اجزا روی پنجرهٔ روزهای قبل
+    (نه میانگین سادهٔ مقادیر روزانه):
 
-    ورود پول روز = ارزش خرید حقیقی − ارزش فروش حقیقی (دادهٔ واقعی سایت، ریال).
-    قدرت خرید روز = (ارزش خرید ÷ تعداد خریداران) ÷ (ارزش فروش ÷ تعداد فروشندگان).
-    میانگین N روزه = میانگین N روز «قبل» بدون امروز — فقط با پنجرهٔ کامل؛
-    کمتر از N روز سابقه = None (نه میانگین جزئی) تا ستون‌ها تکراری نشوند.
+    ورود پول وزنی N روزه = (Σ ارزش خرید حقیقی − Σ ارزش فروش حقیقی) ÷ تعداد روز.
+    حجم وزنی N روزه = Σ حجم ÷ تعداد روز.
+    قدرت خرید وزنی N روزه = (Σ ارزش خرید ÷ Σ خریداران) ÷ (Σ ارزش فروش ÷ Σ فروشندگان).
+    روزِ نامعتبر (اجزای ناقص) از پنجره رد می‌شود و نزدیک‌ترین روزِ معتبرِ قبل
+    جایگزین می‌شود؛ پنجرهٔ ناقص = None تا ستون‌های ۵/۱۰/۲۰/۳۰ تکراری نشوند.
+    پنجره فقط «روزهای قبل» است، امروز داخل میانگین نمی‌آید. میانگین‌های مطلق
+    (مخرج نسبت‌های ٪) مثل قبل جزئی هم می‌پذیرند.
     مبنای داده بانک سابقهٔ ۴۰۰ روزهٔ history.sqlite است؛ نبود → بانک لایو همان نماد.
-    میانگین‌های مطلق (مخرج نسبت‌های ٪) مثل قبل جزئی هم می‌پذیرند.
     """
     if symbol is None:
         symbol = db_path.stem.removeprefix("raw_")
@@ -330,22 +333,52 @@ def _daily_stats(db_path: Path, today: str | None, symbol: str | None = None) ->
         rows = _daily_rows(hdb, today, symbol, table="history_daily") or None
     if rows is None:
         rows = _daily_rows(db_path, today)
-    me, vols, powers = [], [], []
+    me, vols, fdays, vdays, pdays = [], [], [], [], []
     for r in rows[:60]:
         bv, sv = r["buy_i_value"], r["sell_i_value"]
         bc, sc = r["buy_counti"], r["sell_counti"]
         me.append((bv - sv) if (bv is not None and sv is not None) else None)
         vols.append(float(r["tvol"] or 0))
-        # نسبت خام روز (همیشه مثبت) — علامت‌دار کردن فقط در نمایش/خروجی
-        powers.append(((bv / bc) / (sv / sc))
-                      if (bv and sv and bc and sc) else None)
+        # اجزای خام برای میانگین وزنی — روزِ معتبر هر متریک = روزی که همهٔ
+        # اجزای فرمولش موجود باشد؛ سطرها تازه‌به‌قدیم‌اند (ابتدای لیست = اخیر)
+        fdays.append({"bv": bv or 0, "sv": sv or 0}
+                     if (bv is not None or sv is not None) else None)
+        vdays.append({"t": float(r["tvol"])} if r["tvol"] is not None else None)
+        pdays.append({"bv": bv, "sv": sv, "bc": bc, "sc": sc}
+                     if (bv and sv and bc and sc) else None)
     f_abs = [abs(x) for x in me if x is not None]
 
-    def _win(xs, n):
-        # میانگین n روزِ دارای داده (روز بدون معامله/داده ناقص رد می‌شود) —
-        # پنجرهٔ ناقص = None تا ستون‌های ۵/۱۰/۲۰/۳۰ تکراری نشوند
+    def _agg(xs, n):
+        # پنجرهٔ وزنی n روزه — جمع تجمیعی اجزا روی n روزِ معتبرِ قبل؛
+        # پنجرهٔ ناقص = None. خروجی: (جمع اجزا، تعداد روز) یا None.
         xs = [x for x in xs[:n * 2] if x is not None][:n]
-        return sum(xs) / n if len(xs) >= n else None
+        if len(xs) < n:
+            return None
+        keys = xs[0].keys()
+        return ({k: sum(x[k] or 0 for x in xs) for k in keys}, len(xs))
+
+    aggf = {n: _agg(fdays, n) for n in (5, 10, 20, 30)}
+    aggv = {n: _agg(vdays, n) for n in (5, 10, 20, 30)}
+    aggp = {n: _agg(pdays, n) for n in (5, 10, 20, 30)}
+
+    def _flow_w(n):
+        # ورود پول وزنی = (Σ ارزش خرید − Σ ارزش فروش) ÷ تعداد روز
+        a = aggf[n]
+        return (a[0]["bv"] - a[0]["sv"]) / a[1] if a else None
+
+    def _vol_w(n):
+        a = aggv[n]
+        return a[0]["t"] / a[1] if a else None
+
+    def _pow_w(n):
+        # قدرت خرید وزنی از جمع‌ها — بعد علامت‌دار؛ نتیجه همیشه خارج ‎(−۱، +۱)‎
+        a = aggp[n]
+        if not a:
+            return None
+        s = a[0]
+        if not (s["bc"] and s["sc"] and s["sv"]):
+            return None
+        return _signed_power((s["bv"] / s["bc"]) / (s["sv"] / s["sc"]))
 
     f5, v5, v30 = f_abs[:5], vols[:5], vols[:30]
     return {
@@ -353,19 +386,18 @@ def _daily_stats(db_path: Path, today: str | None, symbol: str | None = None) ->
         "flow30_avg_abs": sum(f_abs) / len(f_abs) if f_abs else 0.0,
         "vol5_avg": sum(v5) / len(v5) if v5 else 0.0,
         "vol30_avg": sum(v30) / len(v30) if v30 else 0.0,
-        "flow_avg5_rial": _win(me, 5),
-        "flow_avg10_rial": _win(me, 10),
-        "flow_avg20_rial": _win(me, 20),
-        "flow_avg30_rial": _win(me, 30),
-        "vol_avg5": _win(vols, 5),
-        "vol_avg10": _win(vols, 10),
-        "vol_avg20": _win(vols, 20),
-        "vol_avg30": _win(vols, 30),
-        # میانگین نسبت خام روزها، بعد علامت‌دار — نتیجه همیشه خارج ‎(−۱، +۱)‎
-        "buy_power_avg5": _signed_power(_win(powers, 5)),
-        "buy_power_avg10": _signed_power(_win(powers, 10)),
-        "buy_power_avg20": _signed_power(_win(powers, 20)),
-        "buy_power_avg30": _signed_power(_win(powers, 30)),
+        "flow_avg5_rial": _flow_w(5),
+        "flow_avg10_rial": _flow_w(10),
+        "flow_avg20_rial": _flow_w(20),
+        "flow_avg30_rial": _flow_w(30),
+        "vol_avg5": _vol_w(5),
+        "vol_avg10": _vol_w(10),
+        "vol_avg20": _vol_w(20),
+        "vol_avg30": _vol_w(30),
+        "buy_power_avg5": _pow_w(5),
+        "buy_power_avg10": _pow_w(10),
+        "buy_power_avg20": _pow_w(20),
+        "buy_power_avg30": _pow_w(30),
         "days": len(rows),
     }
 
