@@ -21,9 +21,10 @@ history_dashboard.py — محاسبهٔ شاخص‌های سابقهٔ روزا�
   vol_avg10        میانگین ۱۰ روزه حجم      = همان با ۱۰ روز قبل
   vol_avg20        میانگین ۲۰ روزه حجم      = همان با ۲۰ روز قبل
   vol_avg30        میانگین ۳۰ روزه حجم      = همان با ۳۰ روز قبل
-  buy_power        قدرت خرید روز            = (ارزش خرید حقیقی ÷ تعداد خریداران) ÷
-                                              (ارزش فروش حقیقی ÷ تعداد فروشندگان)
-  buy_power_avg5   میانگین قدرت خرید ۵ روز   = میانگین قدرت خرید ۵ روز قبل (پنجرهٔ کامل)
+  buy_power        قدرت خرید روز            = علامت‌دار: (ارزش خرید ÷ تعداد خریداران) ÷
+                                              (ارزش فروش ÷ تعداد فروشندگان)؛ نسبت < ۱ ← معکوس
+                                              با علامت منفی (مثلاً ۰٫۸۴ ← ‎−۱٫۱۹)؛ مطلق همیشه ≥ ۱
+  buy_power_avg5   میانگین قدرت خرید ۵ روز   = میانگین نسبت خام ۵ روز قبل، بعد علامت‌دار
   buy_power_avg10  میانگین قدرت خرید ۱۰ روز  = همان با ۱۰ روز قبل
   buy_power_avg20  میانگین قدرت خرید ۲۰ روز  = همان با ۲۰ روز قبل
   buy_power_avg30  میانگین قدرت خرید ۳۰ روز  = همان با ۳۰ روز قبل
@@ -32,6 +33,12 @@ history_dashboard.py — محاسبهٔ شاخص‌های سابقهٔ روزا�
   reaction_pct     واکنش قیمت (٪)           = جای آخرین قیمت در بازهٔ کف تا سقف مجاز
                                              (کف/سقف = دیروز × (۱ ± pct) — price_range.py)
   (+ نسبت‌های درصدی قبلی mf5/mf30/vol5/vol30 در payload برای سازگاری حفظ شده‌اند)
+
+بانک محاسباتی: نتیجهٔ همهٔ این ستون‌ها در data/raw/history_computed.sqlite
+(جدا از بانک خام) ذخیره می‌شود — در لحظهٔ جمع‌آوری تاریخچه
+(history_collector.py → refresh_computed) و بار اولِ هر بازخوانی؛ پس گزارش‌ها
+و داشبورد به‌جای محاسبهٔ مجدد، مستقیم از آن بازخوانی می‌کنند (سرعت).
+تازگی با تعداد ردیف بانک خام کنترل می‌شود؛ تغییر خام ← بازمحاسبهٔ خودکار.
 """
 from __future__ import annotations
 
@@ -45,7 +52,42 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from early_warning.price_range import compute_daily_params  # noqa: E402
 
+try:
+    # قرارداد واحد قدرت خرید علامت‌دار — همان تابع exporter
+    from export_portfoli_data import _signed_power  # noqa: E402
+except Exception:  # نسخهٔ مستقل — بدون exporter
+    def _signed_power(ratio: float | None) -> float | None:
+        if ratio is None or ratio <= 0:
+            return None
+        return ratio if ratio >= 1 else -1.0 / ratio
+
 DB = ROOT / "data" / "raw" / "history.sqlite"
+# بانک محاسباتی — جدا از بانک خام؛ میانگین‌ها و شاخص‌های آماده برای گزارش‌ها
+COMPUTED_DB = ROOT / "data" / "raw" / "history_computed.sqlite"
+COMPUTED_SQL = """
+CREATE TABLE IF NOT EXISTS computed_daily (
+    symbol TEXT NOT NULL,
+    date_jalali TEXT NOT NULL,
+    date_greg TEXT NOT NULL,
+    close_price REAL, pct_close REAL, flow_rial REAL,
+    flow_avg5_rial REAL, flow_avg10_rial REAL, flow_avg20_rial REAL, flow_avg30_rial REAL,
+    trade_volume REAL, vol_avg5 REAL, vol_avg10 REAL, vol_avg20 REAL, vol_avg30 REAL,
+    buy_power REAL, buy_power_avg5 REAL, buy_power_avg10 REAL,
+    buy_power_avg20 REAL, buy_power_avg30 REAL,
+    bs_count_ratio REAL, real_buy_pct REAL, reaction_pct REAL, money_flow_pct REAL,
+    mf5_pct REAL, mf30_pct REAL, vol5_pct REAL, vol30_pct REAL,
+    computed_at TEXT,
+    PRIMARY KEY (symbol, date_jalali)
+) WITHOUT ROWID
+"""
+COMPUTED_META_SQL = "CREATE TABLE IF NOT EXISTS computed_meta (k TEXT PRIMARY KEY, v TEXT)"
+COMPUTED_COLS = ["symbol", "date_jalali", "date_greg", "close_price", "pct_close",
+                 "flow_rial", "flow_avg5_rial", "flow_avg10_rial", "flow_avg20_rial",
+                 "flow_avg30_rial", "trade_volume", "vol_avg5", "vol_avg10",
+                 "vol_avg20", "vol_avg30", "buy_power", "buy_power_avg5",
+                 "buy_power_avg10", "buy_power_avg20", "buy_power_avg30",
+                 "bs_count_ratio", "real_buy_pct", "reaction_pct", "money_flow_pct",
+                 "mf5_pct", "mf30_pct", "vol5_pct", "vol30_pct", "computed_at"]
 
 
 def _flow(r: dict) -> float | None:
@@ -56,8 +98,18 @@ def _flow(r: dict) -> float | None:
     return (b or 0.0) - (s or 0.0)
 
 
-def build_history_data(root: Path = ROOT, symbols: list[str] | None = None) -> dict:
-    """خواندن بانک خام سابقه و ساخت ردیف‌های داشبورد — بدون تغییر بانک."""
+def build_history_data(root: Path = ROOT, symbols: list[str] | None = None,
+                       use_cache: bool = True) -> dict:
+    """ردیف‌های داشبورد سابقه — اول بانک محاسباتی (سریع)، وگرنه محاسبه از خام.
+
+    مسیر سریع: اگر history_computed.sqlite موجود و هم‌رو با بانک خام بود،
+    ردیف‌های آماده از آن بازخوانی می‌شود (برای گزارش‌ها و داشبورد).
+    وگرنه از بانک خام محاسبه و نتیجه در بانک محاسباتی ذخیره می‌شود.
+    """
+    if use_cache:
+        cached = load_computed(root, symbols)
+        if cached is not None:
+            return cached
     db = root / "data" / "raw" / "history.sqlite"
     if not db.exists():
         return {"ok": False, "error": "بانک سابقه پیدا نشد — ابتدا جمع‌آوری را اجرا کنید",
@@ -83,8 +135,8 @@ def build_history_data(root: Path = ROOT, symbols: list[str] | None = None) -> d
         vols = [r.get("trade_volume") for r in rows]
         f_abs = [abs(f) if f is not None else None for f in flows]
 
-        def _power(r: dict) -> float | None:
-            """قدرت خرید روز — فرمول dashboard.git (ارزش‌محور، از دادهٔ سایت):
+        def _power_raw(r: dict) -> float | None:
+            """نسبت خام قدرت خرید روز (همیشه مثبت) — فرمول dashboard.git:
             (ارزش خرید حقیقی ÷ تعداد خریداران) ÷ (ارزش فروش حقیقی ÷ تعداد فروشندگان)"""
             bv, sv = r.get("ct_real_buy_value"), r.get("ct_real_sell_value")
             bc, sc = r.get("ct_real_buy_count"), r.get("ct_real_sell_count")
@@ -92,15 +144,17 @@ def build_history_data(root: Path = ROOT, symbols: list[str] | None = None) -> d
                 return None
             return (bv / bc) / (sv / sc)
 
-        powers = [_power(r) for r in rows]
+        powers_raw = [_power_raw(r) for r in rows]
+        # علامت‌دار فقط در نمایش: نسبت ≥ ۱ ← +نسبت، نسبت < ۱ ← −معکوس (۰٫۸۴ ← ‎−۱٫۱۹)
+        powers = [_signed_power(x) for x in powers_raw]
 
         def _win(xs, n, i):
-            """میانگین n روزِ دارای داده قبل از روز i — بدون امروز؛ پنجرهٔ ناقص = None.
-            مطابق calc_volume_avg در dashboard.git؛ روز بدون معامله/داده ناقص
-            رد می‌شود تا ستون‌های ۵/۱۰/۲۰/۳۰ تکراری نشوند."""
+            """میانگین n روزِ دارای دادهٔ «نزدیک‌ترین به روز i» — بدون امروز؛
+            پنجرهٔ ناقص = None. روز بدون معامله/داده ناقص رد می‌شود و جای آن
+            نزدیک‌ترین روزِ معتبرِ قبل می‌نشیند (سری صعودی ← انتها = نزدیک‌ترین)."""
             if i < n:
                 return None
-            xs = [x for x in xs[max(0, i - n * 2):i] if x is not None][:n]
+            xs = [x for x in xs[max(0, i - n * 2):i] if x is not None][-n:]
             return sum(xs) / n if len(xs) >= n else None
 
         computed: list[dict] = []
@@ -108,7 +162,8 @@ def build_history_data(root: Path = ROOT, symbols: list[str] | None = None) -> d
             close = r.get("close_price")
             yest = r.get("yesterday_price")
             tval = r.get("trade_value")
-            row = {"date_jalali": r.get("date_jalali"), "close_price": close}
+            row = {"date_jalali": r.get("date_jalali"), "date_greg": r.get("date_greg"),
+                   "close_price": close}
             # ٪ نوسان پایانی — فرمول pct_close (export_portfoli_data)
             row["pct_close"] = round((close - yest) / yest * 100, 2) if (close and yest) else None
             fl = flows[i]
@@ -135,11 +190,12 @@ def build_history_data(root: Path = ROOT, symbols: list[str] | None = None) -> d
                 row[f"vol_avg{n}"] = round(av) if av is not None else None
             # حجم روز — همان ستون خام qTotTran5J
             row["trade_volume"] = vols[i]
-            # قدرت خرید روز + میانگین ۵/۱۰/۲۰/۳۰ روزهٔ روزهای قبل (پنجرهٔ کامل)
+            # قدرت خرید روز (علامت‌دار) + میانگین ۵/۱۰/۲۰/۳۰ — میانگین نسبت خام
+            # روزهای قبل، بعد علامت‌دار؛ نتیجه همیشه خارج ‎(−۱، +۱)‎
             pw = powers[i]
             row["buy_power"] = round(pw, 2) if pw is not None else None
             for n in (5, 10, 20, 30):
-                av = _win(powers, n, i)
+                av = _signed_power(_win(powers_raw, n, i))
                 row[f"buy_power_avg{n}"] = round(av, 2) if av is not None else None
             # تعداد خریدار به فروشنده — فرمول buyer_seller_count_ratio
             bc, sc = r.get("ct_real_buy_count"), r.get("ct_real_sell_count")
@@ -162,9 +218,125 @@ def build_history_data(root: Path = ROOT, symbols: list[str] | None = None) -> d
                                "last_collected": computed[-1]["date_jalali"],
                                "rows": computed})
     con.close()
+    out["source"] = "computed_fresh"
+    try:
+        save_computed(root, out)  # بانک محاسباتی — خرابی‌اش مانع خروجی نمی‌شود
+    except Exception as se:
+        out["computed_save_error"] = str(se)
     return out
 
 
+def load_computed(root: Path = ROOT, symbols: list[str] | None = None) -> dict | None:
+    """بازخوانی سریع از بانک محاسباتی history_computed.sqlite.
+
+    خروجی None یعنی بانک غایب، خالی یا کهنه (تعداد ردیفش با بانک خام نمی‌خواند)
+    — در این حالت build_history_data از خام بازمحاسبه می‌کند.
+    """
+    hdb = root / "data" / "raw" / "history.sqlite"
+    cdb = root / "data" / "raw" / "history_computed.sqlite"
+    if not hdb.exists() or not cdb.exists():
+        return None
+    try:
+        hcon = sqlite3.connect(str(hdb))
+        n_raw = hcon.execute("SELECT COUNT(*) FROM history_daily").fetchone()[0]
+        hcon.close()
+    except sqlite3.Error:
+        return None
+    con = sqlite3.connect(str(cdb))
+    con.row_factory = sqlite3.Row
+    try:
+        meta = {r["k"]: r["v"] for r in con.execute("SELECT k, v FROM computed_meta")}
+        if int(meta.get("source_rows") or -1) != n_raw:
+            return None  # بانک خام تغییر کرده — بازمحاسبه لازم
+        names = [r[0] for r in con.execute(
+            "SELECT DISTINCT symbol FROM computed_daily ORDER BY symbol")]
+        if symbols:
+            names = [n for n in names if n in symbols]
+        out = {"ok": True, "source": "computed_bank",
+               "generated_at": meta.get("computed_at"), "symbols": []}
+        for name in names:
+            rows = [dict(r) for r in con.execute(
+                "SELECT * FROM computed_daily WHERE symbol=? ORDER BY date_greg",
+                (name,))]
+            if not rows:
+                continue
+            out["symbols"].append({"name": name, "days": len(rows),
+                                   "last_collected": rows[-1]["date_jalali"],
+                                   "rows": rows})
+        return out if out["symbols"] else None
+    except sqlite3.Error:
+        return None
+    finally:
+        con.close()
+
+
+def save_computed(root: Path, data: dict) -> dict:
+    """ذخیرهٔ محاسبات در بانک جداگانهٔ history_computed.sqlite (خارج از بانک خام).
+
+    همهٔ ستون‌های محاسبه‌شدهٔ هر (نماد، روز) — میانگین‌های ۵/۱۰/۲۰/۳۰، قدرت
+    علامت‌دار، نسبت‌ها — یک‌جا ذخیره می‌شوند تا گزارش‌ها به این بانک ارجاع
+    دهند و هر بار محاسبهٔ مجدد انجام نشود.
+    """
+    cdb = root / "data" / "raw" / "history_computed.sqlite"
+    cdb.parent.mkdir(parents=True, exist_ok=True)
+    hdb = root / "data" / "raw" / "history.sqlite"
+    n_raw = 0
+    if hdb.exists():
+        hcon = sqlite3.connect(str(hdb))
+        n_raw = hcon.execute("SELECT COUNT(*) FROM history_daily").fetchone()[0]
+        hcon.close()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    con = sqlite3.connect(str(cdb))
+    n = 0
+    try:
+        con.execute(COMPUTED_SQL)
+        con.execute(COMPUTED_META_SQL)
+        syms = sorted({s["name"] for s in data.get("symbols", [])})
+        cols = ", ".join(COMPUTED_COLS)
+        ph = ", ".join("?" for _ in COMPUTED_COLS)
+        for sym in syms:
+            # ردیف‌های کهنهٔ همین نماد پاک می‌شوند — روزِ حذف‌شده از خام در
+            # بانک محاسباتی هم حذف شود (INSERT OR REPLACE تنها پاک نمی‌کند)
+            con.execute("DELETE FROM computed_daily WHERE symbol=?", (sym,))
+            for s in data.get("symbols", []):
+                if s["name"] != sym:
+                    continue
+                for r in s["rows"]:
+                    rec = {"computed_at": now, "symbol": s["name"]}
+                    rec.update({k: r.get(k) for k in COMPUTED_COLS
+                                if k not in ("computed_at", "symbol")})
+                    con.execute(f"INSERT INTO computed_daily ({cols}) VALUES ({ph})",
+                                [rec[c] for c in COMPUTED_COLS])
+                    n += 1
+        # متای تازگی فقط وقتی معتبر است که همهٔ نمادهای بانک خام پوشش داده شده باشند
+        all_covered = False
+        if hdb.exists():
+            hcon = sqlite3.connect(str(hdb))
+            hsyms = {r[0] for r in hcon.execute(
+                "SELECT DISTINCT symbol FROM history_daily")}
+            hcon.close()
+            all_covered = hsyms <= set(syms)
+        if all_covered:
+            con.execute("INSERT OR REPLACE INTO computed_meta (k, v) VALUES ('source_rows', ?)",
+                        (str(n_raw),))
+            con.execute("INSERT OR REPLACE INTO computed_meta (k, v) VALUES ('computed_at', ?)",
+                        (now,))
+        con.commit()
+    finally:
+        con.close()
+    return {"ok": True, "rows": n, "db": str(cdb)}
+
+
+def refresh_computed(root: Path = ROOT) -> dict:
+    """بازمحاسبهٔ کامل از بانک خام و ذخیره در بانک محاسباتی.
+
+    history_collector.py پس از پایان جمع‌آوری این را صدا می‌زند تا میانگین‌ها
+    «در لحظهٔ جمع‌آوری تاریخچه» یک‌جا محاسبه و ذخیره شوند.
+    """
+    data = build_history_data(root, use_cache=False)  # محاسبه + ذخیرهٔ خودکار
+    return {"ok": data.get("ok"), "symbols": len(data.get("symbols", [])),
+            "source": data.get("source"),
+            "error": data.get("error") or data.get("computed_save_error")}
 # شِمای بایگانی محاسبات — همان بانکی که portfoli_server.save_history می‌سازد
 # (UNIQUE(symbol, date_jalali, fetch_hms) → ردیف تکراری ممکن نیست)
 PORTFOLI_HISTORY_SQL = """

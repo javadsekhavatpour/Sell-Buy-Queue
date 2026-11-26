@@ -199,6 +199,19 @@ def main() -> None:
     rows = conn.execute("SELECT COUNT(*) FROM history_daily").fetchone()[0]
     syms = conn.execute("SELECT COUNT(DISTINCT symbol) FROM history_daily").fetchone()[0]
     print(f"✓ این اجرا: {total} ردیف | کل بانک: {rows} ردیف، {syms} نماد — بدون تکرار")
+    # بانک محاسباتی — میانگین‌های ۵/۱۰/۲۰/۳۰ و شاخص‌ها «در لحظهٔ جمع‌آوری»
+    # محاسبه و در history_computed.sqlite (جدا از بانک خام) ذخیره می‌شوند
+    try:
+        import history_dashboard
+        t0 = time.time()
+        res = history_dashboard.refresh_computed(ROOT)
+        if res.get("ok"):
+            print(f"✓ بانک محاسباتی: {res['symbols']} نماد ذخیره شد "
+                  f"(history_computed.sqlite) — {time.time()-t0:.1f}s")
+        else:
+            print(f"بانک محاسباتی: خطا — {res.get('error')}")
+    except Exception as e:
+        print(f"بانک محاسباتی: خطا — {e}")
 
 
 if __name__ == "__main__":

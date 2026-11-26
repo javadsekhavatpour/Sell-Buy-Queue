@@ -28,16 +28,25 @@
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;
          margin:6px 14px;padding:8px 12px}
   .status{font-size:12px;color:var(--mut);margin:4px 16px}
-  .tbl-wrap{overflow-x:auto;margin:6px 14px;border:1px solid var(--line);
+  /* جدول در پنجرهٔ اسکرول‌دار — هر دو اسکرول افقی و عمودی همین اول صفحه دیده
+     می‌شوند و نیاز به اسکرول‌کردن کل پنجره نیست (مثل داشبورد لایو) */
+  .tbl-wrap{overflow:auto;height:calc(100vh - 178px);min-height:340px;
+            margin:6px 14px;border:1px solid var(--line);
             border-radius:10px;background:var(--panel)}
-  table{border-collapse:collapse;min-width:2200px;width:100%}
+  table{border-collapse:collapse;min-width:1600px;width:100%}
+  /* هدر فریز روی اسکرول عمودی + هدرهای ۲-۳ سطری با wrap — ستون‌ها جمع‌تر و
+     دادهٔ بیشتری در عرض صفحه جا می‌شود؛ اگر جا نشد اسکرول افقی پنجره */
   thead th{position:sticky;top:0;background:var(--hdr);color:#fff;z-index:3;
-           padding:6px 8px;font-size:12px;font-weight:700;white-space:nowrap;
-           border-left:1px solid rgba(255,255,255,.25)}
+           padding:5px 6px;font-size:11.5px;font-weight:700;line-height:1.35;
+           white-space:normal;word-break:break-word;max-width:104px;
+           vertical-align:middle;border-left:1px solid rgba(255,255,255,.25);
+           box-shadow:0 1px 0 rgba(0,0,0,.18)}
+  thead th:nth-child(1){white-space:nowrap;max-width:none}
   tbody td{padding:4px 8px;text-align:center;border-bottom:1px solid #e3e9f4;
            font-size:12.5px;white-space:nowrap}
-  tbody td.dt{position:sticky;right:0;background:var(--sel);font-weight:700;z-index:2}
-  tbody td.sym{position:sticky;right:44px;background:var(--panel);font-weight:700;z-index:2;
+  tbody td.dt{position:sticky;right:0;background:var(--sel);font-weight:700;z-index:2;
+              min-width:84px;max-width:84px}
+  tbody td.sym{position:sticky;right:84px;background:var(--panel);font-weight:700;z-index:2;
                font-size:12px;color:var(--chip)}
   tbody tr:nth-child(even){background:#f5f8fd}
   tbody tr:nth-child(even) td.sym{background:#f5f8fd}
@@ -50,6 +59,7 @@
   @media (max-width:640px){
     .toolbar{padding:8px}
     .panel,.status,.tbl-wrap,.log{margin:6px 8px}
+    .tbl-wrap{height:calc(100vh - 250px)}
     body{font-size:13px}
   }
 </style>

@@ -357,10 +357,12 @@ def _replay_export_xlsx(data: dict, root: Path) -> bytes:
     fill_sheet(ws1, ["نماد"] + head_tail, ["symbol"] + src_tail,
                [[r.get("symbol")] + [r.get(c["en"]) for c in cols] + _extra(r)
                 for r in data.get("frame_rows") or []])
-    ws2 = wb.create_sheet("سری زمانی تا این لحظه")
-    fill_sheet(ws2, ["زمان", "نماد"] + head_tail, ["fetch_hms", "symbol"] + src_tail,
-               [[r.get("fetch_hms"), r.get("symbol")] + [r.get(c["en"]) for c in cols]
-                + _extra(r) for r in data.get("series_rows") or []])
+    if data.get("series_rows"):
+        # شیت سری زمانی فقط برای بازپخش — خروجی لایو (بدون سری) یک شیت دارد
+        ws2 = wb.create_sheet("سری زمانی تا این لحظه")
+        fill_sheet(ws2, ["زمان", "نماد"] + head_tail, ["fetch_hms", "symbol"] + src_tail,
+                   [[r.get("fetch_hms"), r.get("symbol")] + [r.get(c["en"]) for c in cols]
+                    + _extra(r) for r in data.get("series_rows") or []])
     bio = BytesIO()
     wb.save(bio)
     return bio.getvalue()

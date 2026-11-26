@@ -150,6 +150,7 @@
   <button class="btn" id="btn-reload" title="دوباره خواندن portfoli_data.json">↻ بازخوانی</button>
   <button class="btn" id="btn-replay" title="بازپخش شبیه‌سازی جدول از ابتدای جلسه — اگر تاریخ وارد کرده باشید از ابتدای همان روز پخش می‌شود">🎬 بازپخش جدول</button>
   <button class="btn" id="btn-history" title="سابقهٔ نمادها — جمع‌آوری تاریخچهٔ روزانه از TSETMC و داشبورد ورود پول / نسبت‌های ۵ و ۳۰ روزه / واکنش قیمت">📜 سابقهٔ نمادها</button>
+  <button class="btn" id="btn-export" title="گزارش اکسل جدول لایو — ستون‌های نمایان + همهٔ ستون‌های بلااستفادهٔ بانک خام؛ سطر ۲: نام فیلد بانک">⬇ گزارش اکسل</button>
   <input id="rp-date" list="rp-dates" placeholder="۱۴۰۵/۰۸/۳۰" autocomplete="off"
          title="تاریخ شمسی برای بازپخش — خالی = آخرین جلسه (امروز)"
          style="width:104px;border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit">
@@ -750,6 +751,40 @@ document.getElementById("rp-export").addEventListener("click", async () => {
     URL.revokeObjectURL(a.href);
   }catch(e){ alert("خروجی اکسل نشد: " + friendly(e)); }
   btn.disabled = false; btn.textContent = "📊 اکسل";
+});
+
+/* خروجی اکسل جدول لایو — همان ستون‌های نمایان؛ سرور ستون‌های بلااستفادهٔ
+   بانک خام و سطر نام فیلد بانک را هم اضافه می‌کند */
+document.getElementById("btn-export").addEventListener("click", async () => {
+  const cols = visible.map(en => ({en, fa: EN2FA[en] || en}));
+  const rows = currentRows().map(r => {
+    const o = {symbol: r.symbol, fetch_hms: r.fetch_hms};
+    for (const c of cols) o[c.en] = r[c.en];
+    return o;
+  });
+  if (!rows.length) return alert("ردیفی برای خروجی نیست");
+  const body = {date: rows[0].date_jalali || "", t: rows[0].fetch_hms || "",
+                symbol: null, cols, frame_rows: rows, series_rows: []};
+  const btn = document.getElementById("btn-export");
+  btn.disabled = true; btn.textContent = "⏳ در حال ساخت…";
+  try{
+    const res = await fetch(API_BASE() + "/api/export", {
+      method: "POST",
+      headers: {"Content-Type": "text/plain"},   // بدون preflight
+      body: JSON.stringify(body)});
+    if (!res.ok){
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error || ("HTTP " + res.status));
+    }
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `portfoli_live_${(rows[0].date_jalali || "").replace(/\//g, "-")}` +
+                 `_${(rows[0].fetch_hms || "").replace(/:/g, "")}.xlsx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(a.href);
+  }catch(e){ alert("خروجی اکسل نشد: " + friendly(e)); }
+  btn.disabled = false; btn.textContent = "⬇ گزارش اکسل";
 });
 
 /* ───────── رویدادها ───────── */

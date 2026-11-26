@@ -270,6 +270,16 @@ _DAILY_COLS = ("date_jalali, ct_real_buy_value, ct_real_sell_value, "
                "ct_real_buy_count, ct_real_sell_count, close_price, trade_volume")
 
 
+def _signed_power(ratio: float | None) -> float | None:
+    """قدرت خرید علامت‌دار — قرارداد نمایش بازار:
+    نسبت ≥ ۱ ← همان عدد مثبت (خریدار غالب)؛ نسبت < ۱ ← معکوس با علامت منفی
+    (فروشنده غالب)، مثلاً نسبت ۰٫۸۴ ← ‎−۱٫۱۹. قدرت مطلق همیشه ≥ ۱ است و
+    مقدارهای بین ‎−۱ و ‎+۱ هرگز ظاهر نمی‌شوند."""
+    if ratio is None or ratio <= 0:
+        return None
+    return ratio if ratio >= 1 else -1.0 / ratio
+
+
 def _daily_rows(db_path: Path, today: str | None, symbol: str | None = None,
                 table: str = "raw_snapshots") -> list:
     """سری روزانهٔ ورود پول/حجم/تعدادها — نزولی، بدون امروز.
@@ -296,7 +306,9 @@ def _daily_rows(db_path: Path, today: str | None, symbol: str | None = None,
     finally:
         con.close()
     if today:
-        rows = [r for r in rows if r["date_jalali"] != today]
+        # فقط روزهای «قبل» از تاریخ مبنای payload — امروز و روزهای بعدتر حذف؛
+        # بانک سابقه ممکن است روزهای جدیدتری از نمونهٔ لایو داشته باشد
+        rows = [r for r in rows if r["date_jalali"] < today]
     return rows
 
 
@@ -324,6 +336,7 @@ def _daily_stats(db_path: Path, today: str | None, symbol: str | None = None) ->
         bc, sc = r["ct_real_buy_count"], r["ct_real_sell_count"]
         me.append((bv - sv) if (bv is not None and sv is not None) else None)
         vols.append(float(r["trade_volume"] or 0))
+        # نسبت خام روز (همیشه مثبت) — علامت‌دار کردن فقط در نمایش/خروجی
         powers.append(((bv / bc) / (sv / sc))
                       if (bv and sv and bc and sc) else None)
     f_abs = [abs(x) for x in me if x is not None]
@@ -348,10 +361,11 @@ def _daily_stats(db_path: Path, today: str | None, symbol: str | None = None) ->
         "vol_avg10": _win(vols, 10),
         "vol_avg20": _win(vols, 20),
         "vol_avg30": _win(vols, 30),
-        "buy_power_avg5": _win(powers, 5),
-        "buy_power_avg10": _win(powers, 10),
-        "buy_power_avg20": _win(powers, 20),
-        "buy_power_avg30": _win(powers, 30),
+        # میانگین نسبت خام روزها، بعد علامت‌دار — نتیجه همیشه خارج ‎(−۱، +۱)‎
+        "buy_power_avg5": _signed_power(_win(powers, 5)),
+        "buy_power_avg10": _signed_power(_win(powers, 10)),
+        "buy_power_avg20": _signed_power(_win(powers, 20)),
+        "buy_power_avg30": _signed_power(_win(powers, 30)),
         "days": len(rows),
     }
 
@@ -527,7 +541,9 @@ def _compute_row(row: dict, name: str, s: dict, root: Path, raw_db: Path, r) -> 
     pc_sell = rsv / max(rsc, 1)
     row["per_capita_buy_real"] = round(pc_buy, 0)
     row["per_capita_sell_real"] = round(pc_sell, 0)
-    row["buyer_power"] = round(pc_buy / max(pc_sell, 1e-9), 2) if pc_sell else None
+    # قدرت خریدار — علامت‌دار: خریدار غالب ≥ +۱، فروشنده غالب ≤ −۱ (مثلاً ‎−۱٫۱۹)
+    bp = _signed_power(pc_buy / pc_sell if pc_sell else None)
+    row["buyer_power"] = round(bp, 2) if bp is not None else None
     flow = (rbv - rsv) * px if px else 0
     row["real_money_flow"] = int(flow) if (rbv or rsv) else None
     # مخرج حقیقی (نه کل بازار): سهم خالص حقیقی از گردشِ خود حقیقی‌ها، بین −۱ تا +۱
