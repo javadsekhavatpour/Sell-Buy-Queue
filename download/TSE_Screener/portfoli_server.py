@@ -487,7 +487,11 @@ class Handler(BaseHTTPRequestHandler):
                 import history_dashboard
                 p = urllib.parse.parse_qs(qs)
                 syms = [s.strip() for s in p.get("symbols", [""])[0].split(",") if s.strip()]
-                out = history_dashboard.build_history_data(self.root, syms or None)
+                # پیش‌فرض latest=1 ← فقط بروزترین سطر هر نماد (بازشدن سریع)؛
+                # latest=0 ← کل تاریخچه (انتخاب یک نماد یا کلید «کل تاریخچه»)
+                latest = p.get("latest", ["1"])[0] != "0"
+                out = history_dashboard.build_history_data(self.root, syms or None,
+                                                           latest_only=latest)
                 self._send(200, json.dumps(out, ensure_ascii=False).encode("utf-8"),
                            "application/json; charset=utf-8")
             except Exception as e:
@@ -587,6 +591,26 @@ class Handler(BaseHTTPRequestHandler):
                            "application/json; charset=utf-8")
             except Exception as e:
                 self._send(500, json.dumps({"error": str(e)}, ensure_ascii=False).encode("utf-8"),
+                           "application/json; charset=utf-8")
+        elif path == "/api/hcollect_local":  # جمع‌آوری سابقه از اکسل‌های لوکال tradersarena
+            try:
+                import base64
+                import history_local_collector as hlc
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if n else {}
+                days = min(max(int(body.get("days", 30)), 30), 90)
+                up_files = [(f.get("name", "file.xlsx"),
+                             base64.b64decode(f.get("b64", "")))
+                            for f in body.get("files", []) if f.get("b64")]
+                folder = (body.get("folder") or body.get("path") or "").strip()
+                res = hlc.collect(self.root, folder=folder or None,
+                                  files=up_files or None, days=days)
+                res["days"] = days
+                self._send(200, json.dumps(res, ensure_ascii=False).encode("utf-8"),
+                           "application/json; charset=utf-8")
+            except Exception as e:
+                self._send(500, json.dumps({"ok": False, "error": str(e)},
+                                           ensure_ascii=False).encode("utf-8"),
                            "application/json; charset=utf-8")
         else:
             self._send(404, b"not found", "text/plain; charset=utf-8")

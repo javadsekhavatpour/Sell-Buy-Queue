@@ -73,17 +73,41 @@
     .tbl-wrap{height:calc(100vh - 250px)}
     body{font-size:13px}
   }
+  /* کنترل حالت جمع‌آوری: آنلاین/لوکال */
+  .modeseg{display:flex;border:1px solid #3c5ea8;border-radius:8px;overflow:hidden}
+  .modeseg button{background:var(--panel);color:var(--txt);border:none;
+                  padding:5px 12px;font:inherit;font-weight:700;cursor:pointer}
+  .modeseg button.on{background:var(--hdr2);color:#fff}
+  #localpanel{display:none;gap:8px;align-items:center;flex-wrap:wrap;margin:0 14px;
+              padding:6px 10px;background:var(--sel);border:1px solid var(--line);
+              border-radius:8px;font-size:12.5px}
+  #localpanel input[type=text]{background:var(--panel);border:1.5px solid var(--line);
+              border-radius:8px;padding:4px 10px;font:inherit;color:var(--txt);
+              flex:1;min-width:220px;direction:ltr;text-align:left}
+  #local-info{color:var(--mut);font-size:11.5px}
 </style>
 </head>
 <body>
 <div class="toolbar">
   <span class="title-chip">📜 سابقهٔ نمادها <a href="/">← دیده‌بان لایو</a></span>
   <label>نماد: <select id="sym"></select></label>
-  <button class="btn" id="btn-collect">⬇ جمع‌آوری سابقه</button>
+  <span class="modeseg" title="آخرین روز = فقط بروزترین سطر هر نماد (بازشدن سریع صفحه) | کل تاریخچه = همهٔ روزهای انباشته">
+    <button id="view-latest" class="on">آخرین روز هر نماد</button><button id="view-full">کل تاریخچه</button>
+  </span>
+  <span class="modeseg" title="آنلاین = TSETMC | لوکال = اکسل‌های دانلودشده از tradersarena.ir">
+    <button id="mode-online" class="on">🌐 آنلاین</button><button id="mode-local">📁 لوکال</button>
+  </span>
+  <button class="btn" id="btn-collect">⬇ جمع‌آوری سابقه (آنلاین)</button>
   <button class="btn" id="btn-xlsx" title="گزارش اکسل با ستون‌های انتخابی — نماد انتخابی یا همهٔ نمادها">⬇ گزارش اکسل</button>
   <button class="btn" id="btn-hcols" title="افزودن/حذف ستون‌های جدول — انتخاب در همین مرورگر ذخیره می‌شود">ستون‌ها ▾</button>
   <label title="تعداد روزهای بایگانی در portfoli_history — حداقل ۳۰ تا ۹۰ روز">بازهٔ بایگانی (روز):
     <input type="number" id="days" value="30" min="30" max="90" step="5" style="width:64px"></label>
+</div>
+<div id="localpanel">
+  <button class="btn" id="btn-browse" title="انتخاب پوشهٔ اکسل‌ها — نماد از نام فایل مثل tradersarena_ریتون_2026-11-26.xlsx تشخیص داده می‌شود">📁 Browse پوشه</button>
+  <input type="file" id="local-folder" webkitdirectory multiple style="display:none">
+  <input type="text" id="local-path" placeholder="یا آدرس پوشهٔ روی همین ماشین مثل C:\sabeghe یا /home/z/xlsx">
+  <span id="local-info"></span>
 </div>
 <div id="hchooser">
   <h3><span>انتخاب ستون‌ها</span>
@@ -153,6 +177,11 @@ const fmtC = v => {
   return v.toLocaleString("en-US", {maximumFractionDigits: 2});
 };
 let DATA = null;
+// نمای جدول: latest = فقط بروزترین سطر هر نماد (پیش‌فرض سبک) | full = کل تاریخچه
+// برای نماد مشخصِ انتخاب‌شده همیشه کل تاریخچه می‌آید — کندی فقط در «همهٔ نمادها» بود
+const LS_VIEW = "history_view";
+let view = localStorage.getItem(LS_VIEW) === "full" ? "full" : "latest";
+let lastLatest = null;  // آخرین واکشی با برش بروزترین بود؟ — برای راهنمای نوار وضعیت
 const fa = n => Number(n).toLocaleString("fa-IR", {maximumFractionDigits:2});
 const cell = v => (v === null || v === undefined) ? '<span style="color:var(--mut)">—</span>'
   : `<span class="${v > 0 ? "pos" : v < 0 ? "neg" : ""}">${fmtC(v)}</span>`;
@@ -161,7 +190,11 @@ const symParam = new URLSearchParams(location.search).get("symbol");
 async function loadData(){
   document.getElementById("st").textContent = "در حال بارگذاری…";
   try{
-    const r = await fetch("/api/hdata");
+    // اولین بار مقدار select خالی است — نماد لینک‌شده از دیده‌بان یا همهٔ نمادها
+    const pick0 = document.getElementById("sym").value || symParam || "*";
+    const latest = pick0 === "*" && view !== "full";
+    lastLatest = latest;
+    const r = await fetch(`/api/hdata?latest=${latest ? 1 : 0}`);
     const j = await r.json();
     if (!j.ok){ document.getElementById("st").textContent = j.error || "داده‌ای نیست"; return; }
     DATA = j;
@@ -170,7 +203,7 @@ async function loadData(){
       j.symbols.map(s => `<option>${s.name}</option>`).join("");
     // از دکمهٔ 📜 کنار نام نماد در دیده‌بان لایو می‌آید — انتخاب همان نماد
     if (symParam && j.symbols.some(s => s.name === symParam)) sel.value = symParam;
-    sel.onchange = render;
+    sel.onchange = () => loadData();  // تغییر نماد ← واکشی دوباره با درشت‌نمایی درست
     buildHHead();
     render();
   }catch(e){ document.getElementById("st").textContent = "خطای ارتباط با سرور: " + e; }
@@ -205,11 +238,15 @@ function render(){
   }
   tb.innerHTML = html;
   const total = list.reduce((a, s) => a + s.days, 0);
+  const rendered = list.reduce((a, s) => a + s.rows.length, 0);
   const lc = list.map(s => s.last_collected).filter(Boolean).sort().pop();
+  const viewNote = lastLatest
+    ? ` | نمایش: فقط بروزترین روز هر نماد (${fa(rendered)} سطر) — کلید «کل تاریخچه» در نوار ابزار`
+    : ` | نمایش: ${fa(rendered)} سطر`;
   document.getElementById("st").textContent =
     `منبع: data/raw/history.sqlite (فقط دادهٔ خام TSETMC) — ${fa(list.length)} نماد، ` +
-    `${fa(total)} سطر | آخرین روز جمع‌آوری: ${lc || "—"} | محاسبه: ${DATA.generated_at} | ` +
-    `فرمول‌ها: export_portfoli_data.py`;
+    `${fa(total)} روز انباشته${viewNote} | آخرین روز جمع‌آوری: ${lc || "—"} | ` +
+    `محاسبه: ${DATA.generated_at} | فرمول‌ها: export_portfoli_data.py`;
 }
 // گزارش اکسل — ستون‌های انتخابی + نماد انتخابی (یا همهٔ نمادها)
 document.getElementById("btn-xlsx").onclick = async () => {
@@ -247,30 +284,110 @@ document.addEventListener("click", e => {
   if (hch.style.display === "block" && !hch.contains(e.target) &&
       e.target.id !== "btn-hcols") hch.style.display = "none";
 });
+/* حالت جمع‌آوری: آنلاین (TSETMC) یا لوکال (اکسل‌های دانلودشدهٔ tradersarena) */
+let MODE = "online", pickedFiles = [];
+const btnC = document.getElementById("btn-collect"), lgEl = document.getElementById("log");
+const idleLabel = () => MODE === "online" ? "⬇ جمع‌آوری سابقه (آنلاین)" : "⬇ جمع‌آوری سابقه (لوکال)";
+function setMode(m){
+  MODE = m;
+  document.getElementById("mode-online").classList.toggle("on", m === "online");
+  document.getElementById("mode-local").classList.toggle("on", m === "local");
+  document.getElementById("localpanel").style.display = m === "local" ? "flex" : "none";
+  btnC.textContent = idleLabel();
+}
+document.getElementById("mode-online").onclick = () => setMode("online");
+document.getElementById("mode-local").onclick = () => setMode("local");
+/* کلید نمای جدول — آخرین روز هر نماد (پیش‌فرض) یا کل تاریخچه */
+function setView(v){
+  view = v;
+  try{ localStorage.setItem(LS_VIEW, v); }catch(e){ /* localStorage در دسترس نیست */ }
+  document.getElementById("view-latest").classList.toggle("on", v === "latest");
+  document.getElementById("view-full").classList.toggle("on", v === "full");
+  const pick = document.getElementById("sym").value;
+  if (!pick || pick === "*") loadData();  // برای نماد مشخص همیشه کل تاریخچه است
+}
+document.getElementById("view-latest").onclick = () => setView("latest");
+document.getElementById("view-full").onclick = () => setView("full");
+document.getElementById("btn-browse").onclick = () => document.getElementById("local-folder").click();
+document.getElementById("local-folder").onchange = e => {
+  pickedFiles = [...(e.target.files || [])].filter(f => f.name.toLowerCase().endsWith(".xlsx"));
+  document.getElementById("local-path").value = "";
+  document.getElementById("local-info").textContent =
+    pickedFiles.length ? `${fa(pickedFiles.length)} فایل اکسل انتخاب شد` : "فایل اکسلی در پوشهٔ انتخابی نیست";
+};
+const fileToB64 = f => new Promise((res, rej) => {
+  const r = new FileReader();
+  r.onload = () => res(r.result.split(",")[1]);
+  r.onerror = rej;
+  r.readAsDataURL(f);
+});
 document.getElementById("btn-collect").onclick = async () => {
-  const b = document.getElementById("btn-collect"), lg = document.getElementById("log");
-  b.disabled = true; b.textContent = "⏳ در حال جمع‌آوری…";
-  lg.style.display = "block"; lg.textContent = "جمع‌آوری سابقه از TSETMC…";
-  try{
-    const r = await fetch("/api/hcollect", {method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({days: Number(document.getElementById("days").value) || 30})});
-    const j = await r.json();
-    const last = (j.last_dates || []).slice(0, 16)
-      .map(x => `${x.symbol}: ${x.last_collected || "—"}`).join(" | ");
-    lg.textContent = (j.log || []).join("\n") +
-      `\n── بایگانی portfoli_history: ${fa(j.backfilled ?? 0)} ردیف جدید، ` +
-      `${fa(j.updated ?? 0)} به‌روزرسانی تا ${fa(j.archive_days ?? 0)} روز گذشته ──` +
-      `\nآخرین روز جمع‌آوری هر نماد:\n${last}` +
-      (j.error ? `\nخطا: ${j.error}` : "");
-    lg.style.color = j.ok ? "var(--txt)" : "var(--red)";
-    b.textContent = j.ok ? "⬇ جمع‌آوری سابقه" : "⚠ خطا — دوباره";
-    b.disabled = false;
-    if (j.ok) loadData();
-  }catch(e){
-    lg.textContent = "خطا: " + e; b.disabled = false; b.textContent = "⬇ جمع‌آوری سابقه";
+  const b = btnC, lg = lgEl;
+  b.disabled = true;
+  const days = Number(document.getElementById("days").value) || 30;
+  if (MODE === "online"){
+    b.textContent = "⏳ در حال جمع‌آوری آنلاین…";
+    lg.style.display = "block"; lg.textContent = "منبع: آنلاین — جمع‌آوری سابقه از TSETMC…";
+    try{
+      const r = await fetch("/api/hcollect", {method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({days})});
+      const j = await r.json();
+      const last = (j.last_dates || []).slice(0, 16)
+        .map(x => `${x.symbol}: ${x.last_collected || "—"}`).join(" | ");
+      lg.textContent = "── جمع‌آوری آنلاین (TSETMC) ──\n" + (j.log || []).join("\n") +
+        `\n── بایگانی portfoli_history: ${fa(j.backfilled ?? 0)} ردیف جدید، ` +
+        `${fa(j.updated ?? 0)} به‌روزرسانی تا ${fa(j.archive_days ?? 0)} روز گذشته ──` +
+        `\nآخرین روز جمع‌آوری هر نماد:\n${last}` +
+        (j.error ? `\nخطا: ${j.error}` : "");
+      lg.style.color = j.ok ? "var(--txt)" : "var(--red)";
+      b.textContent = j.ok ? idleLabel() : "⚠ خطا — دوباره";
+      b.disabled = false;
+      if (j.ok) loadData();
+    }catch(e){
+      lg.textContent = "خطا: " + e; b.disabled = false; b.textContent = idleLabel();
+    }
+  } else {
+    b.textContent = "⏳ در حال جمع‌آوری لوکال…";
+    lg.style.display = "block"; lg.style.color = "var(--txt)";
+    try{
+      const folder = document.getElementById("local-path").value.trim();
+      if (!pickedFiles.length && !folder){
+        lg.textContent = "منبع: لوکال — اول پوشه را Browse کنید یا آدرس پوشه را بنویسید";
+        lg.style.color = "var(--red)"; b.textContent = idleLabel(); b.disabled = false; return;
+      }
+      lg.textContent = "منبع: لوکال — جمع‌آوری از اکسل‌های tradersarena…";
+      let payload;
+      if (pickedFiles.length){
+        const files = [];
+        for (const f of pickedFiles) files.push({name: f.name, b64: await fileToB64(f)});
+        payload = {files, days};
+      } else {
+        payload = {folder, days};
+      }
+      const r = await fetch("/api/hcollect_local", {method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify(payload)});
+      const j = await r.json();
+      const last = (j.last_dates || []).slice(0, 16)
+        .map(x => `${x.symbol}: ${x.last_collected || "—"}`).join(" | ");
+      lg.textContent = "── جمع‌آوری لوکال (اکسل tradersarena) ──\n" + (j.log || []).join("\n") +
+        `\n── بایگانی portfoli_history: ${fa(j.backfilled ?? 0)} ردیف جدید تا ${fa(j.archive_days ?? 0)} روز ──` +
+        `\nآخرین روز جمع‌آوری هر نماد:\n${last}` +
+        (j.error ? `\nخطا: ${j.error}` : "");
+      lg.style.color = j.ok ? "var(--txt)" : "var(--red)";
+      b.textContent = j.ok ? idleLabel() : "⚠ خطا — دوباره";
+      b.disabled = false;
+      if (j.ok) loadData();
+    }catch(e){
+      lg.textContent = "منبع: لوکال — خطا: " + e;
+      lg.style.color = "var(--red)"; b.disabled = false; b.textContent = idleLabel();
+    }
   }
 };
+/* حالت اولیهٔ کلید نمای جدول (بدون واکشی دوباره) و سپس بارگذاری داده */
+document.getElementById("view-latest").classList.toggle("on", view === "latest");
+document.getElementById("view-full").classList.toggle("on", view === "full");
 loadData();
 </script>
 </body>

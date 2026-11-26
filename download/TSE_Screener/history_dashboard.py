@@ -104,17 +104,36 @@ def _flow(r: dict) -> float | None:
     return (b or 0.0) - (s or 0.0)
 
 
+def _keep_latest(out: dict) -> None:
+    """برش درجا به بروزترین سطر هر نماد — نمای پیش‌فرض سبک صفحهٔ سابقه.
+
+    ردیف‌ها در هر دو مسیر (کش و محاسبهٔ زنده) صعودی بر اساس date_greg هستند؛
+    max برای اطمینان. متادیتای days/last_collected دست‌نخورده می‌ماند و
+    میانگین‌های چندروزه در خود ردیفِ بروز هستند، پس چیزی از دست نمی‌رود.
+    """
+    for s in out.get("symbols", []):
+        rows = s.get("rows") or []
+        if rows:
+            s["rows"] = [max(rows, key=lambda r: r.get("date_greg") or "")]
+
+
 def build_history_data(root: Path = ROOT, symbols: list[str] | None = None,
-                       use_cache: bool = True) -> dict:
+                       use_cache: bool = True, latest_only: bool = False) -> dict:
     """ردیف‌های داشبورد سابقه — اول بانک محاسباتی (سریع)، وگرنه محاسبه از خام.
 
     مسیر سریع: اگر history_computed.sqlite موجود و هم‌رو با بانک خام بود،
     ردیف‌های آماده از آن بازخوانی می‌شود (برای گزارش‌ها و داشبورد).
     وگرنه از بانک خام محاسبه و نتیجه در بانک محاسباتی ذخیره می‌شود.
+
+    latest_only=True ← فقط بروزترین سطر هر نماد (پیش‌فرض بازشدن صفحهٔ سابقه؛
+    چند هزار سطر ← چند سطر). فقط خروجی بریده می‌شود؛ بانک محاسباتی کامل ذخیره
+    می‌شود و گزار‌ش‌ها/بایگانی که این تابع را بدون فلگ صدا می‌زنند دست‌نخورده‌اند.
     """
     if use_cache:
         cached = load_computed(root, symbols)
         if cached is not None:
+            if latest_only:
+                _keep_latest(cached)
             return cached
     db = root / "data" / "raw" / "history.sqlite"
     if not db.exists():
@@ -270,6 +289,8 @@ def build_history_data(root: Path = ROOT, symbols: list[str] | None = None,
         save_computed(root, out)  # بانک محاسباتی — خرابی‌اش مانع خروجی نمی‌شود
     except Exception as se:
         out["computed_save_error"] = str(se)
+    if latest_only:
+        _keep_latest(out)  # بعد از ذخیره — بانک محاسباتی باید کامل بماند
     return out
 
 
