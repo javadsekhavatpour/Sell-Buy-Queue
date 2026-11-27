@@ -125,6 +125,12 @@ GROUPS = [
         ("میانگین قدرت خرید ۲۰ روز", "buy_power_avg20"),
         ("میانگین قدرت خرید ۳۰ روز", "buy_power_avg30"),
     ]),
+    ("تغییرات", [
+        ("اختلاف کدهای خرید و فروش حقیقی", "code_diff"),
+        ("اختلاف سرانه خرید و فروش حقیقی", "per_capita_diff"),
+        ("تفاوت ارزش خرید و فروش حقیقی", "real_value_diff"),
+        ("تفاوت ارزش خرید و فروش حقوقی", "legal_value_diff"),
+    ]),
     ("روند جلسه", [
         ("میانگین نسبت ورود پول (N نمادهٔ اخیر)", "flow_ratio_recent_avg"),
         ("میانگین وزنی ارزش معاملات از ابتدای جلسه", "avg_session_total_value"),
@@ -194,6 +200,10 @@ FIELD_SOURCES = {
     "legal_sell_volume": ("sell_n_volume", "مستقیم — (ct).Sell_N_Volume"),
     "real_buy_value": ("—", "محاسبه: buy_i_volume × قیمت (pc یا pl)"),
     "real_sell_value": ("—", "محاسبه: sell_i_volume × قیمت (pc یا pl)"),
+    "code_diff": ("—", "محاسبه: تعداد خریدار حقیقی − تعداد فروشنده حقیقی (کدهای خرید−فروش)"),
+    "per_capita_diff": ("—", "محاسبه: سرانه خرید حقیقی − سرانه فروش حقیقی (ریال)"),
+    "real_value_diff": ("—", "محاسبه: ارزش خرید حقیقی − ارزش فروش حقیقی (هم‌مقدار ورود پول ریالی)"),
+    "legal_value_diff": ("—", "محاسبه: ارزش خرید حقوقی − ارزش فروش حقوقی (ریال)"),
     "buyer_power": ("—", "محاسبه: (خرید حقیقی÷تعداد خریدار حقیقی) ÷ (فروش حقیقی÷تعداد فروشنده حقیقی)"),
     "per_capita_buy_real": ("—", "محاسبه: buy_i_volume ÷ buy_counti (سرانه خرید)"),
     "per_capita_sell_real": ("—", "محاسبه: sell_i_volume ÷ sell_counti (سرانه فروش)"),
@@ -362,6 +372,11 @@ def _basis_vals(b, raw_db: Path) -> dict:
             out["real_money_flow"] = int(bivv - sivv)
         elif biv is not None and siv is not None and pc:
             out["real_money_flow"] = int((biv - siv) * pc)
+        # نسبت ورود پول حقیقی روز مبنا — سهم خالص حقیقی از گردش خودِ حقیقی‌ها
+        if bivv is not None and sivv is not None and (bivv or sivv):
+            out["real_money_flow_ratio"] = round((bivv - sivv) / (bivv + sivv), 4)
+        elif biv is not None and siv is not None and (biv or siv):
+            out["real_money_flow_ratio"] = round((biv - siv) / (biv + siv), 4)
     d = get("date_jalali")
     if d:  # ارزش معاملات روز مبنا فقط در بانک خام هست (آخرین نمونهٔ آن روز)
         try:
@@ -710,6 +725,12 @@ def _compute_row(row: dict, name: str, s: dict, root: Path, raw_db: Path, r) -> 
     # — چون ClientType ارزش ریالی نمی‌دهد، قیمت واحد (px) از صورت و مخرج حذف می‌شود.
     real_turnover = rbv + rsv
     row["real_money_flow_ratio"] = round((rbv - rsv) / real_turnover, 4) if real_turnover else None
+    # گروه «تغییرات» — اختلاف‌های خرید−فروش همان لحظه (خرید مثبت، فروش منفی)
+    row["code_diff"] = rbc - rsc if (rbc or rsc) else None
+    row["per_capita_diff"] = round(pc_buy - pc_sell, 0) if (rbv or rsv) else None
+    # هم‌مقدار ورود پول ریالی است — طبق درخواست، ستون مستقلِ گروه «تغییرات»
+    row["real_value_diff"] = int((rbv - rsv) * px) if ((rbv or rsv) and px) else None
+    row["legal_value_diff"] = int((lbv - lsv) * px) if ((lbv or lsv) and px) else None
     # درصد تغییر — اول فیلد نمایشی بانک (plp/pcp)، نبود → محاسبه از pl/pc/py
     if r.get("plp") is not None:
         row["pct_last"] = float(r["plp"])
