@@ -85,11 +85,11 @@
   td{border-left:1px solid #e4e9f2;border-bottom:1px solid #eef2f8;
      padding:5px 7px;text-align:center;white-space:nowrap;font-size:13px;
      font-variant-numeric:tabular-nums}
-  tbody tr:nth-child(even) td{background:#f6f8fc}
+  tbody tr.ev td{background:#f6f8fc}
   tbody tr:hover td{background:var(--sel)}
   td.sym-col{position:sticky;right:0;z-index:3;background:#fff;font-weight:700;
              border-right:none;min-width:96px}
-  tbody tr:nth-child(even) td.sym-col{background:#f6f8fc}
+  tbody tr.ev td.sym-col{background:#f6f8fc}
   tbody tr:hover td.sym-col{background:var(--sel)}
   /* هایلایت واژگونی روند — کل سطر */
   tbody tr.div-down{background:#fff3e0}
@@ -103,18 +103,17 @@
   .mini-replay{border:1px solid #b7c6e6;background:#eef3ff;border-radius:4px;
                font-size:9.5px;line-height:1;padding:2px 5px;cursor:pointer;color:#2f5597}
   .mini-replay:hover{background:var(--chip);color:#fff;border-color:var(--chip)}
-  /* سطر دوم «جلسهٔ قبل» — هم‌تراز با ستون‌های جدول؛ فقط با دکمهٔ «📅 جلسهٔ قبل» */
-  tr.hist-row > td{background:#f2f6ff;font-size:11px;
-                   border-bottom:1px solid #e3e9f4}
+  /* سطر دوم «جلسهٔ قبل» — همان رنگ سطر نمادش (کلاس‌های مشترک ev/div-up/div-down)،
+     تفکیک فقط با خطوط جدول؛ با انتخاب میانگین‌های گروه در «ستون‌ها» می‌آید */
   tr.hist-row > td.sym-col{white-space:normal;text-align:right}
   .hist-label{font-weight:700;color:var(--chip);font-size:10.5px;line-height:1.5}
-  #btn-hrow.on{background:var(--chip);color:#fff;border-color:var(--chip)}
+  .btn.on{background:var(--chip);color:#fff;border-color:var(--chip)}
   .pos{color:var(--green);font-weight:700}
   .neg{color:var(--red);font-weight:700}
   .na{color:var(--mut)}
   .row-acts{position:sticky;left:0;background:#fff;z-index:3;min-width:64px;
             border-left:none}
-  tbody tr:nth-child(even) .row-acts{background:#f6f8fc}
+  tbody tr.ev .row-acts{background:#f6f8fc}
   tbody tr:hover .row-acts{background:var(--sel)}
   .row-acts button{border:none;background:none;cursor:pointer;font-size:15px;
                    padding:0 4px;color:#a9b3c6}
@@ -156,7 +155,7 @@
   <button class="btn" id="btn-reload" title="دوباره خواندن portfoli_data.json">↻ بازخوانی</button>
   <button class="btn" id="btn-replay" title="بازپخش شبیه‌سازی جدول از ابتدای جلسه — اگر تاریخ وارد کرده باشید از ابتدای همان روز پخش می‌شود">🎬 بازپخش جدول</button>
   <button class="btn" id="btn-history" title="سابقهٔ نمادها — جمع‌آوری تاریخچهٔ روزانه از TSETMC و داشبورد ورود پول / نسبت‌های ۵ و ۳۰ روزه / واکنش قیمت">📜 سابقهٔ نمادها</button>
-  <button class="btn" id="btn-hrow" title="سطر دوم هر نماد: مقادیر جلسهٔ قبل از امروز برای ستون‌های گروه «جلسهٔ قبل» — ستون‌های انتخاب‌نشدهٔ گروه به انتهای جدول اضافه می‌شوند (ترتیب ستون‌ها حفظ می‌شود) و با بستن دکمه، جدول به حالت قبل برمی‌گردد">📅 جلسهٔ قبل</button>
+  <button class="btn" id="btn-trend" title="نمای «روند جلسه»: قیمت لحظه‌ای/پایانی، حجم، آستانه‌های مجاز، ورود پول + همهٔ شاخص‌های گروه «روند جلسه» (میانگین‌های وزنی از ابتدای جلسه و روند‌ها). با زدن دوباره، ستون‌های قبلی برمی‌گردد؛ حذف ستون دلخواه از «ستون‌ها ▾»">📈 روند جلسه</button>
   <button class="btn" id="btn-export" title="گزارش اکسل جدول لایو — ستون‌های نمایان + همهٔ ستون‌های بلااستفادهٔ بانک خام؛ سطر ۲: نام فیلد بانک">⬇ گزارش اکسل</button>
   <input id="rp-date" list="rp-dates" placeholder="۱۴۰۵/۰۸/۳۰" autocomplete="off"
          title="تاریخ شمسی برای بازپخش — خالی = آخرین جلسه (امروز)"
@@ -250,24 +249,22 @@
 const SYMBOLS = [{"name": "سرود", "ins_code": "11964419322927535", "market_label": "سهام عادی", "instrument_type": "سهم", "trading_hours": {"pre_open": ["08:45", "09:00"], "continuous": ["09:00", "12:30"]}, "days": "شنبه تا چهارشنبه"}, {"name": "دابور", "ins_code": "61332057061846617", "market_label": "سهام عادی", "instrument_type": "سهم", "trading_hours": {"pre_open": ["08:45", "09:00"], "continuous": ["09:00", "12:30"]}, "days": "شنبه تا چهارشنبه"}, {"name": "اهرم", "ins_code": "17914401175772326", "market_label": "صندوق ETF سهامی", "instrument_type": "صندوق سهامی", "trading_hours": {"pre_open": ["08:45", "09:00"], "continuous": ["09:00", "12:30"]}, "days": "شنبه تا چهارشنبه"}, {"name": "ریتون", "ins_code": "14035144070182412", "market_label": "صندوق کالای طلا", "instrument_type": "صندوق کالای طلا", "trading_hours": {"pre_open": ["11:30", "12:00"], "continuous": ["12:00", "18:00"]}, "days": "شنبه تا چهارشنبه"}, {"name": "فسوژ", "ins_code": "56375665074210467", "market_label": "بازار فرابورس", "instrument_type": "سهم", "trading_hours": {"pre_open": ["08:45", "09:00"], "continuous": ["09:00", "12:30"]}, "days": "شنبه تا چهارشنبه"}, {"name": "سیسکو", "ins_code": "5286237676293152", "market_label": "بازار بورس", "instrument_type": "سهم", "trading_hours": {"pre_open": ["08:45", "09:00"], "continuous": ["09:00", "12:30"]}, "days": "شنبه تا چهارشنبه"}, {"name": "کاما", "ins_code": "4942127026063388", "market_label": "بازار بورس", "instrument_type": "سهم", "trading_hours": {"pre_open": ["08:45", "09:00"], "continuous": ["09:00", "12:30"]}, "days": "شنبه تا چهارشنبه"}, {"name": "صبا", "ins_code": "33938004134399485", "market_label": "بازار بورس", "instrument_type": "سهم", "trading_hours": {"pre_open": ["08:45", "09:00"], "continuous": ["09:00", "12:30"]}, "days": "شنبه تا چهارشنبه"}, {"name": "پخش", "ins_code": "12638840758449459", "market_label": "بازار فرابورس", "instrument_type": "سهم", "trading_hours": {"pre_open": ["08:45", "09:00"], "continuous": ["09:00", "12:30"]}, "days": "شنبه تا چهارشنبه"}, {"name": "کپارس", "ins_code": "9698674686691945", "market_label": "بازار بورس", "instrument_type": "سهم", "trading_hours": {"pre_open": ["08:45", "09:00"], "continuous": ["09:00", "12:30"]}, "days": "شنبه تا چهارشنبه"}, {"name": "رانیز", "ins_code": "13386281759834677", "market_label": "بازار فرابورس", "instrument_type": "سهم", "trading_hours": {"pre_open": ["08:45", "09:00"], "continuous": ["09:00", "12:30"]}, "days": "شنبه تا چهارشنبه"}, {"name": "دلر", "ins_code": "4384288570322406", "market_label": "بازار بورس", "instrument_type": "سهم", "trading_hours": {"pre_open": ["08:45", "09:00"], "continuous": ["09:00", "12:30"]}, "days": "شنبه تا چهارشنبه"}, {"name": "کلوند", "ins_code": "32678431934327184", "market_label": "بازار بورس", "instrument_type": "سهم", "trading_hours": {"pre_open": ["08:45", "09:00"], "continuous": ["09:00", "12:30"]}, "days": "شنبه تا چهارشنبه"}, {"name": "دبالک", "ins_code": "71510396252618330", "market_label": "بازار فرابورس", "instrument_type": "سهم", "trading_hours": {"pre_open": ["08:45", "09:00"], "continuous": ["09:00", "12:30"]}, "days": "شنبه تا چهارشنبه"}, {"name": "غدانه", "ins_code": "8234855558996646", "market_label": "بازار فرابورس", "instrument_type": "سهم", "trading_hours": {"pre_open": ["08:45", "09:00"], "continuous": ["09:00", "12:30"]}, "days": "شنبه تا چهارشنبه"}, {"name": "سفانو", "ins_code": "4528607775462304", "market_label": "بازار بورس", "instrument_type": "سهم", "trading_hours": {"pre_open": ["08:45", "09:00"], "continuous": ["09:00", "12:30"]}, "days": "شنبه تا چهارشنبه"}];
 
 /* ───────── هدرها — دقیقاً از شیت اصلی گزارش داشبورد (excel_report.py) ───────── */
-const GROUPS = [{"title":"وضعیت بازار","cols":[{"fa":"تاریخ شمسی","en":"date_jalali"},{"fa":"زمان دقیق","en":"fetch_hms"},{"fa":"نماد","en":"symbol"},{"fa":"فاز بازار","en":"market_phase"},{"fa":"وضعیت نماد","en":"symbol_status"},{"fa":"وضعیت داده","en":"data_status"},{"fa":"خطای دریافت","en":"fetch_error"}]},{"title":"قیمت‌ها","cols":[{"fa":"آخرین قیمت","en":"last_price"},{"fa":"قیمت پایانی","en":"close_price"},{"fa":"اولین قیمت","en":"open_price"},{"fa":"قیمت دیروز","en":"yesterday_price"},{"fa":"بالاترین روز","en":"daily_high"},{"fa":"پایین‌ترین روز","en":"daily_low"},{"fa":"کف مجاز","en":"min_allowed_price"},{"fa":"سقف مجاز","en":"max_allowed_price"}]},{"title":"بهترین قیمت و مجموع","cols":[{"fa":"بهترین خرید","en":"best_bid"},{"fa":"حجم خرید","en":"bid_volume"},{"fa":"بهترین فروش","en":"best_ask"},{"fa":"حجم فروش","en":"ask_volume"},{"fa":"تعداد سفارش خرید","en":"buy_order_count"},{"fa":"تعداد سفارش فروش","en":"sell_order_count"}]},{"title":"پنج ردیف خرید","cols":[{"fa":"bid_price_1","en":"bid_price_1"},{"fa":"bid_vol_1","en":"bid_vol_1"},{"fa":"bid_count_1","en":"bid_count_1"},{"fa":"bid_price_2","en":"bid_price_2"},{"fa":"bid_vol_2","en":"bid_vol_2"},{"fa":"bid_count_2","en":"bid_count_2"},{"fa":"bid_price_3","en":"bid_price_3"},{"fa":"bid_vol_3","en":"bid_vol_3"},{"fa":"bid_count_3","en":"bid_count_3"},{"fa":"bid_price_4","en":"bid_price_4"},{"fa":"bid_vol_4","en":"bid_vol_4"},{"fa":"bid_count_4","en":"bid_count_4"},{"fa":"bid_price_5","en":"bid_price_5"},{"fa":"bid_vol_5","en":"bid_vol_5"},{"fa":"bid_count_5","en":"bid_count_5"}]},{"title":"پنج ردیف فروش","cols":[{"fa":"ask_price_1","en":"ask_price_1"},{"fa":"ask_vol_1","en":"ask_vol_1"},{"fa":"ask_count_1","en":"ask_count_1"},{"fa":"ask_price_2","en":"ask_price_2"},{"fa":"ask_vol_2","en":"ask_vol_2"},{"fa":"ask_count_2","en":"ask_count_2"},{"fa":"ask_price_3","en":"ask_price_3"},{"fa":"ask_vol_3","en":"ask_vol_3"},{"fa":"ask_count_3","en":"ask_count_3"},{"fa":"ask_price_4","en":"ask_price_4"},{"fa":"ask_vol_4","en":"ask_vol_4"},{"fa":"ask_count_4","en":"ask_count_4"},{"fa":"ask_price_5","en":"ask_price_5"},{"fa":"ask_vol_5","en":"ask_vol_5"},{"fa":"ask_count_5","en":"ask_count_5"}]},{"title":"تجمعی","cols":[{"fa":"حجم کل","en":"total_volume"},{"fa":"ارزش کل","en":"total_value"},{"fa":"تعداد معامله کل","en":"total_count"},{"fa":"حجم مبنا","en":"volume_basis"},{"fa":"حجم بازه","en":"interval_volume"},{"fa":"ارزش بازه","en":"interval_value"},{"fa":"تعداد بازه","en":"interval_count"}]},{"title":"حقیقی/حقوقی","cols":[{"fa":"خریداران حقیقی","en":"real_buy_count"},{"fa":"حجم خرید حقیقی","en":"real_buy_volume"},{"fa":"ارزش خرید حقیقی","en":"real_buy_value"},{"fa":"فروشندگان حقیقی","en":"real_sell_count"},{"fa":"حجم فروش حقیقی","en":"real_sell_volume"},{"fa":"ارزش فروش حقیقی","en":"real_sell_value"},{"fa":"خریداران حقوقی","en":"legal_buy_count"},{"fa":"حجم خرید حقوقی","en":"legal_buy_volume"},{"fa":"ارزش خرید حقوقی","en":"legal_buy_value"},{"fa":"فروشندگان حقوقی","en":"legal_sell_count"},{"fa":"حجم فروش حقوقی","en":"legal_sell_volume"},{"fa":"ارزش فروش حقوقی","en":"legal_sell_value"},{"fa":"حجم خرید حقیقی بازه","en":"interval_real_buy_volume"},{"fa":"حجم فروش حقیقی بازه","en":"interval_real_sell_volume"}]},{"title":"شاخص‌های مشتق","cols":[{"fa":"قدرت خریدار","en":"buyer_power"},{"fa":"سرانه خرید","en":"per_capita_buy_real"},{"fa":"سرانه فروش","en":"per_capita_sell_real"},{"fa":"ورود/خروج پول حقیقی","en":"real_money_flow"},{"fa":"نسبت پول حقیقی","en":"real_money_flow_ratio"},{"fa":"نسبت ورود پول ٪","en":"money_flow_ratio_pct"},{"fa":"نسبت ۵ روزه ورود پول ٪","en":"mf_ratio_5d_pct"},{"fa":"نسبت ۳۰ روزه ورود پول ٪","en":"mf_ratio_30d_pct"},{"fa":"نسبت ۵ روزه حجم ٪","en":"volume_ratio_5d_pct"},{"fa":"نسبت ۳۰ روزه حجم ٪","en":"volume_ratio_30d_pct"},{"fa":"از نظر مبلغ خرید یا فروش","en":"buy_sell_amount_side"},{"fa":"نسبت تعداد خریدار به فروشنده","en":"buyer_seller_count_ratio"},{"fa":"امتیاز واکنش قیمت","en":"price_reaction_score"},{"fa":"تعداد خریدار حقیقی","en":"real_buy_count"},{"fa":"تعداد فروشنده حقیقی","en":"real_sell_count"},{"fa":"تعداد خریدار حقوقی","en":"legal_buy_count"},{"fa":"تعداد فروشنده حقوقی","en":"legal_sell_count"}]},{"title":"جلسهٔ قبل","cols":[{"fa":"قیمت پایانی","en":"close_price"},{"fa":"ورود پول","en":"real_money_flow"},{"fa":"ارزش معاملات","en":"total_value"},{"fa":"سرانه خرید","en":"per_capita_buy_real"},{"fa":"سرانه فروش","en":"per_capita_sell_real"},{"fa":"قدرت خرید","en":"buyer_power"},{"fa":"تعداد خریدار حقیقی","en":"real_buy_count"},{"fa":"تعداد فروشنده حقیقی","en":"real_sell_count"},{"fa":"میانگین ۵ روزه ورود پول (ریال)","en":"flow_avg5_rial"},{"fa":"میانگین ۱۰ روزه ورود پول (ریال)","en":"flow_avg10_rial"},{"fa":"میانگین ۲۰ روزه ورود پول (ریال)","en":"flow_avg20_rial"},{"fa":"میانگین ۳۰ روزه ورود پول (ریال)","en":"flow_avg30_rial"},{"fa":"میانگین ۵ روزه حجم (سهم)","en":"vol_avg5"},{"fa":"میانگین ۱۰ روزه حجم (سهم)","en":"vol_avg10"},{"fa":"میانگین ۲۰ روزه حجم (سهم)","en":"vol_avg20"},{"fa":"میانگین ۳۰ روزه حجم (سهم)","en":"vol_avg30"},{"fa":"میانگین قدرت خرید ۵ روز","en":"buy_power_avg5"},{"fa":"میانگین قدرت خرید ۱۰ روز","en":"buy_power_avg10"},{"fa":"میانگین قدرت خرید ۲۰ روز","en":"buy_power_avg20"},{"fa":"میانگین قدرت خرید ۳۰ روز","en":"buy_power_avg30"},{"fa":"میانگین قدرت مطلق ورود پول ۵ روز اخیر (ریال)","en":"flow5_avg_abs"},{"fa":"میانگین قدرت مطلق ورود پول ۳۰ روز اخیر (ریال)","en":"flow30_avg_abs"}]},{"title":"روند جلسه","cols":[{"fa":"میانگین نسبت ورود پول (N نمادهٔ اخیر)","en":"flow_ratio_recent_avg"},{"fa":"روند ورود پول از ابتدای جلسه","en":"trend_flow_session"},{"fa":"روند ورود پول (N نمادهٔ اخیر)","en":"trend_flow_recent"},{"fa":"روند قدرت خریدار از ابتدای جلسه","en":"trend_power_session"},{"fa":"روند قدرت خریدار (N نمادهٔ اخیر)","en":"trend_power_recent"},{"fa":"واژگونی روند","en":"trend_divergence"}]},{"title":"کیفیت داده","cols":[{"fa":"داده کامل","en":"completeness"},{"fa":"فیلدهای مفقود","en":"missing_count"}]},{"title":"نوسان","cols":[{"fa":"٪ نوسان لحظه‌ای","en":"pct_last"},{"fa":"٪ نوسان پایانی","en":"pct_close"}]}];
-const DEFAULT_VISIBLE = ["symbol", "date_jalali", "fetch_hms", "market_phase", "symbol_status", "last_price", "close_price", "pct_last", "pct_close", "best_bid", "bid_volume", "best_ask", "ask_volume", "total_volume", "total_value", "buyer_power", "per_capita_buy_real", "per_capita_sell_real", "real_money_flow", "real_money_flow_ratio", "money_flow_ratio_pct", "mf_ratio_5d_pct", "volume_ratio_5d_pct", "volume_ratio_30d_pct", "buy_sell_amount_side", "buyer_seller_count_ratio", "price_reaction_score", "data_status", "trend_flow_session", "trend_flow_recent", "trend_divergence", "flow_avg5_rial", "flow_avg10_rial", "flow_avg20_rial", "flow_avg30_rial", "vol_avg5", "vol_avg10", "vol_avg20", "vol_avg30", "buy_power_avg5", "buy_power_avg10", "buy_power_avg20", "buy_power_avg30"];
+const GROUPS = [{"title":"وضعیت بازار","cols":[{"fa":"تاریخ شمسی","en":"date_jalali"},{"fa":"زمان دقیق","en":"fetch_hms"},{"fa":"نماد","en":"symbol"},{"fa":"فاز بازار","en":"market_phase"},{"fa":"وضعیت نماد","en":"symbol_status"},{"fa":"وضعیت داده","en":"data_status"},{"fa":"خطای دریافت","en":"fetch_error"}]},{"title":"قیمت‌ها","cols":[{"fa":"آخرین قیمت","en":"last_price"},{"fa":"قیمت پایانی","en":"close_price"},{"fa":"اولین قیمت","en":"open_price"},{"fa":"قیمت دیروز","en":"yesterday_price"},{"fa":"بالاترین روز","en":"daily_high"},{"fa":"پایین‌ترین روز","en":"daily_low"},{"fa":"کف مجاز","en":"min_allowed_price"},{"fa":"سقف مجاز","en":"max_allowed_price"}]},{"title":"بهترین قیمت و مجموع","cols":[{"fa":"بهترین خرید","en":"best_bid"},{"fa":"حجم خرید","en":"bid_volume"},{"fa":"بهترین فروش","en":"best_ask"},{"fa":"حجم فروش","en":"ask_volume"},{"fa":"تعداد سفارش خرید","en":"buy_order_count"},{"fa":"تعداد سفارش فروش","en":"sell_order_count"}]},{"title":"پنج ردیف خرید","cols":[{"fa":"bid_price_1","en":"bid_price_1"},{"fa":"bid_vol_1","en":"bid_vol_1"},{"fa":"bid_count_1","en":"bid_count_1"},{"fa":"bid_price_2","en":"bid_price_2"},{"fa":"bid_vol_2","en":"bid_vol_2"},{"fa":"bid_count_2","en":"bid_count_2"},{"fa":"bid_price_3","en":"bid_price_3"},{"fa":"bid_vol_3","en":"bid_vol_3"},{"fa":"bid_count_3","en":"bid_count_3"},{"fa":"bid_price_4","en":"bid_price_4"},{"fa":"bid_vol_4","en":"bid_vol_4"},{"fa":"bid_count_4","en":"bid_count_4"},{"fa":"bid_price_5","en":"bid_price_5"},{"fa":"bid_vol_5","en":"bid_vol_5"},{"fa":"bid_count_5","en":"bid_count_5"}]},{"title":"پنج ردیف فروش","cols":[{"fa":"ask_price_1","en":"ask_price_1"},{"fa":"ask_vol_1","en":"ask_vol_1"},{"fa":"ask_count_1","en":"ask_count_1"},{"fa":"ask_price_2","en":"ask_price_2"},{"fa":"ask_vol_2","en":"ask_vol_2"},{"fa":"ask_count_2","en":"ask_count_2"},{"fa":"ask_price_3","en":"ask_price_3"},{"fa":"ask_vol_3","en":"ask_vol_3"},{"fa":"ask_count_3","en":"ask_count_3"},{"fa":"ask_price_4","en":"ask_price_4"},{"fa":"ask_vol_4","en":"ask_vol_4"},{"fa":"ask_count_4","en":"ask_count_4"},{"fa":"ask_price_5","en":"ask_price_5"},{"fa":"ask_vol_5","en":"ask_vol_5"},{"fa":"ask_count_5","en":"ask_count_5"}]},{"title":"تجمعی","cols":[{"fa":"حجم کل","en":"total_volume"},{"fa":"ارزش کل","en":"total_value"},{"fa":"تعداد معامله کل","en":"total_count"},{"fa":"حجم مبنا","en":"volume_basis"},{"fa":"حجم بازه","en":"interval_volume"},{"fa":"ارزش بازه","en":"interval_value"},{"fa":"تعداد بازه","en":"interval_count"}]},{"title":"حقیقی/حقوقی","cols":[{"fa":"خریداران حقیقی","en":"real_buy_count"},{"fa":"حجم خرید حقیقی","en":"real_buy_volume"},{"fa":"ارزش خرید حقیقی","en":"real_buy_value"},{"fa":"فروشندگان حقیقی","en":"real_sell_count"},{"fa":"حجم فروش حقیقی","en":"real_sell_volume"},{"fa":"ارزش فروش حقیقی","en":"real_sell_value"},{"fa":"خریداران حقوقی","en":"legal_buy_count"},{"fa":"حجم خرید حقوقی","en":"legal_buy_volume"},{"fa":"ارزش خرید حقوقی","en":"legal_buy_value"},{"fa":"فروشندگان حقوقی","en":"legal_sell_count"},{"fa":"حجم فروش حقوقی","en":"legal_sell_volume"},{"fa":"ارزش فروش حقوقی","en":"legal_sell_value"},{"fa":"حجم خرید حقیقی بازه","en":"interval_real_buy_volume"},{"fa":"حجم فروش حقیقی بازه","en":"interval_real_sell_volume"}]},{"title":"شاخص‌های مشتق","cols":[{"fa":"قدرت خریدار","en":"buyer_power"},{"fa":"سرانه خرید","en":"per_capita_buy_real"},{"fa":"سرانه فروش","en":"per_capita_sell_real"},{"fa":"ورود/خروج پول حقیقی","en":"real_money_flow"},{"fa":"نسبت پول حقیقی","en":"real_money_flow_ratio"},{"fa":"نسبت ورود پول ٪","en":"money_flow_ratio_pct"},{"fa":"نسبت ۵ روزه ورود پول ٪","en":"mf_ratio_5d_pct"},{"fa":"نسبت ۳۰ روزه ورود پول ٪","en":"mf_ratio_30d_pct"},{"fa":"نسبت ۵ روزه حجم ٪","en":"volume_ratio_5d_pct"},{"fa":"نسبت ۳۰ روزه حجم ٪","en":"volume_ratio_30d_pct"},{"fa":"از نظر مبلغ خرید یا فروش","en":"buy_sell_amount_side"},{"fa":"نسبت تعداد خریدار به فروشنده","en":"buyer_seller_count_ratio"},{"fa":"امتیاز واکنش قیمت","en":"price_reaction_score"},{"fa":"تعداد خریدار حقیقی","en":"real_buy_count"},{"fa":"تعداد فروشنده حقیقی","en":"real_sell_count"},{"fa":"تعداد خریدار حقوقی","en":"legal_buy_count"},{"fa":"تعداد فروشنده حقوقی","en":"legal_sell_count"}]},{"title":"جلسهٔ قبل","cols":[{"fa":"قیمت پایانی","en":"close_price"},{"fa":"ورود پول","en":"real_money_flow"},{"fa":"ارزش معاملات","en":"total_value"},{"fa":"سرانه خرید","en":"per_capita_buy_real"},{"fa":"سرانه فروش","en":"per_capita_sell_real"},{"fa":"قدرت خرید","en":"buyer_power"},{"fa":"تعداد خریدار حقیقی","en":"real_buy_count"},{"fa":"تعداد فروشنده حقیقی","en":"real_sell_count"},{"fa":"میانگین ۵ روزه ورود پول (ریال)","en":"flow_avg5_rial"},{"fa":"میانگین ۱۰ روزه ورود پول (ریال)","en":"flow_avg10_rial"},{"fa":"میانگین ۲۰ روزه ورود پول (ریال)","en":"flow_avg20_rial"},{"fa":"میانگین ۳۰ روزه ورود پول (ریال)","en":"flow_avg30_rial"},{"fa":"میانگین ۵ روزه حجم (سهم)","en":"vol_avg5"},{"fa":"میانگین ۱۰ روزه حجم (سهم)","en":"vol_avg10"},{"fa":"میانگین ۲۰ روزه حجم (سهم)","en":"vol_avg20"},{"fa":"میانگین ۳۰ روزه حجم (سهم)","en":"vol_avg30"},{"fa":"میانگین قدرت خرید ۵ روز","en":"buy_power_avg5"},{"fa":"میانگین قدرت خرید ۱۰ روز","en":"buy_power_avg10"},{"fa":"میانگین قدرت خرید ۲۰ روز","en":"buy_power_avg20"},{"fa":"میانگین قدرت خرید ۳۰ روز","en":"buy_power_avg30"},{"fa":"میانگین قدرت مطلق ورود پول ۵ روز اخیر (ریال)","en":"flow5_avg_abs"},{"fa":"میانگین قدرت مطلق ورود پول ۳۰ روز اخیر (ریال)","en":"flow30_avg_abs"}]},{"title":"روند جلسه","cols":[{"fa":"میانگین نسبت ورود پول (N نمادهٔ اخیر)","en":"flow_ratio_recent_avg"},{"fa":"میانگین وزنی ارزش معاملات از ابتدای جلسه","en":"avg_session_total_value"},{"fa":"میانگین وزنی سرانه خرید از ابتدای جلسه","en":"avg_session_per_capita_buy"},{"fa":"میانگین وزنی سرانه فروش از ابتدای جلسه","en":"avg_session_per_capita_sell"},{"fa":"میانگین وزنی قدرت خرید از ابتدای جلسه","en":"avg_session_buyer_power"},{"fa":"میانگین وزنی تعداد خریدار حقیقی از ابتدای جلسه","en":"avg_session_real_buy_count"},{"fa":"میانگین وزنی تعداد فروشنده حقیقی از ابتدای جلسه","en":"avg_session_real_sell_count"},{"fa":"میانگین وزنی تعداد خریدار حقوقی از ابتدای جلسه","en":"avg_session_legal_buy_count"},{"fa":"میانگین وزنی تعداد فروشنده حقوقی از ابتدای جلسه","en":"avg_session_legal_sell_count"},{"fa":"میانگین وزنی ارزش خرید حقیقی از ابتدای جلسه","en":"avg_session_real_buy_value"},{"fa":"میانگین وزنی ارزش فروش حقیقی از ابتدای جلسه","en":"avg_session_real_sell_value"},{"fa":"روند ورود پول از ابتدای جلسه","en":"trend_flow_session"},{"fa":"روند ورود پول (N نمادهٔ اخیر)","en":"trend_flow_recent"},{"fa":"روند قدرت خریدار از ابتدای جلسه","en":"trend_power_session"},{"fa":"روند قدرت خریدار (N نمادهٔ اخیر)","en":"trend_power_recent"},{"fa":"واژگونی روند","en":"trend_divergence"}]},{"title":"کیفیت داده","cols":[{"fa":"داده کامل","en":"completeness"},{"fa":"فیلدهای مفقود","en":"missing_count"}]},{"title":"نوسان","cols":[{"fa":"٪ نوسان لحظه‌ای","en":"pct_last"},{"fa":"٪ نوسان پایانی","en":"pct_close"}]}];
+const DEFAULT_VISIBLE = ["symbol", "date_jalali", "fetch_hms", "market_phase", "symbol_status", "last_price", "close_price", "pct_last", "pct_close", "best_bid", "bid_volume", "best_ask", "ask_volume", "total_volume", "total_value", "buyer_power", "per_capita_buy_real", "per_capita_sell_real", "real_money_flow", "real_money_flow_ratio", "money_flow_ratio_pct", "mf_ratio_5d_pct", "volume_ratio_5d_pct", "volume_ratio_30d_pct", "buy_sell_amount_side", "buyer_seller_count_ratio", "price_reaction_score", "data_status", "trend_flow_session", "trend_flow_recent", "trend_divergence"];
 
 /* ───────── وضعیت ───────── */
 const LS = {cols:"pf_cols_v1", favs:"pf_favs_v1", hid:"pf_hidden_v1", win:"pf_win_v1",
-            hsnap:"pf_hsnap_v1"};
+            tsnap:"pf_tsnap_v1"};
 /* نشانگر بیلد — برای تشخیص نسخهٔ اجرایی در مرورگر (کش/استقرار قدیمی را لو می‌دهد) */
-const BUILD = "1405-09-06-b";
+const BUILD = "1405-09-06-c";
 /* گروه «جلسهٔ قبل» — مقادیرش در سطر دومِ هر نماد می‌نشیند، نه در سطر لحظه‌ای:
    • AVERAGES (۱۴ میانگین وزنی): دادهٔ جلساتِ قبل از امروز‌اند و هیچ‌وقت در سطر
-     لحظه‌ای مقدار ندارند (سلولشان «—» است) — فقط سطر دوم.
+     لحظه‌ای مقدار ندارند (سلولشان «—» است) — فقط سطر دوم. سطر دوم وقتی فعال است
+     که حداقل یک میانگین در ستون‌ها باشد؛ یعنی انتخاب گروه از «ستون‌ها ▾» یا
+     دکمه‌های گروهِ کنار جدول، خودش سطر دوم را می‌سازد — دکمهٔ جداگانه ندارد.
    • ۸ فیلد مقایسه‌ای (قیمت پایانی، ورود پول، ارزش معاملات، سرانه‌ها، قدرت خرید،
      تعداد خریدار/فروشنده حقیقی): در سطر لحظه‌ای مقدارِ امروز را دارند (عادی) و در
-     سطر دوم مقدارِ جلسهٔ قبل از r.hist_vals (سرور، از ردیف مبنا با همان فرمول‌ها).
-   دکمهٔ «📅 جلسهٔ قبل»: ستون‌های گروهِ انتخاب‌نشده را به «انتهای» ستون‌ها اضافه
-   می‌کند (ترتیب ستون‌های فعلی به‌هم نمی‌خورد) و سطر دوم دقیقاً هم‌تراز با همین
-   ستون‌ها می‌سازد؛ با بستن دکمه ستون‌ها به حالت قبل بازمی‌گردند (اسنپ‌شات).
-   تنظیم دلخواه ستون‌ها از «ستون‌ها ▾» — گروه «جلسهٔ قبل» مثل بقیهٔ گروه‌ها. */
+     سطر دوم مقدارِ جلسهٔ قبل از r.hist_vals (سرور، از ردیف مبنا با همان فرمول‌ها). */
 const AVERAGES = new Set(["flow_avg5_rial","flow_avg10_rial","flow_avg20_rial",
   "flow_avg30_rial","vol_avg5","vol_avg10","vol_avg20","vol_avg30",
   "buy_power_avg5","buy_power_avg10","buy_power_avg20","buy_power_avg30",
@@ -275,10 +272,35 @@ const AVERAGES = new Set(["flow_avg5_rial","flow_avg10_rial","flow_avg20_rial",
 const HIST_GROUP = new Set([...AVERAGES, "close_price","real_money_flow","total_value",
   "per_capita_buy_real","per_capita_sell_real","buyer_power",
   "real_buy_count","real_sell_count"]);
-let histRow = localStorage.getItem("pf_histrow_v1") === "1";
+/* جای هر فیلدِ گروه «جلسهٔ قبل» کنار ستون مرتبطش — میانگین ورود پول بعد از
+   ورود پول، میانگین حجم بعد از حجم کل، میانگین قدرت بعد از قدرت خرید و… —
+   نه یک‌جا در انتهای جدول. لنگر اصلی نبود، اولین ستونِ بالاترِ همان زنجیره
+   جایگاه است (مثلاً میانگین ۱۰روزه وقتی میانگین ۵روزه حذف شده، بعد از ورود پول). */
+const HIST_AFTER = {
+  flow_avg5_rial:"real_money_flow", flow_avg10_rial:"flow_avg5_rial",
+  flow_avg20_rial:"flow_avg10_rial", flow_avg30_rial:"flow_avg20_rial",
+  flow5_avg_abs:"flow_avg30_rial", flow30_avg_abs:"flow5_avg_abs",
+  vol_avg5:"total_volume", vol_avg10:"vol_avg5", vol_avg20:"vol_avg10",
+  vol_avg30:"vol_avg20",
+  buy_power_avg5:"buyer_power", buy_power_avg10:"buy_power_avg5",
+  buy_power_avg20:"buy_power_avg10", buy_power_avg30:"buy_power_avg20",
+  close_price:"last_price", real_money_flow:"per_capita_sell_real",
+  total_value:"total_volume", per_capita_buy_real:"buyer_power",
+  per_capita_sell_real:"per_capita_buy_real",
+  real_buy_count:"per_capita_buy_real", real_sell_count:"per_capita_sell_real",
+};
 let visible = (load(LS.cols) || DEFAULT_VISIBLE.slice());
-if (!histRow) visible = visible.filter(en => !AVERAGES.has(en));
-let histSnapshot = load(LS.hsnap);   // ستون‌های قبل از باز کردن دکمه — برای بازگردانی
+// سطر دوم «جلسهٔ قبل» فعال ⇔ حداقل یک میانگینِ گروه در ستون‌ها باشد
+const histActive = () => visible.some(en => AVERAGES.has(en));
+// مرتب‌سازی موقعیتی فیلدهای گروه — انتخاب‌های نسخه‌های قدیمی که همه یک‌جا در
+// انتهای جدول بودند، به جای مرتبطِ هر فیلد منتقل می‌شود (انتخاب عوض نمی‌شود)
+(function normalizeHistOrder(){
+  const sel = visible.filter(en => HIST_GROUP.has(en));
+  if (!sel.length || sel.length === visible.length) return;
+  visible = visible.filter(en => !HIST_GROUP.has(en));
+  addCols(sel);
+  save(LS.cols, visible);
+})();
 let favs = load(LS.favs) || [];
 let hidden = load(LS.hid) || [];
 let onlyFav = false;
@@ -440,10 +462,14 @@ function sortedRows(rows){
 function renderBody(){
   const rows = sortedRows(currentRows());
   const tb = document.getElementById("tbody");
-  tb.innerHTML = rows.map(r => {
+  tb.innerHTML = rows.map((r, i) => {
     // هایلایت کل سطر هنگام واژگونی روند (نزولی = نارنجی، صعودی = سبز)
     const dvk = r.trend_divergence_kind;
-    let t = `<tr class="${dvk === "down" ? "div-down" : dvk === "up" ? "div-up" : ""}">`;
+    /* راه‌راه با کلاس صریح (نه nth-child) تا درج سطر دوم، رنگ سطرهای بعدی را
+       نیندازد؛ سطر دوم «جلسهٔ قبل» همین کلاس‌ها را می‌گیرد → دو سطر هم‌رنگ‌اند */
+    const cls = ((dvk === "down" ? "div-down " : dvk === "up" ? "div-up " : "")
+              + (i % 2 ? "ev" : "")).trim();
+    let t = `<tr class="${cls}">`;
     const ml = r._meta && r._meta.market_label ? r._meta.market_label : "";
     t += `<td class="sym-col"><div class="sym-line"><span>${r.symbol}</span>` +
          `<button class="mini-replay" data-srp="${r.symbol}" ` +
@@ -461,9 +487,9 @@ function renderBody(){
     // سطر دوم «جلسهٔ قبل» — دقیقاً هم‌تراز با ستون‌های جدول: زیر هر ستونِ گروه
     // «جلسهٔ قبل» مقدارِ جلسهٔ قبل می‌نشیند (میانگین‌ها از خودِ ردیف، فیلدهای
     // مقایسه‌ای از hist_vals سرور)؛ بقیهٔ سلول‌ها خالی تا شکل ستون‌ها عوض نشود
-    if (histRow){
+    if (histActive()){
       const hv = r.hist_vals || {};
-      t += `<tr class="hist-row"><td class="sym-col">` +
+      t += `<tr class="hist-row ${cls}"><td class="sym-col">` +
            `<div class="hist-label">📅 جلسهٔ قبل` +
            (r.hist_basis_date ? ` — تا ${r.hist_basis_date}` : "") + `</div></td>`;
       for (const en of visible)
@@ -502,7 +528,8 @@ function renderGroups(){
     const t = b.dataset.g;
     const ens = GROUPS.find(g => g.title === t).cols.map(c => c.en);
     const allIn = ens.every(e => visible.includes(e));
-    visible = allIn ? visible.filter(e => !ens.includes(e)) : [...visible, ...ens.filter(e => !visible.includes(e))];
+    if (allIn) visible = visible.filter(e => !ens.includes(e)); else addCols(ens);
+    if (!visible.length) visible = ["symbol"];
     save(LS.cols, visible); syncGroupBoxes(); renderAll();
   }));
   syncGroupBoxes();
@@ -534,10 +561,25 @@ function renderStatus(){
 function renderAll(){ renderHead(); renderBody(); renderStatus(); }
 
 /* ───────── انتخابگر ستون‌ها ───────── */
+/* افزودن ستون‌ها با جایگذاری هوشمند — فیلدهای گروه «جلسهٔ قبل» کنار ستون
+   مرتبطشان می‌نشینند (بر اساس HIST_AFTER)، بقیه مثل قبل به انتها می‌روند */
+function addCols(ens){
+  for (const en of ens){
+    if (visible.includes(en)) continue;
+    let cur = en, pos = -1;
+    for (let d = 0; d < 6 && pos < 0; d++){
+      const a = HIST_AFTER[cur];
+      if (a === undefined) break;
+      pos = visible.indexOf(a);
+      cur = a;
+    }
+    if (pos >= 0) visible.splice(pos + 1, 0, en); else visible.push(en);
+  }
+  if (!visible.length) visible = ["symbol"];
+}
 function buildChooser(){
   const wrap = document.getElementById("chooser-groups");
-  // گروه «تاریخچه» اینجاست — میانگین‌های جلسات قبل فقط از دکمهٔ «📅 میانگین جلسهٔ قبل»
-  wrap.innerHTML = GROUPS.filter(g => g.title !== "تاریخچه").map(g => `
+  wrap.innerHTML = GROUPS.map(g => `
     <div class="cg-block">
       <div class="cg-title"><span>${g.title}</span>
         <span class="mini"><button data-gall="${g.title}">همه</button><button data-gnone="${g.title}">هیچ</button></span>
@@ -550,13 +592,12 @@ function buildChooser(){
     </div>`).join("");
   wrap.querySelectorAll("input[data-col]").forEach(cb => cb.addEventListener("change", () => {
     const en = cb.dataset.col;
-    visible = cb.checked ? [...visible, en] : visible.filter(x => x !== en);
-    if (!visible.length) visible = [EN2FA ? "symbol" : en];
+    if (cb.checked) addCols([en]); else visible = visible.filter(x => x !== en);
     save(LS.cols, visible); syncChooserChecks(); syncGroupBoxes(); renderAll();
   }));
   wrap.querySelectorAll("[data-gall]").forEach(b => b.addEventListener("click", () => {
     const ens = GROUPS.find(g => g.title === b.dataset.gall).cols.map(c => c.en);
-    visible = [...new Set([...visible, ...ens])]; save(LS.cols, visible);
+    addCols(ens); save(LS.cols, visible);
     syncChooserChecks(); syncGroupBoxes(); renderAll();
   }));
   wrap.querySelectorAll("[data-gnone]").forEach(b => b.addEventListener("click", () => {
@@ -753,28 +794,26 @@ document.getElementById("btn-replay").addEventListener("click", () =>
 document.getElementById("btn-history").addEventListener("click", () => {
   location.href = "/history";
 });
-// سطر دوم «جلسهٔ قبل» — باز/بسته؛ ستون‌های گروه به انتها اضافه و با بستن بازگردانی می‌شوند
-document.getElementById("btn-hrow").addEventListener("click", () => {
-  histRow = !histRow;
-  localStorage.setItem("pf_histrow_v1", histRow ? "1" : "0");
-  if (histRow){
-    // اسنپ‌شات ستون‌های فعلی — برای بازگردانی هنگام بستن دکمه
-    histSnapshot = visible.slice();
-    save(LS.hsnap, histSnapshot);
-    // ستون‌های انتخاب‌نشدهٔ گروه «جلسهٔ قبل» → انتهای ستون‌ها (ترتیب فعلی حفظ می‌ماند)
-    const add = [...HIST_GROUP].filter(en => !visible.includes(en));
-    if (add.length){ visible = visible.concat(add); save(LS.cols, visible); }
+// نمای «روند جلسه» — پریست ستون‌ها با بازگردانی اسنپ‌شات و انتخاب ذخیره‌شده
+const TREND_PRESET = ["symbol", "last_price", "close_price", "total_volume",
+  "max_allowed_price", "min_allowed_price", "real_money_flow",
+  ...(GROUPS.find(g => g.title === "روند جلسه").cols.map(c => c.en))];
+let trendOn = localStorage.getItem("pf_trend_on_v1") === "1";
+document.getElementById("btn-trend").addEventListener("click", () => {
+  trendOn = !trendOn;
+  localStorage.setItem("pf_trend_on_v1", trendOn ? "1" : "0");
+  if (trendOn){
+    save(LS.tsnap, visible.slice());   // ستون‌های فعلی برای بازگردانی
+    visible = TREND_PRESET.slice();
   }else{
-    // بازگردانی ستون‌های قبل از باز کردن — میانگین‌ها از جدول خارج می‌شوند
-    const snap = load(LS.hsnap);
-    visible = (snap && snap.length ? snap : visible.filter(en => !AVERAGES.has(en)));
-    save(LS.cols, visible);
-    histSnapshot = null;
+    const snap = load(LS.tsnap);
+    visible = (snap && snap.length ? snap : visible);
   }
-  document.getElementById("btn-hrow").classList.toggle("on", histRow);
-  renderAll();
+  save(LS.cols, visible);
+  document.getElementById("btn-trend").classList.toggle("on", trendOn);
+  syncChooserChecks(); syncGroupBoxes(); renderAll();
 });
-document.getElementById("btn-hrow").classList.toggle("on", histRow);
+document.getElementById("btn-trend").classList.toggle("on", trendOn);
 // لیست تاریخ‌های موجود در بانک‌های خام — پیشنهاد فیلد تاریخ (بدون سرور، فیلد آزاد می‌ماند)
 apiGet("/api/dates").then(j => {
   document.getElementById("rp-dates").innerHTML =

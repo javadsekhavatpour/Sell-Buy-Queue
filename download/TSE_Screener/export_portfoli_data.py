@@ -127,6 +127,16 @@ GROUPS = [
     ]),
     ("روند جلسه", [
         ("میانگین نسبت ورود پول (N نمادهٔ اخیر)", "flow_ratio_recent_avg"),
+        ("میانگین وزنی ارزش معاملات از ابتدای جلسه", "avg_session_total_value"),
+        ("میانگین وزنی سرانه خرید از ابتدای جلسه", "avg_session_per_capita_buy"),
+        ("میانگین وزنی سرانه فروش از ابتدای جلسه", "avg_session_per_capita_sell"),
+        ("میانگین وزنی قدرت خرید از ابتدای جلسه", "avg_session_buyer_power"),
+        ("میانگین وزنی تعداد خریدار حقیقی از ابتدای جلسه", "avg_session_real_buy_count"),
+        ("میانگین وزنی تعداد فروشنده حقیقی از ابتدای جلسه", "avg_session_real_sell_count"),
+        ("میانگین وزنی تعداد خریدار حقوقی از ابتدای جلسه", "avg_session_legal_buy_count"),
+        ("میانگین وزنی تعداد فروشنده حقوقی از ابتدای جلسه", "avg_session_legal_sell_count"),
+        ("میانگین وزنی ارزش خرید حقیقی از ابتدای جلسه", "avg_session_real_buy_value"),
+        ("میانگین وزنی ارزش فروش حقیقی از ابتدای جلسه", "avg_session_real_sell_value"),
         ("روند ورود پول از ابتدای جلسه", "trend_flow_session"),
         ("روند ورود پول (N نمادهٔ اخیر)", "trend_flow_recent"),
         ("روند قدرت خریدار از ابتدای جلسه", "trend_power_session"),
@@ -214,6 +224,16 @@ FIELD_SOURCES = {
     "pct_last": ("plp", "مستقیم — plp (بانک)؛ نبود → محاسبه از pl/py"),
     "pct_close": ("pcp", "مستقیم — pcp (بانک)؛ نبود → محاسبه از pc/py"),
     "flow_ratio_recent_avg": ("—", "محاسبه: میانگین نسبت ورود پول ٪ در N نمونهٔ اخیر"),
+    "avg_session_total_value": ("—", "میانگین وزنی از ابتدای جلسه: منحنی تجمیعی ارزش معاملات، وزن هر بازه = ارزش معاملات همان بازه"),
+    "avg_session_per_capita_buy": ("—", "میانگین وزنی از ابتدای جلسه: منحنی تجمیعی سرانه خرید حقیقی با وزن ارزش معاملات بازه"),
+    "avg_session_per_capita_sell": ("—", "میانگین وزنی از ابتدای جلسه: منحنی تجمیعی سرانه فروش حقیقی با وزن ارزش معاملات بازه"),
+    "avg_session_buyer_power": ("—", "میانگین وزنی از ابتدای جلسه: منحنی تجمیعی نسبت قدرت (سپس علامت‌دار) با وزن ارزش معاملات بازه"),
+    "avg_session_real_buy_count": ("—", "میانگین وزنی از ابتدای جلسه: منحنی تجمیعی تعداد خریدار حقیقی با وزن ارزش معاملات بازه"),
+    "avg_session_real_sell_count": ("—", "میانگین وزنی از ابتدای جلسه: منحنی تجمیعی تعداد فروشنده حقیقی با وزن ارزش معاملات بازه"),
+    "avg_session_legal_buy_count": ("—", "میانگین وزنی از ابتدای جلسه: منحنی تجمیعی تعداد خریدار حقوقی با وزن ارزش معاملات بازه"),
+    "avg_session_legal_sell_count": ("—", "میانگین وزنی از ابتدای جلسه: منحنی تجمیعی تعداد فروشنده حقوقی با وزن ارزش معاملات بازه"),
+    "avg_session_real_buy_value": ("—", "میانگین وزنی از ابتدای جلسه: منحنی تجمیعی ارزش خرید حقیقی (حجم×قیمت) با وزن ارزش معاملات بازه"),
+    "avg_session_real_sell_value": ("—", "میانگین وزنی از ابتدای جلسه: منحنی تجمیعی ارزش فروش حقیقی (حجم×قیمت) با وزن ارزش معاملات بازه"),
     "trend_flow_session": ("—", "محاسبه: شیب رگرسیون سری ورود پول کل جلسه، نرمال به دامنه — آستانه ±۰٫۱۵/±۰٫۵"),
     "trend_flow_recent": ("—", "محاسبه: همان، فقط روی N نمونهٔ اخیر"),
     "trend_power_session": ("—", "محاسبه: همان، روی سری قدرت خریدار کل جلسه"),
@@ -529,26 +549,81 @@ def _trends_from_series(flow, power, window: int = TREND_WINDOW_DEFAULT) -> dict
 
 
 def _session_trends(raw_db: Path, window: int = TREND_WINDOW_DEFAULT) -> dict:
-    """سری‌های نسبت ورود پول و قدرت خریدارِ جلسه از بانک خام و روند آن‌ها."""
+    """سری‌های نسبت ورود پول و قدرت خریدارِ جلسه از بانک خام، روند آن‌ها و
+    میانگین‌های وزنیِ «از ابتدای جلسه» (گروه «روند جلسه»).
+
+    میانگین وزنی هر متریک = میانگینِ منحنیِ تجمیعی آن در طول جلسه با وزنِ ارزش
+    معاملاتِ همان بازه (اختلاف tval دو نمونهٔ پیوسته) — دقیقه‌های پرمعامله وزن
+    بیشتری دارند؛ «مشابه گزارشات» یعنی وزنی، نه میانگین سادهٔ نمونه‌ها.
+    قدرت خرید هم از میانگین وزنیِ نسبتِ خام ساخته و بعد علامت‌دار می‌شود —
+    هم‌روش با میانگین‌های چندروزهٔ بانک سابقه.
+    """
     con = sqlite3.connect(str(raw_db))
     try:
         rows = con.execute(
-            "SELECT buy_i_volume, sell_i_volume, buy_counti, "
-            "sell_counti, tval, pc, pl "
+            "SELECT buy_i_volume, sell_i_volume, buy_counti, sell_counti, "
+            "buy_countn, sell_countn, tval, pc, pl "
             "FROM raw_snapshots WHERE date_jalali = (SELECT MAX(date_jalali) "
             "FROM raw_snapshots) ORDER BY id"
         ).fetchall()
     finally:
         con.close()
     flow, power = [], []
-    for rbv, rsv, rbc, rsc, tval, close_p, last_p in rows:
-        rbv, rsv, rbc, rsc, tval = (x or 0 for x in (rbv, rsv, rbc, rsc, tval))
+    curve: dict[str, list] = {}
+    prev_tval = 0
+    for rbv, rsv, rbc, rsc, lbc, lsc, tval, close_p, last_p in rows:
+        rbv, rsv, tval = (x or 0 for x in (rbv, rsv, tval))
+        rbc, rsc, lbc, lsc = (x or 0 for x in (rbc, rsc, lbc, lsc))
         px = float(close_p or 0) or float(last_p or 0)
         if tval and px:
             flow.append((rbv - rsv) * px / tval * 100)
         if rbc and rsc:
             power.append((rbv / rbc) / (rsv / rsc))
-    return _trends_from_series(flow, power, window)
+        w = max(tval - prev_tval, 0)   # وزن بازه = ارزش معاملات همان فاصله
+        prev_tval = tval
+        if not w:
+            continue
+        if tval and px:
+            curve.setdefault("avg_session_total_value", []).append((tval, w))
+            if rbc:
+                curve.setdefault("avg_session_per_capita_buy", []).append(
+                    (rbv / max(rbc, 1), w))
+            if rsc:
+                curve.setdefault("avg_session_per_capita_sell", []).append(
+                    (rsv / max(rsc, 1), w))
+            if rbc and rsc:
+                curve.setdefault("avg_session_buyer_power", []).append(
+                    ((rbv / rbc) / (rsv / rsc), w))
+            curve.setdefault("avg_session_real_buy_value", []).append((rbv * px, w))
+            curve.setdefault("avg_session_real_sell_value", []).append((rsv * px, w))
+        if rbc:
+            curve.setdefault("avg_session_real_buy_count", []).append((rbc, w))
+        if rsc:
+            curve.setdefault("avg_session_real_sell_count", []).append((rsc, w))
+        if lbc:
+            curve.setdefault("avg_session_legal_buy_count", []).append((lbc, w))
+        if lsc:
+            curve.setdefault("avg_session_legal_sell_count", []).append((lsc, w))
+
+    def _wavg(key: str) -> float | None:
+        pairs = curve.get(key) or []
+        sw = sum(w for _, w in pairs)
+        return sum(v * w for v, w in pairs) / sw if pairs and sw else None
+
+    out = _trends_from_series(flow, power, window)
+    for key in ("avg_session_total_value", "avg_session_real_buy_count",
+                "avg_session_real_sell_count", "avg_session_legal_buy_count",
+                "avg_session_legal_sell_count", "avg_session_real_buy_value",
+                "avg_session_real_sell_value"):
+        v = _wavg(key)
+        out[key] = int(round(v)) if v is not None else None
+    for key in ("avg_session_per_capita_buy", "avg_session_per_capita_sell"):
+        v = _wavg(key)
+        out[key] = round(v, 0) if v is not None else None
+    bp = _wavg("avg_session_buyer_power")
+    bp = _signed_power(bp) if bp is not None else None
+    out["avg_session_buyer_power"] = round(bp, 2) if bp is not None else None
+    return out
 
 
 def _compute_row(row: dict, name: str, s: dict, root: Path, raw_db: Path, r) -> None:
