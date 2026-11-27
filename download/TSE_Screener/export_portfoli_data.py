@@ -312,6 +312,51 @@ def _daily_rows(db_path: Path, today: str | None, symbol: str | None = None,
     return rows
 
 
+def _basis_vals(b, raw_db: Path) -> dict:
+    """مقادیر «جلسهٔ قبل» برای سطر دوم داشبورد لایو — از ردیف مبنای روزهای قبل (b).
+
+    فرمول‌ها عیناً همان شاخص‌های لحظه‌ایِ _compute_row است (سرانه، قدرت
+    علامت‌دار، ورود پول)؛ فقط ورود پولِ روز مبنا مستقیماً از ارزش‌های روزانهٔ
+    بانک سابقه (buy_i_value/sell_i_value) می‌آید که دقیق‌تر از حجم×قیمت است.
+    «ارزش معاملات» در بانک سابقه نیست — از آخرین نمونهٔ خامِ همان روزِ بانک لایو
+    گرفته می‌شود. کلیدهای بی‌مقدار در خروجی نمی‌آیند تا payload سبک بماند.
+    """
+    out: dict = {}
+    get = lambda k: b[k] if k in b.keys() else None  # noqa: E731  (Row → مقدار امن)
+    pc, biv, siv = get("pc"), get("buy_i_volume"), get("sell_i_volume")
+    bic, bsc = get("buy_counti"), get("sell_counti")
+    out["close_price"] = int(pc) if pc else None
+    out["real_buy_count"] = int(bic) if bic else None
+    out["real_sell_count"] = int(bsc) if bsc else None
+    if biv is not None and bic is not None:
+        out["per_capita_buy_real"] = round(biv / max(bic, 1), 0)
+    if siv is not None and bsc is not None:
+        out["per_capita_sell_real"] = round(siv / max(bsc, 1), 0)
+    if biv is not None and siv is not None and bsc and siv / max(bsc, 1):
+        bp = _signed_power((biv / max(bic or 0, 1)) / (siv / max(bsc, 1)))
+        if bp is not None:
+            out["buyer_power"] = round(bp, 2)
+    if bic or bsc:  # ورود پول — ارزش روزانه دقیق‌تر؛ نبود → حجم×قیمتِ پایانی
+        bivv, sivv = get("buy_i_value"), get("sell_i_value")
+        if bivv is not None and sivv is not None:
+            out["real_money_flow"] = int(bivv - sivv)
+        elif biv is not None and siv is not None and pc:
+            out["real_money_flow"] = int((biv - siv) * pc)
+    d = get("date_jalali")
+    if d:  # ارزش معاملات روز مبنا فقط در بانک خام هست (آخرین نمونهٔ آن روز)
+        try:
+            con = sqlite3.connect(str(raw_db))
+            try:
+                r = con.execute("SELECT tval FROM raw_snapshots WHERE date_jalali = ? "
+                                "ORDER BY id DESC LIMIT 1", (d,)).fetchone()
+                out["total_value"] = int(r[0]) if r and r[0] else None
+            finally:
+                con.close()
+        except sqlite3.Error:
+            out["total_value"] = None
+    return {k: v for k, v in out.items() if v is not None}
+
+
 def _daily_stats(db_path: Path, today: str | None, symbol: str | None = None) -> dict:
     """میانگین‌های وزنی ۵/۱۰/۲۰/۳۰ روزه — جمع تجمیعی اجزا روی پنجرهٔ روزهای قبل
     (نه میانگین سادهٔ مقادیر روزانه):
@@ -401,6 +446,8 @@ def _daily_stats(db_path: Path, today: str | None, symbol: str | None = None) ->
         # جدیدترین جلسهٔ داخل میانگین‌ها = آخرین روزِ بانک قبل از سطر لایو —
         # برای برچسب سطر دوم داشبورد لایو («میانگین‌های جلسهٔ قبل — تا …»)
         "basis_date": rows[0]["date_jalali"] if rows else None,
+        # مقادیر ۸ فیلدِ جلسهٔ قبل برای سطر دوم داشبورد لایو (گروه «جلسهٔ قبل»)
+        "basis_vals": _basis_vals(rows[0], db_path) if rows else None,
         "days": len(rows),
     }
 
@@ -610,8 +657,10 @@ def _compute_row(row: dict, name: str, s: dict, root: Path, raw_db: Path, r) -> 
 
     # شاخص‌های چندروزه — فرمول‌های فایل dashboard.xlsx، شیت dashboard
     ds = _daily_stats(raw_db, str(g("date_jalali") or "") or None, name)
-    # تاریخ مبنا برای سطر دوم داشبورد لایو («میانگین‌های جلسهٔ قبل از امروز — تا …»)
+    # تاریخ مبنا برای سطر دوم داشبورد لایو («جلسهٔ قبل — تا …»)
     row["hist_basis_date"] = ds.get("basis_date")
+    # مقادیر جلسهٔ قبلِ فیلدهای مقایسه‌ای (قیمت پایانی، ورود پول، …) برای سطر دوم
+    row["hist_vals"] = ds.get("basis_vals")
     if tval:
         row["money_flow_ratio_pct"] = round(flow / tval * 100, 2)
     if (rbv or rsv) and px:
