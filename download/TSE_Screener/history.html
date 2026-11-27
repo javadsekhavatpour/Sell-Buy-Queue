@@ -91,9 +91,6 @@
 <div class="toolbar">
   <span class="title-chip">📜 سابقهٔ نمادها <a href="/">← دیده‌بان لایو</a></span>
   <label>نماد: <select id="sym"></select></label>
-  <span class="modeseg" title="آخرین روز = فقط بروزترین سطر هر نماد (بازشدن سریع صفحه) | کل تاریخچه = همهٔ روزهای انباشته">
-    <button id="view-latest" class="on">آخرین روز هر نماد</button><button id="view-full">کل تاریخچه</button>
-  </span>
   <span class="modeseg" title="آنلاین = TSETMC | لوکال = اکسل‌های دانلودشده از tradersarena.ir">
     <button id="mode-online" class="on">🌐 آنلاین</button><button id="mode-local">📁 لوکال</button>
   </span>
@@ -177,11 +174,11 @@ const fmtC = v => {
   return v.toLocaleString("en-US", {maximumFractionDigits: 2});
 };
 let DATA = null;
-// نمای جدول: latest = فقط بروزترین سطر هر نماد (پیش‌فرض سبک) | full = کل تاریخچه
-// برای نماد مشخصِ انتخاب‌شده همیشه کل تاریخچه می‌آید — کندی فقط در «همهٔ نمادها» بود
-const LS_VIEW = "history_view";
-let view = localStorage.getItem(LS_VIEW) === "full" ? "full" : "latest";
-let lastLatest = null;  // آخرین واکشی با برش بروزترین بود؟ — برای راهنمای نوار وضعیت
+// صفحه‌بندی تاریخچهٔ نماد — نمایش همهٔ سطرها سیستم را کند می‌کند؛ دیفالت ۳۰
+// سطر و با دکمهٔ «۳۰ سطر بیشتر» ادامه. نمای «همهٔ نمادها» همیشه فقط یک سطر
+// بروز از هر نماد است (پیش‌فرض بازشدن صفحه) و صفحه‌بندی نمی‌خواهد.
+const PAGE = 30;
+let rowLimit = PAGE;
 const fa = n => Number(n).toLocaleString("fa-IR", {maximumFractionDigits:2});
 const cell = v => (v === null || v === undefined) ? '<span style="color:var(--mut)">—</span>'
   : `<span class="${v > 0 ? "pos" : v < 0 ? "neg" : ""}">${fmtC(v)}</span>`;
@@ -190,14 +187,15 @@ const symParam = new URLSearchParams(location.search).get("symbol");
 async function loadData(){
   document.getElementById("st").textContent = "در حال بارگذاری…";
   try{
-    // اولین بار مقدار select خالی است — نماد لینک‌شده از دیده‌بان یا همهٔ نمادها
+    // «همهٔ نمادها» ← فقط بروزترین سطر هر نماد (بازشدن سریع)؛ نماد مشخص ←
+    // کل تاریخچهٔ همان نماد — ورود به آن از dropdown یا دکمهٔ 📜 کنار نام
+    // نماد در دیده‌بان لایو (?symbol=…) مثل قبل
     const pick0 = document.getElementById("sym").value || symParam || "*";
-    const latest = pick0 === "*" && view !== "full";
-    lastLatest = latest;
-    const r = await fetch(`/api/hdata?latest=${latest ? 1 : 0}`);
+    const r = await fetch(`/api/hdata?latest=${pick0 === "*" ? 1 : 0}`);
     const j = await r.json();
     if (!j.ok){ document.getElementById("st").textContent = j.error || "داده‌ای نیست"; return; }
     DATA = j;
+    rowLimit = PAGE;  // نماد تازه ← صفحه‌بندی از اول
     const sel = document.getElementById("sym");
     sel.innerHTML = `<option value="*">همهٔ نمادها</option>` +
       j.symbols.map(s => `<option>${s.name}</option>`).join("");
@@ -227,25 +225,38 @@ function render(){
   const tb = document.getElementById("tb");
   const pick = document.getElementById("sym").value;
   const list = pick === "*" ? DATA.symbols : DATA.symbols.filter(s => s.name === pick);
-  let html = "";
+  let html = "", rendered = 0;
   for (const s of list){
     // سرگروه هر نماد — نام نماد + تعداد روز + آخرین روز جمع‌آوری
     html += `<tr class="sym-head"><td colspan="${visible.length + 2}">نماد «${s.name}» — ${fa(s.days)} روز ` +
             `| آخرین روز جمع‌آوری: ${s.last_collected || "—"}</td></tr>`;
-    html += s.rows.slice().reverse().map(r =>
+    const rows = s.rows.slice().reverse();  // بروزترین در بالا
+    // «همهٔ نمادها» = یک سطر بروز از هر نماد؛ نماد مشخص = صفحه‌بندی ۳۰تایی
+    const show = pick === "*" ? rows : rows.slice(0, rowLimit);
+    rendered += show.length;
+    html += show.map(r =>
       `<tr><td class="dt">${r.date_jalali}</td><td class="sym">${s.name}</td>` +
       visible.map(c => `<td>${cell(r[c])}</td>`).join("") + "</tr>").join("");
+    if (show.length < rows.length){
+      html += `<tr><td colspan="${visible.length + 2}" style="text-align:center;padding:6px">` +
+              `<button class="btn" id="btn-more">۳۰ سطر بیشتر — ${fa(rows.length - show.length)} سطر باقی مانده</button>` +
+              ` <a href="#" id="lnk-all" style="font-size:12px">نمایش همهٔ ${fa(rows.length)} سطر</a></td></tr>`;
+    }
   }
   tb.innerHTML = html;
+  const more = document.getElementById("btn-more");
+  if (more) more.onclick = () => { rowLimit += PAGE; render(); };
+  const all = document.getElementById("lnk-all");
+  if (all) all.onclick = e => { e.preventDefault(); rowLimit = 1e9; render(); };
   const total = list.reduce((a, s) => a + s.days, 0);
-  const rendered = list.reduce((a, s) => a + s.rows.length, 0);
   const lc = list.map(s => s.last_collected).filter(Boolean).sort().pop();
-  const viewNote = lastLatest
-    ? ` | نمایش: فقط بروزترین روز هر نماد (${fa(rendered)} سطر) — کلید «کل تاریخچه» در نوار ابزار`
-    : ` | نمایش: ${fa(rendered)} سطر`;
+  const note = pick === "*"
+    ? "نمایش: فقط بروزترین روز هر نماد — تاریخچهٔ کامل: dropdown نماد یا دکمهٔ 📜 کنار نامش در دیده‌بان لایو"
+    : `نمایش: ${fa(rendered)} از ${fa(total)} سطر` +
+      (rendered < total ? " — دکمهٔ «۳۰ سطر بیشتر» برای ادامه" : "");
   document.getElementById("st").textContent =
     `منبع: data/raw/history.sqlite (فقط دادهٔ خام TSETMC) — ${fa(list.length)} نماد، ` +
-    `${fa(total)} روز انباشته${viewNote} | آخرین روز جمع‌آوری: ${lc || "—"} | ` +
+    `${fa(total)} روز انباشته | ${note} | آخرین روز جمع‌آوری: ${lc || "—"} | ` +
     `محاسبه: ${DATA.generated_at} | فرمول‌ها: export_portfoli_data.py`;
 }
 // گزارش اکسل — ستون‌های انتخابی + نماد انتخابی (یا همهٔ نمادها)
@@ -297,17 +308,6 @@ function setMode(m){
 }
 document.getElementById("mode-online").onclick = () => setMode("online");
 document.getElementById("mode-local").onclick = () => setMode("local");
-/* کلید نمای جدول — آخرین روز هر نماد (پیش‌فرض) یا کل تاریخچه */
-function setView(v){
-  view = v;
-  try{ localStorage.setItem(LS_VIEW, v); }catch(e){ /* localStorage در دسترس نیست */ }
-  document.getElementById("view-latest").classList.toggle("on", v === "latest");
-  document.getElementById("view-full").classList.toggle("on", v === "full");
-  const pick = document.getElementById("sym").value;
-  if (!pick || pick === "*") loadData();  // برای نماد مشخص همیشه کل تاریخچه است
-}
-document.getElementById("view-latest").onclick = () => setView("latest");
-document.getElementById("view-full").onclick = () => setView("full");
 document.getElementById("btn-browse").onclick = () => document.getElementById("local-folder").click();
 document.getElementById("local-folder").onchange = e => {
   pickedFiles = [...(e.target.files || [])].filter(f => f.name.toLowerCase().endsWith(".xlsx"));
@@ -385,9 +385,6 @@ document.getElementById("btn-collect").onclick = async () => {
     }
   }
 };
-/* حالت اولیهٔ کلید نمای جدول (بدون واکشی دوباره) و سپس بارگذاری داده */
-document.getElementById("view-latest").classList.toggle("on", view === "latest");
-document.getElementById("view-full").classList.toggle("on", view === "full");
 loadData();
 </script>
 </body>
