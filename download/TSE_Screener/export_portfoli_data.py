@@ -398,6 +398,9 @@ def _daily_stats(db_path: Path, today: str | None, symbol: str | None = None) ->
         "buy_power_avg10": _pow_w(10),
         "buy_power_avg20": _pow_w(20),
         "buy_power_avg30": _pow_w(30),
+        # جدیدترین جلسهٔ داخل میانگین‌ها = آخرین روزِ بانک قبل از سطر لایو —
+        # برای برچسب سطر دوم داشبورد لایو («میانگین‌های جلسهٔ قبل — تا …»)
+        "basis_date": rows[0]["date_jalali"] if rows else None,
         "days": len(rows),
     }
 
@@ -607,6 +610,8 @@ def _compute_row(row: dict, name: str, s: dict, root: Path, raw_db: Path, r) -> 
 
     # شاخص‌های چندروزه — فرمول‌های فایل dashboard.xlsx، شیت dashboard
     ds = _daily_stats(raw_db, str(g("date_jalali") or "") or None, name)
+    # تاریخ مبنا برای سطر دوم داشبورد لایو («میانگین‌های جلسهٔ قبل از امروز — تا …»)
+    row["hist_basis_date"] = ds.get("basis_date")
     if tval:
         row["money_flow_ratio_pct"] = round(flow / tval * 100, 2)
     if (rbv or rsv) and px:

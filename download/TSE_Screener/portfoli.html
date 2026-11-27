@@ -103,6 +103,13 @@
   .mini-replay{border:1px solid #b7c6e6;background:#eef3ff;border-radius:4px;
                font-size:9.5px;line-height:1;padding:2px 5px;cursor:pointer;color:#2f5597}
   .mini-replay:hover{background:var(--chip);color:#fff;border-color:var(--chip)}
+  /* سطر دوم میانگین‌های جلسهٔ قبل — فقط با دکمهٔ «📅 میانگین جلسهٔ قبل» باز می‌شود */
+  tr.hist-row > td{background:#f2f6ff;font-size:11px;line-height:1.7;
+                   border-bottom:1px solid #e3e9f4;white-space:normal;text-align:right}
+  .hist-label{font-weight:700;color:var(--chip)}
+  .hchip{display:inline-block;background:#fff;border:1px solid #d3def2;
+         border-radius:6px;padding:1px 8px;margin:1px 2px;white-space:nowrap}
+  #btn-hrow.on{background:var(--chip);color:#fff;border-color:var(--chip)}
   .pos{color:var(--green);font-weight:700}
   .neg{color:var(--red);font-weight:700}
   .na{color:var(--mut)}
@@ -150,6 +157,7 @@
   <button class="btn" id="btn-reload" title="دوباره خواندن portfoli_data.json">↻ بازخوانی</button>
   <button class="btn" id="btn-replay" title="بازپخش شبیه‌سازی جدول از ابتدای جلسه — اگر تاریخ وارد کرده باشید از ابتدای همان روز پخش می‌شود">🎬 بازپخش جدول</button>
   <button class="btn" id="btn-history" title="سابقهٔ نمادها — جمع‌آوری تاریخچهٔ روزانه از TSETMC و داشبورد ورود پول / نسبت‌های ۵ و ۳۰ روزه / واکنش قیمت">📜 سابقهٔ نمادها</button>
+  <button class="btn" id="btn-hrow" title="سطر دوم هر نماد: میانگین‌های وزنی ۵/۱۰/۲۰/۳۰ روزهٔ جلساتِ قبل از امروز (از بانک سابقه) — برای مقایسهٔ مجموع امروز با میانگین‌ها. این میانگین‌ها دادهٔ لحظه‌ای نیستند و دیگر داخل سطر لحظه‌ای نشان داده نمی‌شوند">📅 میانگین جلسهٔ قبل</button>
   <button class="btn" id="btn-export" title="گزارش اکسل جدول لایو — ستون‌های نمایان + همهٔ ستون‌های بلااستفادهٔ بانک خام؛ سطر ۲: نام فیلد بانک">⬇ گزارش اکسل</button>
   <input id="rp-date" list="rp-dates" placeholder="۱۴۰۵/۰۸/۳۰" autocomplete="off"
          title="تاریخ شمسی برای بازپخش — خالی = آخرین جلسه (امروز)"
@@ -249,8 +257,23 @@ const DEFAULT_VISIBLE = ["symbol", "date_jalali", "fetch_hms", "market_phase", "
 /* ───────── وضعیت ───────── */
 const LS = {cols:"pf_cols_v1", favs:"pf_favs_v1", hid:"pf_hidden_v1", win:"pf_win_v1"};
 /* نشانگر بیلد — برای تشخیص نسخهٔ اجرایی در مرورگر (کش/استقرار قدیمی را لو می‌دهد) */
-const BUILD = "1405-09-05-b";
-let visible = load(LS.cols) || DEFAULT_VISIBLE.slice();
+const BUILD = "1405-09-06-a";
+/* فیلدهای میانگین‌های وزنی چندروزه — از بانک سابقه (جلساتِ قبل از امروز) هستند،
+   نه دادهٔ لحظه‌ای: در سطر لحظه‌ای نمایش داده نمی‌شوند. فقط سطر دومِ هر نماد —
+   که با دکمهٔ «📅 میانگین جلسهٔ قبل» باز/بسته می‌شود — آنها را با تاریخ مبنا
+   نشان می‌دهد (کاربرد: مقایسهٔ مجموع امروز با میانگین‌ها). انتخابگر «ستون‌ها»
+   هم این گروه را دیگر نشان نمی‌دهد. */
+const HIST_FIELDS = new Set(["flow_avg5_rial","flow_avg10_rial","flow_avg20_rial",
+  "flow_avg30_rial","vol_avg5","vol_avg10","vol_avg20","vol_avg30",
+  "buy_power_avg5","buy_power_avg10","buy_power_avg20","buy_power_avg30"]);
+const HIST_FA = {flow_avg5_rial:"ورود پول ۵روزه", flow_avg10_rial:"ورود پول ۱۰روزه",
+  flow_avg20_rial:"ورود پول ۲۰روزه", flow_avg30_rial:"ورود پول ۳۰روزه",
+  vol_avg5:"حجم ۵روزه", vol_avg10:"حجم ۱۰روزه", vol_avg20:"حجم ۲۰روزه",
+  vol_avg30:"حجم ۳۰روزه", buy_power_avg5:"قدرت خرید ۵روزه",
+  buy_power_avg10:"قدرت خرید ۱۰روزه", buy_power_avg20:"قدرت خرید ۲۰روزه",
+  buy_power_avg30:"قدرت خرید ۳۰روزه"};
+let histRow = localStorage.getItem("pf_histrow_v1") === "1";
+let visible = (load(LS.cols) || DEFAULT_VISIBLE.slice()).filter(en => !HIST_FIELDS.has(en));
 let favs = load(LS.favs) || [];
 let hidden = load(LS.hid) || [];
 let onlyFav = false;
@@ -429,6 +452,18 @@ function renderBody(){
             <button class="${faved?"faved":""}" data-fav="${r.symbol}" title="منتخب">★</button>
             <button data-hide="${r.symbol}" title="مخفی کردن">🗑</button>
           </td></tr>`;
+    // سطر دوم: میانگین‌های وزنی جلسهٔ قبل از امروز — این فیلدها دادهٔ جلسات
+    // قبل‌اند (از بانک سابقه)، نه لحظه‌ای؛ فقط با دکمهٔ «📅 میانگین جلسهٔ قبل»
+    if (histRow){
+      const vals = [...HIST_FIELDS].filter(en => r[en] !== null && r[en] !== undefined);
+      if (vals.length)
+        t += `<tr class="hist-row"><td colspan="${visible.length + 2}">` +
+             `<span class="hist-label">📅 میانگین‌های وزنی جلسهٔ قبل از امروز` +
+             (r.hist_basis_date ? ` — تا ${r.hist_basis_date}` : "") + `:</span> ` +
+             vals.map(en => `<span class="hchip"><b>${HIST_FA[en] || EN2FA[en] || en}:</b> ` +
+                            `${cellHTML(en, r[en], r)}</span>`).join("") +
+             `</td></tr>`;
+    }
     return t;
   }).join("");
   tb.querySelectorAll("[data-srp]").forEach(b => b.addEventListener("click", () =>
@@ -495,7 +530,8 @@ function renderAll(){ renderHead(); renderBody(); renderStatus(); }
 /* ───────── انتخابگر ستون‌ها ───────── */
 function buildChooser(){
   const wrap = document.getElementById("chooser-groups");
-  wrap.innerHTML = GROUPS.map(g => `
+  // گروه «تاریخچه» اینجاست — میانگین‌های جلسات قبل فقط از دکمهٔ «📅 میانگین جلسهٔ قبل»
+  wrap.innerHTML = GROUPS.filter(g => g.title !== "تاریخچه").map(g => `
     <div class="cg-block">
       <div class="cg-title"><span>${g.title}</span>
         <span class="mini"><button data-gall="${g.title}">همه</button><button data-gnone="${g.title}">هیچ</button></span>
@@ -711,6 +747,14 @@ document.getElementById("btn-replay").addEventListener("click", () =>
 document.getElementById("btn-history").addEventListener("click", () => {
   location.href = "/history";
 });
+// سطر دوم میانگین‌های جلسهٔ قبل — باز/بسته؛ انتخاب در مرورگر ذخیره می‌شود
+document.getElementById("btn-hrow").addEventListener("click", () => {
+  histRow = !histRow;
+  localStorage.setItem("pf_histrow_v1", histRow ? "1" : "0");
+  document.getElementById("btn-hrow").classList.toggle("on", histRow);
+  renderAll();
+});
+document.getElementById("btn-hrow").classList.toggle("on", histRow);
 // لیست تاریخ‌های موجود در بانک‌های خام — پیشنهاد فیلد تاریخ (بدون سرور، فیلد آزاد می‌ماند)
 apiGet("/api/dates").then(j => {
   document.getElementById("rp-dates").innerHTML =

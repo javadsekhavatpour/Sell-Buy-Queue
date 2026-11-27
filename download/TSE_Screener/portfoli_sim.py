@@ -105,7 +105,7 @@ def build_frames(per_symbol: dict, per_cfg: dict, root: Path, date: str,
                 r = rows[k]
                 rbv, rsv = r["buy_i_volume"] or 0, r["sell_i_volume"] or 0
                 rbc, rsc = r["buy_counti"] or 0, r["sell_counti"] or 0
-                tval = r["trade_value"] or 0
+                tval = r["tval"] or 0  # ستون بانک خام (qTotCap) — «trade_value» نام قدیمی بود
                 px = float(r["pc"] or 0) or float(r["pl"] or 0)
                 if tval and px:
                     run_flow[name].append((rbv - rsv) * px / tval * 100)
