@@ -120,6 +120,10 @@ GROUPS = [
         ("میانگین ۱۰ روزه حجم (سهم)", "vol_avg10"),
         ("میانگین ۲۰ روزه حجم (سهم)", "vol_avg20"),
         ("میانگین ۳۰ روزه حجم (سهم)", "vol_avg30"),
+        ("میانگین ۵ روزه ارزش معاملات", "val_avg5"),
+        ("میانگین ۱۰ روزه ارزش معاملات", "val_avg10"),
+        ("میانگین ۲۰ روزه ارزش معاملات", "val_avg20"),
+        ("میانگین ۳۰ روزه ارزش معاملات", "val_avg30"),
         ("میانگین قدرت خرید ۵ روز", "buy_power_avg5"),
         ("میانگین قدرت خرید ۱۰ روز", "buy_power_avg10"),
         ("میانگین قدرت خرید ۲۰ روز", "buy_power_avg20"),
@@ -222,6 +226,10 @@ FIELD_SOURCES = {
     "vol_avg10": ("—", "محاسبه: همان با ۱۰ روز قبل"),
     "vol_avg20": ("—", "محاسبه: همان با ۲۰ روز قبل"),
     "vol_avg30": ("—", "محاسبه: همان با ۳۰ روز قبل"),
+    "val_avg5": ("—", "محاسبهٔ وزنی: Σ ارزش معاملات روزانه (tval) ÷ تعداد روز، در ۵ روز قبل (پنجرهٔ کامل)"),
+    "val_avg10": ("—", "محاسبه: همان با ۱۰ روز قبل"),
+    "val_avg20": ("—", "محاسبه: همان با ۲۰ روز قبل"),
+    "val_avg30": ("—", "محاسبه: همان با ۳۰ روز قبل"),
     "buy_power_avg5": ("—", "محاسبهٔ وزنی: (Σ ارزش خرید ÷ Σ خریداران) ÷ (Σ ارزش فروش ÷ Σ فروشندگان) در ۵ روز قبل (پنجرهٔ کامل)"),
     "buy_power_avg10": ("—", "محاسبه: همان با ۱۰ روز قبل"),
     "buy_power_avg20": ("—", "محاسبه: همان با ۲۰ روز قبل"),
@@ -297,7 +305,7 @@ def _raw_phase(trading_hours: dict, hm: str) -> str:
 
 _DAILY_COLS = ("date_jalali, buy_i_value, sell_i_value, "
                "buy_i_volume, sell_i_volume, "
-               "buy_counti, sell_counti, pc, tvol")
+               "buy_counti, sell_counti, pc, tvol, tval")
 
 
 def _signed_power(ratio: float | None) -> float | None:
@@ -348,8 +356,9 @@ def _basis_vals(b, raw_db: Path) -> dict:
     فرمول‌ها عیناً همان شاخص‌های لحظه‌ایِ _compute_row است (سرانه، قدرت
     علامت‌دار، ورود پول)؛ فقط ورود پولِ روز مبنا مستقیماً از ارزش‌های روزانهٔ
     بانک سابقه (buy_i_value/sell_i_value) می‌آید که دقیق‌تر از حجم×قیمت است.
-    «ارزش معاملات» در بانک سابقه نیست — از آخرین نمونهٔ خامِ همان روزِ بانک لایو
-    گرفته می‌شود. کلیدهای بی‌مقدار در خروجی نمی‌آیند تا payload سبک بماند.
+    ارزش معاملات و حجم روز مبنا از ستون‌های روزانهٔ بانک سابقه (tval/tvol)
+    می‌آیند؛ نبودِ tval → آخرین نمونهٔ خام همان روز از بانک لایو.
+    کلیدهای بی‌مقدار در خروجی نمی‌آیند تا payload سبک بماند.
     """
     out: dict = {}
     get = lambda k: b[k] if k in b.keys() else None  # noqa: E731  (Row → مقدار امن)
@@ -377,18 +386,24 @@ def _basis_vals(b, raw_db: Path) -> dict:
             out["real_money_flow_ratio"] = round((bivv - sivv) / (bivv + sivv), 4)
         elif biv is not None and siv is not None and (biv or siv):
             out["real_money_flow_ratio"] = round((biv - siv) / (biv + siv), 4)
-    d = get("date_jalali")
-    if d:  # ارزش معاملات روز مبنا فقط در بانک خام هست (آخرین نمونهٔ آن روز)
-        try:
-            con = sqlite3.connect(str(raw_db))
+    tv = get("tval")          # ارزش معاملات روزانهٔ بانک سابقه (tval)
+    tvol_b = get("tvol")      # حجم روزانهٔ بانک سابقه — فیلد «حجم» جلسهٔ قبل
+    out["total_volume"] = int(tvol_b) if tvol_b else None
+    if tv:  # ارزش معاملات روز مبنا — tval روزانهٔ بانک سابقه (رسمی TSETMC)
+        out["total_value"] = int(tv)
+    else:
+        d = get("date_jalali")
+        if d:  # نبود در بانک سابقه → آخرین نمونهٔ خام همان روز از بانک لایو
             try:
-                r = con.execute("SELECT tval FROM raw_snapshots WHERE date_jalali = ? "
-                                "ORDER BY id DESC LIMIT 1", (d,)).fetchone()
-                out["total_value"] = int(r[0]) if r and r[0] else None
-            finally:
-                con.close()
-        except sqlite3.Error:
-            out["total_value"] = None
+                con = sqlite3.connect(str(raw_db))
+                try:
+                    r = con.execute("SELECT tval FROM raw_snapshots WHERE date_jalali = ? "
+                                    "ORDER BY id DESC LIMIT 1", (d,)).fetchone()
+                    out["total_value"] = int(r[0]) if r and r[0] else None
+                finally:
+                    con.close()
+            except sqlite3.Error:
+                out["total_value"] = None
     return {k: v for k, v in out.items() if v is not None}
 
 
@@ -413,7 +428,7 @@ def _daily_stats(db_path: Path, today: str | None, symbol: str | None = None) ->
         rows = _daily_rows(hdb, today, symbol, table="history_daily") or None
     if rows is None:
         rows = _daily_rows(db_path, today)
-    me, vols, fdays, vdays, pdays = [], [], [], [], []
+    me, vols, fdays, vdays, pdays, aldays = [], [], [], [], [], []
     for r in rows[:60]:
         bv, sv = r["buy_i_value"], r["sell_i_value"]
         bc, sc = r["buy_counti"], r["sell_counti"]
@@ -424,6 +439,7 @@ def _daily_stats(db_path: Path, today: str | None, symbol: str | None = None) ->
         fdays.append({"bv": bv or 0, "sv": sv or 0}
                      if (bv is not None or sv is not None) else None)
         vdays.append({"t": float(r["tvol"])} if r["tvol"] is not None else None)
+        aldays.append({"v": float(r["tval"])} if r["tval"] is not None else None)
         pdays.append({"bv": bv, "sv": sv, "bc": bc, "sc": sc}
                      if (bv and sv and bc and sc) else None)
     f_abs = [abs(x) for x in me if x is not None]
@@ -439,6 +455,7 @@ def _daily_stats(db_path: Path, today: str | None, symbol: str | None = None) ->
 
     aggf = {n: _agg(fdays, n) for n in (5, 10, 20, 30)}
     aggv = {n: _agg(vdays, n) for n in (5, 10, 20, 30)}
+    agga = {n: _agg(aldays, n) for n in (5, 10, 20, 30)}
     aggp = {n: _agg(pdays, n) for n in (5, 10, 20, 30)}
 
     def _flow_w(n):
@@ -449,6 +466,11 @@ def _daily_stats(db_path: Path, today: str | None, symbol: str | None = None) ->
     def _vol_w(n):
         a = aggv[n]
         return a[0]["t"] / a[1] if a else None
+
+    def _val_w(n):
+        # میانگین ارزش معاملات وزنی = Σ ارزش معاملات روزانه (tval) ÷ تعداد روز
+        a = agga[n]
+        return a[0]["v"] / a[1] if a else None
 
     def _pow_w(n):
         # قدرت خرید وزنی از جمع‌ها — بعد علامت‌دار؛ نتیجه همیشه خارج ‎(−۱، +۱)‎
@@ -474,6 +496,10 @@ def _daily_stats(db_path: Path, today: str | None, symbol: str | None = None) ->
         "vol_avg10": _vol_w(10),
         "vol_avg20": _vol_w(20),
         "vol_avg30": _vol_w(30),
+        "val_avg5": _val_w(5),
+        "val_avg10": _val_w(10),
+        "val_avg20": _val_w(20),
+        "val_avg30": _val_w(30),
         "buy_power_avg5": _pow_w(5),
         "buy_power_avg10": _pow_w(10),
         "buy_power_avg20": _pow_w(20),
@@ -776,7 +802,8 @@ def _compute_row(row: dict, name: str, s: dict, root: Path, raw_db: Path, r) -> 
     if ds.get("days"):
         for k in ("flow_avg5_rial", "flow_avg10_rial", "flow_avg20_rial",
                   "flow_avg30_rial", "vol_avg5", "vol_avg10",
-                  "vol_avg20", "vol_avg30"):
+                  "vol_avg20", "vol_avg30", "val_avg5", "val_avg10",
+                  "val_avg20", "val_avg30"):
             v = ds.get(k)
             row[k] = int(v) if v is not None else None
         for k in ("buy_power_avg5", "buy_power_avg10",
